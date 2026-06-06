@@ -20,12 +20,94 @@ SHEET_MAPPINGS = {
     "evaluations": ("EVALUATIONS", RESULTS_DIR / "evaluations.csv"),
 }
 SAFETY_NOTES = [
-    "This system does not place trades.",
-    "This system does not operate XM or brokers.",
-    "Rule updates are proposals only.",
-    "weights.json is not automatically updated.",
-    "Human review is required before any live trading use.",
+    "このシステムは実売買を行いません。",
+    "このシステムはXMや証券会社を操作しません。",
+    "ルール改善は提案のみで、自動反映されません。",
+    "weights.json は自動更新されません。",
+    "実運用に使う前に必ず人間による確認が必要です。",
 ]
+DASHBOARD_DESCRIPTION = (
+    "このダッシュボードは、Tactical Swing OS が生成したシグナル、評価結果、理由コード分析、"
+    "改善候補を確認するための研究用画面です。実売買や自動発注は行いません。"
+)
+DISPLAY_LABELS = {
+    "market_snapshot rows": "市場データ行数",
+    "signals rows": "シグナル行数",
+    "evaluations rows": "評価行数",
+    "latest daily report": "最新日次レポート",
+    "latest weekly review": "最新週次レビュー",
+    "latest monthly calibration": "最新月次較正",
+    "latest reason_code_analysis": "最新理由コード分析",
+    "latest rule_update_proposals": "最新ルール改善候補",
+    "A": "Aランク",
+    "B": "Bランク",
+    "NO_TRADE": "見送り",
+    "asset": "資産",
+    "side": "売買方向",
+    "rank": "ランク",
+    "type": "タイプ",
+    "recommended_action": "推奨アクション",
+    "signal_strength": "シグナル強度",
+    "setup_quality_score": "セットアップ品質",
+    "entry_quality_score": "エントリー品質",
+    "direction_confidence": "方向信頼度",
+    "reason_codes": "判断理由コード",
+    "no_trade_reason": "見送り理由",
+    "total_evaluated": "評価対象数",
+    "closed": "決着済み",
+    "pending": "評価待ち",
+    "skipped": "スキップ",
+    "no_entry": "未約定",
+    "no_trade": "見送り",
+    "win_rate": "勝率",
+    "total_r": "総R",
+    "average_r": "平均R",
+    "best_r": "最大R",
+    "worst_r": "最小R",
+    "missed_opportunity_count": "取り逃し候補数",
+    "signals": "シグナル数",
+    "evaluations": "評価数",
+    "reason_code": "判断理由コード",
+    "signals_count": "シグナル数",
+    "evaluated_count": "評価数",
+    "reliability_label": "信頼性ラベル",
+    "count": "件数",
+    "average_mfe_r": "平均最大順行R",
+    "assessment": "判定",
+    "proposal_type": "提案タイプ",
+    "target_type": "対象タイプ",
+    "target_name": "対象名",
+    "proposal_strength": "提案強度",
+    "priority": "優先度",
+    "proposed_change": "提案内容",
+    "apply_automatically": "自動適用",
+    "next_week_mode": "次週モード",
+    "next_month_mode": "次月モード",
+    "max_daily_risk_pct": "最大日次リスク%",
+    "best_asset": "最良資産",
+    "worst_asset": "最悪資産",
+    "best_rank": "最良ランク",
+    "worst_rank": "最悪ランク",
+}
+VALUE_LABELS = {
+    "not available": "未取得",
+    "data not available": "データなし",
+    "local fallback": "ローカルCSV/JSON fallback",
+    "insufficient_data": "データ不足",
+    "strong_positive": "強いプラス",
+    "positive": "プラス",
+    "neutral": "中立",
+    "negative": "マイナス",
+    "strong_negative": "強いマイナス",
+    "effective_filter": "有効な見送り",
+    "over_filtering_risk": "見送り過剰リスク",
+    "TRADE": "TRADE（取引候補）",
+    "WATCH": "WATCH（監視）",
+    "NO_TRADE": "NO_TRADE（見送り）",
+    "LONG": "LONG（買い）",
+    "SHORT": "SHORT（売り）",
+    "NONE": "NONE（見送り）",
+}
 
 
 def normalize_column_name(column: str) -> str:
@@ -156,9 +238,39 @@ def fmt_num(value) -> str:
     return f"{float(value):.2f}"
 
 
-def badge(value: str) -> str:
-    clean = str(value or "")
-    cls = normalize_column_name(clean) or "default"
+def display_label(label: str) -> str:
+    return DISPLAY_LABELS.get(str(label), str(label).replace("_", " "))
+
+
+def display_value(value, column: str | None = None) -> str:
+    if pd.isna(value):
+        return ""
+    raw = str(value)
+    if raw == "":
+        return ""
+    if column == "apply_automatically":
+        return "false（自動適用なし）" if raw.lower() in {"false", "0", "no"} else raw
+    return VALUE_LABELS.get(raw, VALUE_LABELS.get(raw.lower(), raw))
+
+
+def display_source(source: str) -> str:
+    return VALUE_LABELS.get(source, source)
+
+
+def display_optional(value: str, fallback: str = "未取得") -> str:
+    try:
+        if pd.isna(value):
+            return fallback
+    except (TypeError, ValueError):
+        pass
+    if not value or str(value) == "not available":
+        return fallback
+    return str(value)
+
+
+def badge(value: str, column: str | None = None) -> str:
+    clean = display_value(value, column)
+    cls = normalize_column_name(value) or "default"
     return f'<span class="badge badge-{html.escape(cls)}">{html.escape(clean)}</span>'
 
 
@@ -195,20 +307,20 @@ def table_html(df: pd.DataFrame, columns: list[str], empty: str = "データな�
         return f'<div class="empty">{html.escape(empty)}</div>'
 
     out = ['<div class="table-wrap"><table><thead><tr>']
-    out.extend(f"<th>{html.escape(col)}</th>" for col in view.columns)
+    out.extend(f"<th>{html.escape(display_label(col))}</th>" for col in view.columns)
     out.append("</tr></thead><tbody>")
     for _, row in view.iterrows():
         out.append("<tr>")
         for col in view.columns:
             raw = row.get(col, "")
             if col in {"rank", "side", "recommended_action", "proposal_strength", "reliability_label", "assessment"}:
-                cell = badge(raw)
+                cell = badge(raw, col)
             elif col in {"average_r", "total_r", "r_multiple", "win_rate", "best_r", "worst_r", "average_mfe_r"}:
                 cell = f'<span class="{value_class(raw)}">{fmt_num(raw)}</span>'
             elif is_numeric_cell(raw):
                 cell = fmt_num(raw)
             else:
-                cell = html.escape("" if pd.isna(raw) else str(raw))
+                cell = html.escape(display_value(raw, col))
             out.append(f"<td>{cell}</td>")
         out.append("</tr>")
     out.append("</tbody></table></div>")
@@ -216,7 +328,7 @@ def table_html(df: pd.DataFrame, columns: list[str], empty: str = "データな�
 
 
 def stat_card(label: str, value, css_class: str = "") -> str:
-    return f'<div class="stat {css_class}"><div class="stat-label">{html.escape(label)}</div><div class="stat-value">{html.escape(str(value))}</div></div>'
+    return f'<div class="stat {css_class}"><div class="stat-label">{html.escape(display_label(label))}</div><div class="stat-value">{html.escape(display_value(value))}</div></div>'
 
 
 def latest_signals(signals: pd.DataFrame) -> pd.DataFrame:
@@ -422,6 +534,7 @@ def build_dashboard() -> tuple[dict, str]:
     }
     summary = json_safe({
         "generated_at": generated,
+        "display_language": "ja",
         "data_source": source,
         "row_counts": row_counts,
         "latest_dates": latest_dates,
@@ -488,23 +601,23 @@ def render_html(
             stat_card("market_snapshot rows", row_counts["market_snapshot"]),
             stat_card("signals rows", row_counts["signals"]),
             stat_card("evaluations rows", row_counts["evaluations"]),
-            stat_card("latest daily report", latest_dates["latest_daily_report_date"] or "not available"),
-            stat_card("latest weekly review", latest_dates["latest_weekly_review_date"] or "not available"),
-            stat_card("latest monthly calibration", latest_dates["latest_monthly_calibration_date"] or "not available"),
-            stat_card("latest reason_code_analysis", latest_dates["latest_reason_code_analysis_date"] or "not available"),
-            stat_card("latest rule_update_proposals", latest_dates["latest_rule_update_proposals_date"] or "not available"),
+            stat_card("latest daily report", latest_dates["latest_daily_report_date"] or "未取得"),
+            stat_card("latest weekly review", latest_dates["latest_weekly_review_date"] or "未取得"),
+            stat_card("latest monthly calibration", latest_dates["latest_monthly_calibration_date"] or "未取得"),
+            stat_card("latest reason_code_analysis", latest_dates["latest_reason_code_analysis_date"] or "未取得"),
+            stat_card("latest rule_update_proposals", latest_dates["latest_rule_update_proposals_date"] or "未取得"),
         ]
     )
-    eval_stats = "".join(stat_card(k.replace("_", " "), fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
+    eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
     signal_stats = "".join(stat_card(k, v) for k, v in signal_counts.items())
-    mode_stats = "".join(stat_card(k.replace("_", " "), fmt_num(v) if isinstance(v, float) else v) for k, v in mode.items())
+    mode_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else display_optional(str(v))) for k, v in mode.items())
     safe = "".join(f"<li>{html.escape(note)}</li>" for note in SAFETY_NOTES)
     return f"""<!doctype html>
-<html lang="en">
+<html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tactical Swing OS Dashboard</title>
+  <title>Tactical Swing OS ダッシュボード</title>
   <style>
     :root {{ color-scheme: dark; --bg:#0b1020; --panel:#121a2e; --panel2:#17213a; --text:#edf2ff; --muted:#98a6c7; --line:#263553; --pos:#65d98c; --neg:#ff7b86; --warn:#ffd166; --accent:#7aa2ff; }}
     * {{ box-sizing: border-box; }}
@@ -515,6 +628,7 @@ def render_html(
     h3 {{ margin:18px 0 10px; font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }}
     main {{ padding:20px; display:grid; gap:18px; }}
     .meta {{ display:flex; flex-wrap:wrap; gap:10px; color:var(--muted); font-size:13px; }}
+    .lead {{ margin:14px 0 0; max-width:960px; color:var(--muted); line-height:1.7; }}
     .card {{ background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; box-shadow:0 8px 24px rgba(0,0,0,.18); }}
     .grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:10px; }}
     .stat {{ background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:12px; }}
@@ -540,24 +654,25 @@ def render_html(
 </head>
 <body>
   <header>
-    <h1>Tactical Swing OS Dashboard</h1>
+    <h1>Tactical Swing OS ダッシュボード</h1>
     <div class="meta">
-      <span>generated_at: {html.escape(generated)}</span>
-      <span>data_source: {html.escape(source)}</span>
-      <span>latest_signal_date: {html.escape(latest_dates["latest_signal_date"] or "not available")}</span>
-      <span>latest_evaluation_date: {html.escape(latest_dates["latest_evaluation_date"] or "not available")}</span>
+      <span>生成日時: {html.escape(generated)}</span>
+      <span>データソース: {html.escape(display_source(source))}</span>
+      <span>最新シグナル日: {html.escape(display_optional(latest_dates["latest_signal_date"]))}</span>
+      <span>最新評価日: {html.escape(display_optional(latest_dates["latest_evaluation_date"]))}</span>
     </div>
+    <p class="lead">{html.escape(DASHBOARD_DESCRIPTION)}</p>
   </header>
   <main>
-    <section class="card"><h2>System Status</h2><div class="grid">{system_stats}</div></section>
-    <section class="card"><h2>Daily Signal Overview</h2><div class="grid">{signal_stats}</div>{table_html(signals, ["asset","side","rank","type","recommended_action","signal_strength","setup_quality_score","entry_quality_score","direction_confidence","reason_codes","no_trade_reason"])}</section>
-    <section class="card"><h2>Evaluation Overview</h2><div class="grid">{eval_stats}</div></section>
-    <section class="card"><h2>Asset Performance</h2>{table_html(asset_table, ["asset","signals","evaluations","win_rate","total_r","average_r","missed_opportunity_count"])}</section>
-    <section class="card"><h2>Reason Code Performance</h2><h3>Top Positive</h3>{table_html(top_positive, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>Top Negative</h3>{table_html(top_negative, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>Insufficient Data</h3>{table_html(insufficient, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}</section>
-    <section class="card"><h2>No Trade Reason Analysis</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "no_trade_reason data not available")}</section>
-    <section class="card"><h2>Rule Update Proposals</h2><p class="notice">apply_automatically is false for all proposals: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
-    <section class="card"><h2>Weekly / Monthly Mode</h2><div class="grid">{mode_stats}</div></section>
-    <section class="card"><h2>Safety Notes</h2><ul>{safe}</ul></section>
+    <section class="card"><h2>システム状態</h2><div class="grid">{system_stats}</div></section>
+    <section class="card"><h2>本日のシグナル概要</h2><div class="grid">{signal_stats}</div>{table_html(signals, ["asset","side","rank","type","recommended_action","signal_strength","setup_quality_score","entry_quality_score","direction_confidence","reason_codes","no_trade_reason"])}</section>
+    <section class="card"><h2>評価概要</h2><div class="grid">{eval_stats}</div></section>
+    <section class="card"><h2>資産別成績</h2>{table_html(asset_table, ["asset","signals","evaluations","win_rate","total_r","average_r","missed_opportunity_count"])}</section>
+    <section class="card"><h2>判断理由コード別成績</h2><h3>プラス寄与が大きい理由</h3>{table_html(top_positive, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>マイナス寄与が大きい理由</h3>{table_html(top_negative, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>データ不足</h3>{table_html(insufficient, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}</section>
+    <section class="card"><h2>見送り理由分析</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "見送り理由データなし")}</section>
+    <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
+    <section class="card"><h2>週次・月次モード</h2><div class="grid">{mode_stats}</div></section>
+    <section class="card"><h2>安全上の注意</h2><p class="notice">{html.escape(DASHBOARD_DESCRIPTION)}</p><ul>{safe}</ul></section>
   </main>
   <script type="application/json" id="dashboard-summary">{html.escape(json.dumps(summary, ensure_ascii=False))}</script>
 </body>

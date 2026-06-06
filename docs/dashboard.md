@@ -2,6 +2,8 @@
 
 Tactical Swing OS Dashboard は、日次シグナル、仮想評価、資産別成績、Reason Code分析、Rule Update Proposalを1つのHTMLで確認するための読み取り専用レポートです。
 
+画面の主要な見出し、カード、テーブル列、注意文は日本語表示です。`reason_codes`、`proposal_type`、`target_name` など一部の内部分析コードは、ログとの照合をしやすくするため英語コードのまま残ります。
+
 ## 目的
 
 ダッシュボードは、毎日のartifactやGoogle Sheetsに蓄積された結果を人間が確認しやすい形にまとめます。実売買、発注、XM操作、Google Sheetsへの書き込み、`weights.json` の自動更新、`generate_signal.py` の自動変更は行いません。
@@ -68,6 +70,8 @@ Pagesへ公開される対象は `reports/dashboard` ディレクトリです。
 GitHub Pagesはリポジトリ設定によってpublicに閲覧できる状態になる可能性があります。そのため、ダッシュボードにはSecrets、APIキー、サービスアカウントJSON、個人口座情報、取引口座番号、実資金量、発注情報、ブローカー操作情報を表示しない設計にしています。
 
 現在のダッシュボードは、`SIGNALS`、`EVALUATIONS`、Reason Code分析、Rule Update Proposalなどの分析結果のみを表示します。Google Sheetsからの読み込みは行いますが、Google Sheetsへの書き込みは行いません。
+
+公開URLを共有する場合は、表示内容が研究用の分析結果だけであることを確認してください。このダッシュボードは実売買や発注のための画面ではありません。
 
 ## 注意
 
