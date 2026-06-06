@@ -1,11 +1,8 @@
-from __future__ import annotations
-
-from datetime import datetime, timezone
 from pathlib import Path
+from datetime import datetime, timezone
 
 import pandas as pd
 import yfinance as yf
-
 
 ASSETS = {
     "BTC-USD": "BTC",
@@ -20,7 +17,4 @@ ASSETS = {
 }
 
 RAW_DIR = Path("data/raw")
-RESULTS_DIR = Path("results")
-
-
-def _normalise_download
+RESULTS_DIR = Path("results
