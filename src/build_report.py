@@ -65,6 +65,33 @@ def json_block(df: pd.DataFrame) -> str:
     return df.to_json(orient="records", indent=2, force_ascii=False)
 
 
+def evaluation_summary(evaluations: pd.DataFrame) -> pd.DataFrame:
+    labels = [
+        "win_tp2",
+        "win_tp1",
+        "loss_sl",
+        "no_entry",
+        "missed_opportunity",
+        "no_trade_correct",
+        "no_trade_missed",
+    ]
+    if evaluations.empty:
+        return pd.DataFrame({"metric": labels, "count": [0] * len(labels)})
+
+    outcome = evaluations["outcome"].astype(str) if "outcome" in evaluations else pd.Series([], dtype=str)
+    rows = []
+    for label in labels:
+        if label == "missed_opportunity":
+            if "missed_opportunity" in evaluations:
+                count = int(evaluations["missed_opportunity"].astype(str).str.lower().isin(["true", "1", "yes"]).sum())
+            else:
+                count = 0
+        else:
+            count = int((outcome == label).sum()) if not outcome.empty else 0
+        rows.append({"metric": label, "count": count})
+    return pd.DataFrame(rows)
+
+
 def main() -> int:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -80,7 +107,8 @@ def main() -> int:
     no_trade = signals[signals["rank"] == "NO_TRADE"] if "rank" in signals else pd.DataFrame()
     signal_cols = ["date", "asset", "side", "rank", "type", "entry_low", "entry_high", "sl", "tp1", "tp2", "tq_score", "expected_r"]
     snapshot_cols = ["asset", "ticker", "status", "date", "close", "rows", "message"]
-    evaluation_cols = ["signal_id", "asset", "side", "evaluation_status", "hit_level", "r_result", "mfe", "mae", "bars_checked"]
+    evaluation_cols = ["signal_id", "asset", "side", "status", "outcome", "error_type", "r_multiple", "mfe_r", "mae_r", "missed_opportunity", "bars_checked"]
+    summary = evaluation_summary(evaluations)
 
     report = f"""# Tactical Swing OS Daily Report - {today}
 
@@ -105,6 +133,12 @@ def main() -> int:
 {markdown_table(no_trade, ["date", "asset", "side", "rank", "regime", "no_trade_score", "verification_target"])}
 
 ## 仮想評価
+
+### 評価要約
+
+{markdown_table(summary)}
+
+### 評価明細
 
 {markdown_table(evaluations, evaluation_cols)}
 
