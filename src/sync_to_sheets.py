@@ -119,6 +119,15 @@ def choose_key_columns(sheet_name: str, csv_columns: list[str], sheet_header: li
     return []
 
 
+def has_valid_header(sheet_name: str, header: list[str]) -> bool:
+    header_map = normalized_column_map(header)
+    if sheet_name == "MARKET_SNAPSHOT":
+        return ("date" in header_map and "asset" in header_map) or ("run_ts" in header_map and "asset" in header_map)
+    if sheet_name in {"SIGNALS", "EVALUATIONS"}:
+        return "signal_id" in header_map
+    return bool(header)
+
+
 def existing_keys(worksheet, key_columns: list[str]) -> set[tuple[str, ...]]:
     values = worksheet.get_all_values()
     if not values:
@@ -135,11 +144,17 @@ def existing_keys(worksheet, key_columns: list[str]) -> set[tuple[str, ...]]:
     return keys
 
 
-def ensure_header(worksheet, header: list[str]) -> None:
+def ensure_header(worksheet, header: list[str], sheet_name: str) -> None:
     values = worksheet.get_all_values()
-    if values:
+    if not values:
+        worksheet.append_row(header, value_input_option="RAW")
         return
-    worksheet.append_row(header, value_input_option="RAW")
+
+    if has_valid_header(sheet_name, values[0]):
+        return
+
+    worksheet.insert_row(header, index=1, value_input_option="RAW")
+    print(f"warning: {sheet_name} header is missing or invalid; inserted CSV header at row 1")
 
 
 def current_header(worksheet) -> list[str]:
@@ -165,7 +180,7 @@ def append_csv(spreadsheet, csv_path: Path, sheet_name: str) -> bool:
 
     worksheet = get_or_create_worksheet(spreadsheet, sheet_name)
     header = list(df.columns)
-    ensure_header(worksheet, header)
+    ensure_header(worksheet, header, sheet_name)
 
     sheet_header = current_header(worksheet)
     key_columns = choose_key_columns(sheet_name, header, sheet_header)
