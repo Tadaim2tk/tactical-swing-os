@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -62,9 +63,60 @@ def normalize_value(value) -> str:
     return str(value)
 
 
+def normalize_column_name(column: str) -> str:
+    normalized = str(column).strip().lower()
+    normalized = normalized.replace("-", "_")
+    normalized = re.sub(r"\s+", "_", normalized)
+    normalized = re.sub(r"_+", "_", normalized)
+    return normalized
+
+
+def normalized_column_map(columns: list[str]) -> dict[str, str]:
+    mapping = {}
+    for column in columns:
+        normalized = normalize_column_name(column)
+        if normalized and normalized not in mapping:
+            mapping[normalized] = column
+    return mapping
+
+
 def read_csv(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     return df.fillna("")
+
+
+def key_candidates_for(sheet_name: str) -> list[list[str]]:
+    if sheet_name == "MARKET_SNAPSHOT":
+        return [
+            ["date", "asset"],
+            ["timestamp", "asset"],
+            ["run_ts", "asset"],
+            ["run_timestamp", "asset"],
+            ["fetched_at", "asset"],
+            ["created_at", "asset"],
+            ["retrieved_at", "asset"],
+        ]
+    if sheet_name == "SIGNALS":
+        return [
+            ["signal_id"],
+            ["date", "asset", "side", "type"],
+        ]
+    if sheet_name == "EVALUATIONS":
+        return [
+            ["signal_id"],
+            ["date", "asset", "side"],
+            ["evaluation_date", "asset", "side"],
+        ]
+    return []
+
+
+def choose_key_columns(sheet_name: str, csv_columns: list[str], sheet_header: list[str]) -> list[str]:
+    csv_map = normalized_column_map(csv_columns)
+    sheet_map = normalized_column_map(sheet_header)
+    for candidate in key_candidates_for(sheet_name):
+        if all(column in csv_map and column in sheet_map for column in candidate):
+            return candidate
+    return []
 
 
 def existing_keys(worksheet, key_columns: list[str]) -> set[tuple[str, ...]]:
@@ -73,12 +125,8 @@ def existing_keys(worksheet, key_columns: list[str]) -> set[tuple[str, ...]]:
         return set()
 
     header = values[0]
-    missing = [col for col in key_columns if col not in header]
-    if missing:
-        print(f"warning: {worksheet.title} has no key columns {missing}; appending all rows")
-        return set()
-
-    indexes = [header.index(col) for col in key_columns]
+    header_map = normalized_column_map(header)
+    indexes = [header.index(header_map[col]) for col in key_columns]
     keys = set()
     for row in values[1:]:
         key = tuple(row[idx] if idx < len(row) else "" for idx in indexes)
@@ -94,12 +142,15 @@ def ensure_header(worksheet, header: list[str]) -> None:
     worksheet.append_row(header, value_input_option="RAW")
 
 
-def key_columns_for(sheet_name: str) -> list[str]:
-    if sheet_name == "MARKET_SNAPSHOT":
-        return ["date", "asset"]
-    if sheet_name in {"SIGNALS", "EVALUATIONS"}:
-        return ["signal_id"]
-    return []
+def current_header(worksheet) -> list[str]:
+    values = worksheet.get_all_values()
+    if not values:
+        return []
+    return values[0]
+
+
+def row_key(record: pd.Series, csv_map: dict[str, str], key_columns: list[str]) -> tuple[str, ...]:
+    return tuple(normalize_value(record[csv_map[col]]) for col in key_columns)
 
 
 def append_csv(spreadsheet, csv_path: Path, sheet_name: str) -> bool:
@@ -116,21 +167,31 @@ def append_csv(spreadsheet, csv_path: Path, sheet_name: str) -> bool:
     header = list(df.columns)
     ensure_header(worksheet, header)
 
-    key_columns = key_columns_for(sheet_name)
+    sheet_header = current_header(worksheet)
+    key_columns = choose_key_columns(sheet_name, header, sheet_header)
+    csv_map = normalized_column_map(header)
     known_keys = existing_keys(worksheet, key_columns) if key_columns else set()
+    if key_columns:
+        print(f"ok: {sheet_name} using key columns {key_columns}")
+    else:
+        print(f"warning: {sheet_name} has no usable dedup key columns; appending all rows")
 
     rows = []
+    duplicate_count = 0
     for _, record in df.iterrows():
-        key = tuple(normalize_value(record[col]) for col in key_columns) if key_columns else tuple()
+        key = row_key(record, csv_map, key_columns) if key_columns else tuple()
         if key_columns and key in known_keys:
+            duplicate_count += 1
             continue
         rows.append([normalize_value(record[col]) for col in header])
+        if key_columns:
+            known_keys.add(key)
 
-    if not rows:
-        print(f"ok: {sheet_name} no new rows")
-        return True
+    if key_columns:
+        print(f"ok: {sheet_name} skipped {duplicate_count} duplicate rows")
 
-    worksheet.append_rows(rows, value_input_option="RAW")
+    if rows:
+        worksheet.append_rows(rows, value_input_option="RAW")
     print(f"ok: {sheet_name} appended {len(rows)} rows")
     return True
 
