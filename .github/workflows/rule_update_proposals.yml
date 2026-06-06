@@ -1,0 +1,43 @@
+name: Tactical Swing OS rule update proposals
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 03:40 UTC is 12:40 JST.
+    - cron: "40 3 * * 6"
+
+permissions:
+  contents: read
+
+jobs:
+  rule-update-proposals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Propose rule updates
+        run: python src/propose_rule_updates.py
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+      - name: Upload rule update proposal artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-rule-updates-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            reports/rule_updates/*.md
+            results/rule_update_proposals.csv
+            results/rule_update_proposals.json
