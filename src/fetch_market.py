@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
@@ -19,4 +19,8 @@ ASSETS = {
     "^TNX": "US10Y",
 }
 
-RAW
+RAW_DIR = Path("data/raw")
+RESULTS_DIR = Path("results")
+
+
+def _normalise_download
