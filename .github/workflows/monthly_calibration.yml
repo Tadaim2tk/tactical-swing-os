@@ -1,0 +1,44 @@
+name: Tactical Swing OS monthly calibration
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 03:30 UTC is 12:30 JST.
+    - cron: "30 3 1 * *"
+
+permissions:
+  contents: read
+
+jobs:
+  monthly-calibration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build monthly calibration
+        run: python src/build_monthly_calibration.py
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+      - name: Upload monthly calibration artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-monthly-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            reports/monthly/*.md
+            results/monthly_calibration.csv
+            results/monthly_calibration.json
+            models/weights.json
