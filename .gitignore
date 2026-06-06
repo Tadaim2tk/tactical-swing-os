@@ -6,3 +6,4 @@ results/*.csv
 results/*.json
 reports/*.md
 reports/weekly/*.md
+reports/monthly/*.md
