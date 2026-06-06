@@ -10,3 +10,6 @@ reports/monthly/*.md
 reports/reason_codes/*.md
 results/reason_code_analysis.csv
 results/reason_code_analysis.json
+reports/rule_updates/*.md
+results/rule_update_proposals.csv
+results/rule_update_proposals.json
