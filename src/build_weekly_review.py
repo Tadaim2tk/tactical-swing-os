@@ -399,6 +399,38 @@ def json_records(df: pd.DataFrame) -> str:
     return df.to_json(orient="records", indent=2, force_ascii=False)
 
 
+def load_reason_code_analysis() -> tuple[pd.DataFrame, pd.DataFrame]:
+    reason_path = RESULTS_DIR / "reason_code_analysis.csv"
+    json_path = RESULTS_DIR / "reason_code_analysis.json"
+    reasons = normalize_headers(read_csv(reason_path))
+    no_trade = pd.DataFrame()
+    if json_path.exists():
+        try:
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            no_trade = pd.DataFrame(payload.get("no_trade_reason_summary", []))
+        except (json.JSONDecodeError, OSError):
+            no_trade = pd.DataFrame()
+    return reasons, normalize_headers(no_trade)
+
+
+def reason_code_weekly_summary(reasons: pd.DataFrame, no_trade: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
+    if reasons.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "reason code analysisは別artifact参照。現時点では分析結果が未生成です。"
+    positive = reasons[reasons["reliability_label"].isin(["strong_positive", "positive"])].head(3) if "reliability_label" in reasons.columns else pd.DataFrame()
+    negative = (
+        reasons[reasons["reliability_label"].isin(["strong_negative", "negative"])].sort_values("average_r").head(3)
+        if {"reliability_label", "average_r"}.issubset(reasons.columns)
+        else pd.DataFrame()
+    )
+    missed = (
+        no_trade[no_trade["missed_opportunity_count"].astype(str) != "0"].head(3)
+        if not no_trade.empty and "missed_opportunity_count" in no_trade.columns
+        else pd.DataFrame()
+    )
+    note = "reason code analysisは別artifact参照。詳細は reports/reason_codes/*.md を確認してください。"
+    return positive, negative, missed, note
+
+
 def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, str]:
     input_data = load_input_data()
     signals = filter_period(input_data["signals"], start, end)
@@ -419,6 +451,8 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
     best_asset, worst_asset = best_worst_asset(asset_table)
     mode, max_daily_risk_pct, mode_notes = next_week_decision(metrics, closed_count)
     changes = rule_changes(metrics, rank_table, pending_count, mode_notes)
+    reason_analysis, no_trade_analysis = load_reason_code_analysis()
+    reason_positive, reason_negative, reason_missed, reason_note = reason_code_weekly_summary(reason_analysis, no_trade_analysis)
 
     review_row = {
         "week_start": start.strftime("%Y-%m-%d"),
@@ -497,13 +531,29 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
 - {changes[1] or '特記事項なし'}
 - {changes[2] or '特記事項なし'}
 
-## 9. REVIEW_LOG CSV
+## 9. Reason Code分析メモ
+
+{reason_note}
+
+### reason_code 上位プラス3件
+
+{markdown_table(reason_positive)}
+
+### reason_code 上位マイナス3件
+
+{markdown_table(reason_negative)}
+
+### no_trade_reason 取り逃し候補
+
+{markdown_table(reason_missed)}
+
+## 10. REVIEW_LOG CSV
 
 ```csv
 {review.to_csv(index=False).strip()}
 ```
 
-## 10. REVIEW_LOG JSON
+## 11. REVIEW_LOG JSON
 
 ```json
 {json_records(review)}

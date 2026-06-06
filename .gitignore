@@ -7,3 +7,6 @@ results/*.json
 reports/*.md
 reports/weekly/*.md
 reports/monthly/*.md
+reports/reason_codes/*.md
+results/reason_code_analysis.csv
+results/reason_code_analysis.json

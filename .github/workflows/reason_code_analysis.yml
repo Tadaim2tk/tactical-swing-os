@@ -1,0 +1,43 @@
+name: Tactical Swing OS reason code analysis
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 03:25 UTC is 12:25 JST.
+    - cron: "25 3 * * 6"
+
+permissions:
+  contents: read
+
+jobs:
+  reason-code-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Analyze reason codes
+        run: python src/analyze_reason_codes.py --period weekly
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+      - name: Upload reason code analysis artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-reason-codes-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            reports/reason_codes/*.md
+            results/reason_code_analysis.csv
+            results/reason_code_analysis.json

@@ -346,6 +346,29 @@ def markdown_table(df: pd.DataFrame, empty: str = "_該当なし_") -> str:
     return "\n".join(lines)
 
 
+def load_reason_code_analysis() -> pd.DataFrame:
+    path = RESULTS_DIR / "reason_code_analysis.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    return read_csv(path)
+
+
+def monthly_reason_code_memo(reasons: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, str]:
+    if reasons.empty or "reliability_label" not in reasons.columns:
+        return pd.DataFrame(), pd.DataFrame(), "reason_code分析は未生成です。別artifact生成後に月次較正メモへ反映されます。"
+    strong_positive = reasons[reasons["reliability_label"].astype(str) == "strong_positive"].head(10)
+    strong_negative = (
+        reasons[reasons["reliability_label"].astype(str) == "strong_negative"].sort_values("average_r").head(10)
+        if "average_r" in reasons.columns
+        else pd.DataFrame()
+    )
+    if strong_positive.empty and strong_negative.empty:
+        memo = "現時点ではstrong_positive / strong_negativeのreason_codeはありません。weights.jsonは据え置きます。"
+    else:
+        memo = "reason_code単位の将来weights調整候補です。今回もweights.jsonは自動更新しません。"
+    return strong_positive, strong_negative, memo
+
+
 def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, str]:
     input_data = load_input_data()
     signals = filter_period(input_data["signals"], start, end)
@@ -365,6 +388,8 @@ def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[p
     mode, risk, mode_notes = next_month_decision(metrics)
     summary = weight_change_summary(asset_table, rank_table, side_table)
     changes = rule_changes(metrics, mode_notes, summary)
+    reason_analysis = load_reason_code_analysis()
+    strong_positive_reasons, strong_negative_reasons, reason_memo = monthly_reason_code_memo(reason_analysis)
 
     row = {
         "month_start": start.strftime("%Y-%m-%d"),
@@ -451,13 +476,25 @@ weights.jsonは初期値のまま据え置きます。今回の出力は提案�
 
 {data_warning}
 
-## 10. MONTHLY_CALIBRATION_LOG CSV
+## 10. Reason Code較正メモ
+
+{reason_memo}
+
+### strong_positive reason_codes
+
+{markdown_table(strong_positive_reasons)}
+
+### strong_negative reason_codes
+
+{markdown_table(strong_negative_reasons)}
+
+## 11. MONTHLY_CALIBRATION_LOG CSV
 
 ```csv
 {log.to_csv(index=False).strip()}
 ```
 
-## 11. MONTHLY_CALIBRATION_LOG JSON
+## 12. MONTHLY_CALIBRATION_LOG JSON
 
 ```json
 {json.dumps([payload], ensure_ascii=False, indent=2)}
