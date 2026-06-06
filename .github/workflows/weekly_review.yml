@@ -28,6 +28,9 @@ jobs:
 
       - name: Build weekly review
         run: python src/build_weekly_review.py
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
       - name: Upload weekly review artifacts
         uses: actions/upload-artifact@v4
