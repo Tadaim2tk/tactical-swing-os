@@ -1,16 +1,22 @@
-import yfinance as yf
-import pandas as pd
-from pathlib import Path
+from __future__ import annotations
 
-ASSETS={
- 'BTC-USD':'BTC',
- 'GC=F':'GOLD',
- 'CL=F':'WTI',
- 'JPY=X':'USDJPY'
+from pathlib import Path
+from datetime import datetime, timezone
+
+import pandas as pd
+import yfinance as yf
+
+
+ASSETS = {
+    "BTC-USD": "BTC",
+    "GC=F": "GOLD",
+    "CL=F": "WTI",
+    "JPY=X": "USDJPY",
+    "ES=F": "SPX",
+    "NQ=F": "NASDAQ",
+    "DX-Y.NYB": "DXY",
+    "^VIX": "VIX",
+    "^TNX": "US10Y",
 }
 
-Path('data/raw').mkdir(parents=True,exist_ok=True)
-for ticker,name in ASSETS.items():
-    df=yf.download(ticker,period='180d',interval='1d',auto_adjust=True,progress=False)
-    df.to_csv(f'data/raw/{name}.csv')
-print('download complete')
+RAW
