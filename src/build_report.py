@@ -1,3 +1,10 @@
+"""build_report.py – Daily Markdown report generator.
+
+Phase 6 additions:
+  - setup_quality_score, direction_confidence, reason_codes,
+    no_trade_reason, recommended_action per asset
+  - A / B / NO_TRADE count summary
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -53,6 +60,39 @@ def summarize_conclusion(signals: pd.DataFrame) -> str:
     return f"本日は見送り優勢です。No Trade は {no_count} 件です。"
 
 
+def rank_summary_table(signals: pd.DataFrame) -> str:
+    """Return a small markdown table with A/B/NO_TRADE counts and totals."""
+    if signals.empty or "rank" not in signals.columns:
+        return "_シグナルなし_"
+    a_cnt = int((signals["rank"] == "A").sum())
+    b_cnt = int((signals["rank"] == "B").sum())
+    nt_cnt = int((signals["rank"] == "NO_TRADE").sum())
+    total = len(signals)
+    rows = [
+        ("A", a_cnt, "TRADE"),
+        ("B", b_cnt, "WATCH"),
+        ("NO_TRADE", nt_cnt, "NO_TRADE"),
+    ]
+    lines = [
+        "| rank | count | recommended_action |",
+        "| --- | --- | --- |",
+    ]
+    for rank, cnt, action in rows:
+        lines.append(f"| {rank} | {cnt} | {action} |")
+    lines.append(f"| **合計** | **{total}** | |")
+    return "\n".join(lines)
+
+
+def phase6_signal_table(df: pd.DataFrame) -> str:
+    """Per-asset Phase-6 scoring table."""
+    cols = [
+        "asset", "side", "rank",
+        "setup_quality_score", "direction_confidence",
+        "reason_codes", "no_trade_reason", "recommended_action",
+    ]
+    return markdown_table(df, cols)
+
+
 def csv_block(df: pd.DataFrame) -> str:
     if df.empty:
         return ""
@@ -105,7 +145,12 @@ def main() -> int:
     a_candidates = signals[signals["rank"] == "A"] if "rank" in signals else pd.DataFrame()
     b_candidates = signals[signals["rank"] == "B"] if "rank" in signals else pd.DataFrame()
     no_trade = signals[signals["rank"] == "NO_TRADE"] if "rank" in signals else pd.DataFrame()
-    signal_cols = ["date", "asset", "side", "rank", "type", "entry_low", "entry_high", "sl", "tp1", "tp2", "tq_score", "expected_r"]
+
+    signal_cols = [
+        "date", "asset", "side", "rank", "type",
+        "entry_low", "entry_high", "sl", "tp1", "tp2",
+        "tq_score", "expected_r",
+    ]
     snapshot_cols = ["asset", "ticker", "status", "date", "close", "rows", "message"]
     evaluation_cols = ["signal_id", "asset", "side", "status", "outcome", "error_type", "r_multiple", "mfe_r", "mae_r", "missed_opportunity", "bars_checked"]
     summary = evaluation_summary(evaluations)
@@ -115,6 +160,14 @@ def main() -> int:
 ## 本日の結論
 
 {summarize_conclusion(signals)}
+
+## Rank別サマリー（Phase 6）
+
+{rank_summary_table(signals)}
+
+## Phase 6 スコア・理由コード一覧
+
+{phase6_signal_table(signals)}
 
 ## 市場データ取得状況
 
@@ -130,7 +183,7 @@ def main() -> int:
 
 ## No Trade
 
-{markdown_table(no_trade, ["date", "asset", "side", "rank", "regime", "no_trade_score", "verification_target"])}
+{markdown_table(no_trade, ["date", "asset", "side", "rank", "regime", "no_trade_score", "no_trade_reason", "verification_target"])}
 
 ## 仮想評価
 
