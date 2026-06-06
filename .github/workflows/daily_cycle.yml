@@ -38,6 +38,12 @@ jobs:
       - name: Build report
         run: python src/build_report.py
 
+      - name: Sync to Google Sheets
+        run: python src/sync_to_sheets.py
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
       - name: Upload TSO artifacts
         uses: actions/upload-artifact@v4
         with:
