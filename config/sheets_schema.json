@@ -1,0 +1,21 @@
+{
+  "mappings": [
+    {
+      "csv_path": "results/market_snapshot.csv",
+      "sheet_name": "MARKET_SNAPSHOT"
+    },
+    {
+      "csv_path": "results/signals.csv",
+      "sheet_name": "SIGNALS"
+    },
+    {
+      "csv_path": "results/evaluations.csv",
+      "sheet_name": "EVALUATIONS"
+    }
+  ],
+  "future_sheets": [
+    "WEEKLY_REVIEW",
+    "MONTHLY_CALIBRATION",
+    "PARAMETERS"
+  ]
+}
