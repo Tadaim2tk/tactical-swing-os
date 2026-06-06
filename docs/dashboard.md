@@ -51,6 +51,24 @@ Rule Update Proposalは提案ログとして表示するだけです。`apply_au
 4. `Run workflow` で手動実行する
 5. 成功したrunのartifactから `reports/dashboard/index.html` と `reports/dashboard/dashboard_summary.json` を確認する
 
+## GitHub Pages版の確認方法
+
+GitHub Pagesを使うと、artifact zipをダウンロードせずにブラウザから直接ダッシュボードを確認できます。
+
+1. GitHubの対象リポジトリを開く
+2. `Settings` → `Pages` を開く
+3. `Build and deployment` の `Source` が `GitHub Actions` になっていることを確認する
+4. `Actions` タブで `Tactical Swing OS dashboard` を手動実行、または定期実行を待つ
+5. 成功したrunの `deploy-pages` 結果、または `Settings` → `Pages` に表示されるURLから開く
+
+Pagesへ公開される対象は `reports/dashboard` ディレクトリです。`reports/dashboard/index.html` がPagesのルートで開かれ、`dashboard_summary.json` も同じ場所に配置されます。
+
+## GitHub Pages公開時の注意
+
+GitHub Pagesはリポジトリ設定によってpublicに閲覧できる状態になる可能性があります。そのため、ダッシュボードにはSecrets、APIキー、サービスアカウントJSON、個人口座情報、取引口座番号、実資金量、発注情報、ブローカー操作情報を表示しない設計にしています。
+
+現在のダッシュボードは、`SIGNALS`、`EVALUATIONS`、Reason Code分析、Rule Update Proposalなどの分析結果のみを表示します。Google Sheetsからの読み込みは行いますが、Google Sheetsへの書き込みは行いません。
+
 ## 注意
 
 このダッシュボードは分析・監査・レビュー用です。実売買判断には人間の確認が必要です。Sheets読み込みはサービスアカウントの権限やヘッダー状態に依存するため、読み込みに失敗した場合はローカルCSV/JSONのfallback結果になります。
