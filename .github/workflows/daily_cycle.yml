@@ -1,0 +1,50 @@
+name: Tactical Swing OS daily cycle
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 21:55 UTC is 06:55 JST.
+    - cron: "55 21 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  daily-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch market data
+        run: python src/fetch_market.py
+
+      - name: Generate signals
+        run: python src/generate_signal.py
+
+      - name: Evaluate signals
+        run: python src/evaluate_signal.py || true
+
+      - name: Build report
+        run: python src/build_report.py
+
+      - name: Upload TSO artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            data/raw/*.csv
+            results/*.csv
+            results/*.json
+            reports/*.md
