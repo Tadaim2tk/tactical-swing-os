@@ -1,6 +1,5 @@
 from pathlib import Path
 from datetime import datetime, timezone
-
 import pandas as pd
 import yfinance as yf
 
@@ -13,13 +12,17 @@ ASSETS = {
     'NQ=F': 'NASDAQ',
     'DX-Y.NYB': 'DXY',
     '^VIX': 'VIX',
-    '^TNX': 'US10Y',
+    '^TNX': 'US10Y'
 }
 
 RAW_DIR = Path('data/raw')
 RESULTS_DIR = Path('results')
 
 
-def _prepare_frame(df: pd.DataFrame) -> pd.DataFrame:
+def clean(df):
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [col[
+        df.columns = [str(c[0]) for c in df.columns]
+    df = df.reset_index()
+    if 'Date' not in df.columns and 'Datetime' in df.columns:
+        df = df.rename(columns={'Datetime': 'Date'})
+    keep = [
