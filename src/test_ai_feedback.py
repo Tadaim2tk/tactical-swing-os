@@ -195,3 +195,57 @@ def test_build_report_handles_non_json_values_in_payload_sections():
     )
     assert "AI_FEEDBACK_LOG JSON" in markdown
     assert "2026-06-07T00:00:00" in markdown
+
+
+def test_recent_evaluation_reflection_dedupes_alignment_signal_id_by_latest_date():
+    evaluations = pd.DataFrame(
+        [
+            {
+                "signal_id": "dup-signal",
+                "asset": "BTC",
+                "outcome": "win_tp1",
+                "r_multiple": 1.2,
+                "evaluation_date": "2026-06-07",
+            }
+        ]
+    )
+    alignment = pd.DataFrame(
+        [
+            {
+                "signal_id": "",
+                "evaluation_date": "2026-06-09",
+                "narrative_alignment": "conflicted",
+            },
+            {
+                "signal_id": "dup-signal",
+                "evaluation_date": "2026-06-06",
+                "narrative_alignment": "conflicted",
+            },
+            {
+                "signal_id": "dup-signal",
+                "evaluation_date": "2026-06-08",
+                "narrative_alignment": "aligned",
+            },
+        ]
+    )
+
+    reflections = build_ai_feedback.recent_evaluation_reflection(evaluations, alignment)
+
+    assert reflections[0]["signal_id"] == "dup-signal"
+    assert reflections[0]["narrative_alignment"] == "aligned"
+
+
+def test_dedupe_by_signal_id_uses_row_order_when_date_columns_are_missing():
+    duplicated = pd.DataFrame(
+        [
+            {"signal_id": "x", "narrative_alignment": "conflicted"},
+            {"signal_id": " ", "narrative_alignment": "neutral"},
+            {"signal_id": "x", "narrative_alignment": "aligned"},
+        ]
+    )
+
+    deduped = build_ai_feedback.dedupe_by_signal_id(duplicated, "alignment")
+
+    assert len(deduped) == 1
+    assert deduped.iloc[0]["signal_id"] == "x"
+    assert deduped.iloc[0]["narrative_alignment"] == "aligned"
