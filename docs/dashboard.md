@@ -29,6 +29,14 @@ Secretsが未設定、またはSheets読み込みに失敗した場合は、ロ�
 
 週次・月次・Reason Code・Rule Proposalは、現時点では主にローカルartifactを参照します。runner上に該当ファイルがない場合、そのセクションは「データなし」と表示されます。
 
+## AI Feedback表示
+
+Dashboard workflow は、`build_dashboard.py` を実行する前に表示用の `build_ai_feedback.py` を同一job内で実行します。これにより、別workflowのartifactを手動で受け渡ししなくても、`results/ai_feedback.json` を使ってダッシュボード上のAIフィードバック要約を表示できます。
+
+AI Feedback workflow単体で生成されるartifactと、Dashboard表示用にDashboard workflow内で生成されるAI Feedbackは別です。GitHub Actionsのworkflow間ではartifactが自動共有されないため、Dashboard workflow側でも表示直前に再生成します。
+
+AI Feedback生成に失敗した場合でも、Dashboard workflowは継続します。その場合、ダッシュボード自体は表示されますが、AIフィードバック欄は「未取得」または「AIフィードバック未取得」と表示されます。
+
 ## 表示セクション
 
 - `System Status`: 読み込んだ行数、最新レポート日付、データソース
@@ -52,6 +60,8 @@ Rule Update Proposalは提案ログとして表示するだけです。`apply_au
 3. `Tactical Swing OS dashboard` を選ぶ
 4. `Run workflow` で手動実行する
 5. 成功したrunのartifactから `reports/dashboard/index.html` と `reports/dashboard/dashboard_summary.json` を確認する
+
+Dashboard artifactには、表示確認用として可能な場合に `results/ai_feedback.json`、`results/ai_feedback.csv`、`reports/ai_feedback/*.md` も含まれます。
 
 ## GitHub Pages版の確認方法
 
