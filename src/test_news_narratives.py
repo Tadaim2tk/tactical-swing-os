@@ -48,3 +48,22 @@ def test_empty_news_produces_zero_scores():
     scores, drivers = cnn.classify_rows(pd.DataFrame())
     assert scores["news_confidence"] == 0
     assert drivers == []
+
+
+def test_news_market_bias_risk_on_risk_off_mixed_and_insufficient():
+    assert cnn.news_market_bias({"risk_on_news_score": 70, "risk_off_news_score": 20}, 10) == "risk_on"
+    assert cnn.news_market_bias({"risk_on_news_score": 20, "risk_off_news_score": 70}, 10) == "risk_off"
+    assert cnn.news_market_bias({"risk_on_news_score": 70, "risk_off_news_score": 65}, 10) == "mixed"
+    assert cnn.news_market_bias({"risk_on_news_score": 70, "risk_off_news_score": 20}, 3) == "insufficient_data"
+
+
+def test_driver_tags_for_iran_war_and_inflation_headlines():
+    iran_scores, iran_drivers = classify_one("Iran war raises fears of wider Middle East conflict")
+    assert iran_scores["geopolitical_risk_news_score"] > 0
+    assert "geopolitical_risk" in iran_drivers[0]["driver_tags"]
+    assert "地政学リスク" in iran_drivers[0]["driver_summary_ja"]
+
+    inflation_scores, inflation_drivers = classify_one("Inflation inside electronics supply chains keeps prices high")
+    assert inflation_scores["inflation_pressure_news_score"] > 0
+    assert "inflation_pressure" in inflation_drivers[0]["driver_tags"]
+    assert "インフレ圧力" in inflation_drivers[0]["driver_summary_ja"]

@@ -43,6 +43,10 @@ DISPLAY_LABELS = {
     "latest ai feedback": "最新AIフィードバック",
     "latest_news_fetched_at": "最新ニュース取得日時",
     "headline_count": "headline件数",
+    "news_market_bias": "ニュース市場バイアス",
+    "news_conflict_score": "ニュース矛盾スコア",
+    "dominant_news_themes": "主要ニューステーマ",
+    "news_summary_ja": "日本語ニュース要約",
     "news_confidence": "ニュース信頼度",
     "risk_on_news_score": "ニュースRisk On",
     "risk_off_news_score": "ニュースRisk Off",
@@ -517,6 +521,10 @@ def news_narrative_summary(news_csv: pd.DataFrame, news_json) -> dict:
             "available": True,
             "latest_news_fetched_at": news_json.get("generated_at_jst", ""),
             "headline_count": int(numeric_or(news_json.get("headline_count", 0), 0)),
+            "news_market_bias": news_json.get("news_market_bias", "insufficient_data"),
+            "news_conflict_score": numeric_or(news_json.get("news_conflict_score", 0), 0.0),
+            "dominant_news_themes": list(news_json.get("dominant_news_themes", []) or []),
+            "news_summary_ja": news_json.get("news_summary_ja", "ニュースナラティブ未取得"),
             "news_confidence": numeric_or(news_json.get("news_confidence", 0), 0.0),
             "risk_on_news_score": numeric_or(news_json.get("risk_on_news_score", 0), 0.0),
             "risk_off_news_score": numeric_or(news_json.get("risk_off_news_score", 0), 0.0),
@@ -539,6 +547,10 @@ def news_narrative_summary(news_csv: pd.DataFrame, news_json) -> dict:
             "available": True,
             "latest_news_fetched_at": row.get("generated_at_jst", ""),
             "headline_count": int(numeric_or(row.get("headline_count", 0), 0)),
+            "news_market_bias": row.get("news_market_bias", "insufficient_data"),
+            "news_conflict_score": numeric_or(row.get("news_conflict_score", 0), 0.0),
+            "dominant_news_themes": str(row.get("dominant_news_themes", "") or "").split("|") if row.get("dominant_news_themes", "") else [],
+            "news_summary_ja": row.get("news_summary_ja", "ニュースナラティブ未取得"),
             "news_confidence": numeric_or(row.get("news_confidence", 0), 0.0),
             "risk_on_news_score": numeric_or(row.get("risk_on_news_score", 0), 0.0),
             "risk_off_news_score": numeric_or(row.get("risk_off_news_score", 0), 0.0),
@@ -553,6 +565,10 @@ def news_narrative_summary(news_csv: pd.DataFrame, news_json) -> dict:
         "available": False,
         "latest_news_fetched_at": "",
         "headline_count": 0,
+        "news_market_bias": "insufficient_data",
+        "news_conflict_score": 0.0,
+        "dominant_news_themes": [],
+        "news_summary_ja": "ニュースナラティブ未取得",
         "news_confidence": 0.0,
         "risk_on_news_score": 0.0,
         "risk_off_news_score": 0.0,
@@ -772,6 +788,10 @@ def render_html(
         [
             stat_card("latest_news_fetched_at", news_summary.get("latest_news_fetched_at") or "ニュースナラティブ未取得"),
             stat_card("headline_count", news_summary.get("headline_count", 0)),
+            stat_card("news_market_bias", news_summary.get("news_market_bias", "insufficient_data")),
+            stat_card("news_conflict_score", fmt_num(news_summary.get("news_conflict_score", 0))),
+            stat_card("dominant_news_themes", ", ".join(news_summary.get("dominant_news_themes", []) or []) or "なし"),
+            stat_card("news_summary_ja", news_summary.get("news_summary_ja", "ニュースナラティブ未取得")),
             stat_card("news_confidence", fmt_num(news_summary.get("news_confidence", 0))),
             stat_card("risk_on_news_score", fmt_num(news_summary.get("risk_on_news_score", 0))),
             stat_card("risk_off_news_score", fmt_num(news_summary.get("risk_off_news_score", 0))),
@@ -783,7 +803,12 @@ def render_html(
         ]
     )
     news_drivers = news_summary.get("top_news_drivers") or []
-    news_driver_list = "".join(f"<li>{html.escape(str(item.get('title', item)))}</li>" if isinstance(item, dict) else f"<li>{html.escape(str(item))}</li>" for item in news_drivers[:5])
+    news_driver_list = "".join(
+        f"<li>{html.escape(str(item.get('title', item)))}（{html.escape(str(item.get('driver_summary_ja', '分類未確定'))) }）</li>"
+        if isinstance(item, dict)
+        else f"<li>{html.escape(str(item))}</li>"
+        for item in news_drivers[:5]
+    )
     if not news_driver_list:
         news_driver_list = "<li>ニュースナラティブ未取得</li>"
     safe = "".join(f"<li>{html.escape(note)}</li>" for note in SAFETY_NOTES)
