@@ -33,7 +33,7 @@ jobs:
 
       - name: Fetch news for dashboard
         run: |
-          python src/fetch_news.py --hours 48 --max-items 100 || echo "warning: news fetch failed; continuing dashboard"
+          python src/fetch_news.py --hours 24 --max-items 30 --timeout-seconds 5 --global-timeout-seconds 45 || echo "warning: news fetch failed; continuing dashboard"
 
       - name: Classify news narratives for dashboard
         run: |

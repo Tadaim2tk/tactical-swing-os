@@ -113,6 +113,18 @@ def read_headlines(path: Path = HEADLINES_PATH) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def read_headline_metadata(path: Path = RESULTS_DIR / "news_headlines.json") -> dict:
+    if not path.exists():
+        return {"fetch_status": "unavailable"}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"fetch_status": "unavailable"}
+    if isinstance(payload, dict):
+        return payload.get("metadata", {}) or {"fetch_status": "unavailable"}
+    return {"fetch_status": "unavailable"}
+
+
 def keyword_hits(text: str, keywords: list[str]) -> list[str]:
     lower = text.lower()
     return [keyword for keyword in keywords if keyword in lower]
@@ -279,8 +291,9 @@ def news_mode_summary(scores: dict) -> str:
     return " / ".join(parts)
 
 
-def write_outputs(scores: dict, drivers: list[dict], headlines: pd.DataFrame) -> dict:
+def write_outputs(scores: dict, drivers: list[dict], headlines: pd.DataFrame, fetch_metadata: dict | None = None) -> dict:
     generated_at = now_utc()
+    fetch_metadata = fetch_metadata or {"fetch_status": "unavailable"}
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     enriched_scores = {
@@ -296,6 +309,12 @@ def write_outputs(scores: dict, drivers: list[dict], headlines: pd.DataFrame) ->
         "headline_count": int(len(headlines)),
         **enriched_scores,
         "news_mode_summary": news_mode_summary(enriched_scores),
+        "news_fetch_status": fetch_metadata.get("fetch_status", "unavailable"),
+        "news_fetch_success_source_count": int(fetch_metadata.get("source_success_count", 0) or 0),
+        "news_fetch_failed_source_count": int(fetch_metadata.get("source_failed_count", 0) or 0),
+        "news_fetch_skipped_source_count": int(fetch_metadata.get("source_skipped_count", 0) or 0),
+        "news_fetch_elapsed_seconds": float(fetch_metadata.get("elapsed_seconds", 0) or 0),
+        "news_fetch_metadata": fetch_metadata,
         "top_news_drivers": drivers[:10],
     }
     flat = row.copy()
@@ -310,6 +329,10 @@ def write_outputs(scores: dict, drivers: list[dict], headlines: pd.DataFrame) ->
         f"生成日時（JST）: {row['generated_at_jst']}",
         f"生成日時（UTC）: {row['generated_at_utc']}",
         f"headline件数: {row['headline_count']}",
+        f"ニュース取得ステータス: {row['news_fetch_status']}",
+        f"取得成功ソース数: {row['news_fetch_success_source_count']}",
+        f"取得失敗ソース数: {row['news_fetch_failed_source_count']}",
+        f"最終ニュース取得所要秒数: {row['news_fetch_elapsed_seconds']}",
         f"ニュース市場バイアス: {row['news_market_bias']}",
         f"ニュース矛盾スコア: {row['news_conflict_score']}",
         f"主要テーマ: {', '.join(row['dominant_news_themes']) or 'なし'}",
@@ -337,8 +360,9 @@ def write_outputs(scores: dict, drivers: list[dict], headlines: pd.DataFrame) ->
 
 def classify_news_narratives() -> dict:
     headlines = read_headlines()
+    fetch_metadata = read_headline_metadata()
     scores, drivers = classify_rows(headlines)
-    return write_outputs(scores, drivers, headlines)
+    return write_outputs(scores, drivers, headlines, fetch_metadata)
 
 
 def main() -> int:
