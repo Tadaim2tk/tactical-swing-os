@@ -353,6 +353,16 @@ def evaluate_one(signal: pd.Series, horizon: int) -> dict:
     return evaluate_trade(signal, df, horizon)
 
 
+def evaluate_signals_dataframe(signals: pd.DataFrame, horizon: int) -> pd.DataFrame:
+    if signals.empty:
+        return pd.DataFrame(columns=EVALUATION_COLUMNS)
+
+    normalized = signals.copy()
+    normalized.columns = [normalize_column_name(col) for col in normalized.columns]
+    rows = [evaluate_one(row, horizon) for _, row in normalized.iterrows()]
+    return pd.DataFrame(rows).reindex(columns=EVALUATION_COLUMNS)
+
+
 def main() -> int:
     args = parse_args()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -361,10 +371,7 @@ def main() -> int:
         evaluations = pd.DataFrame(columns=EVALUATION_COLUMNS)
     else:
         signals = pd.read_csv(signals_path)
-        signals.columns = [normalize_column_name(col) for col in signals.columns]
-        rows = [evaluate_one(row, args.horizon) for _, row in signals.iterrows()]
-        evaluations = pd.DataFrame(rows)
-        evaluations = evaluations.reindex(columns=EVALUATION_COLUMNS)
+        evaluations = evaluate_signals_dataframe(signals, args.horizon)
 
     evaluations.to_csv(RESULTS_DIR / "evaluations.csv", index=False)
     evaluations.to_json(RESULTS_DIR / "evaluations.json", orient="records", indent=2, force_ascii=False)

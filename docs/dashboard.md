@@ -38,6 +38,14 @@ AI Feedback workflow単体で生成されるartifactと、Dashboard表示用にD
 
 AI Feedback生成に失敗した場合でも、Dashboard workflowは継続します。その場合、ダッシュボード自体は表示されますが、AIフィードバック欄は「未取得」または「AIフィードバック未取得」と表示されます。
 
+## Pending再評価表示
+
+Dashboard workflow は、表示用に `build_dashboard.py` の前で `reevaluate_pending_signals.py` を実行します。これにより、過去SIGNALSのうち pending / open / no_entry / unresolved の仮想評価を最新OHLCで再確認し、`results/pending_reevaluations.csv/json` を生成できた場合はダッシュボードに要約します。
+
+表示内容は、再評価対象件数、決着件数、open継続件数、no_entry継続件数、missed opportunity件数、直近決着シグナル上位5件です。
+
+再評価生成に失敗した場合でも、Dashboard workflowは継続します。その場合は `Pending再評価未取得` と表示されます。初期運用ではDashboard workflowからGoogle Sheetsへ再評価結果を書き込みません。
+
 ## 時刻表示
 
 GitHub Actions runner はUTC基準で動くため、そのまま表示すると日本時間より9時間前の時刻に見えます。ダッシュボードでは生成時刻を `生成日時（JST）` として日本時間へ変換し、あわせて `Actions実行時刻（UTC）` も表示します。
@@ -56,6 +64,7 @@ GitHub Actions runner はUTC基準で動くため、そのまま表示すると�
 - `No Trade Reason Analysis`: NO_TRADE理由ごとの暫定評価
 - `Rule Update Proposals`: ルール更新提案一覧
 - `News Narrative Summary`: RSS/公開見出しから推定したニュースナラティブ要約
+- `Pending Re-evaluation Summary`: 未決着シグナルの継続再評価要約
 - `Weekly / Monthly Mode`: 翌週・翌月モードとリスク上限
 - `Safety Notes`: 自動売買ではないことの確認
 
@@ -71,7 +80,7 @@ Rule Update Proposalは提案ログとして表示するだけです。`apply_au
 4. `Run workflow` で手動実行する
 5. 成功したrunのartifactから `reports/dashboard/index.html` と `reports/dashboard/dashboard_summary.json` を確認する
 
-Dashboard artifactには、表示確認用として可能な場合に `results/ai_feedback.json`、`results/ai_feedback.csv`、`reports/ai_feedback/*.md` も含まれます。
+Dashboard artifactには、表示確認用として可能な場合に `results/ai_feedback.json`、`results/ai_feedback.csv`、`reports/ai_feedback/*.md`、`results/pending_reevaluations.csv/json`、`reports/reevaluation/*.md` も含まれます。
 
 ## GitHub Pages版の確認方法
 
