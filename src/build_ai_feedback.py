@@ -252,6 +252,9 @@ def narrative_source_mix(scores: pd.DataFrame, news: dict) -> str:
 def news_mode_summary(news: dict) -> str:
     if not news or numeric_from_mapping(news, "news_confidence", 0.0) <= 0:
         return "ニュースナラティブ未取得"
+    if str(news.get("news_market_bias", "")) == "mixed":
+        summary = str(news.get("news_summary_ja", "") or "")
+        return summary or "ニュースは混在し、方向感が割れています。"
     summary = str(news.get("news_mode_summary", "") or "")
     if summary:
         return summary
@@ -279,11 +282,25 @@ def blend(proxy: float, news_value: float, weight: float = 0.3) -> float:
     return round(max(0.0, min(100.0, proxy * (1.0 - weight) + news_value * weight)), 2)
 
 
+def combined_market_mode_summary(scores: pd.DataFrame, news: dict) -> str:
+    base = narratives.market_mode_summary(scores)
+    if not news or numeric_from_mapping(news, "news_confidence", 0.0) <= 0:
+        return base
+    bias = str(news.get("news_market_bias", ""))
+    conflict = numeric_from_mapping(news, "news_conflict_score", 0.0)
+    suffix = news_mode_summary(news)
+    if bias == "mixed":
+        suffix = f"ニュースは混在（矛盾スコア {conflict:.2f}）"
+    return f"{base} / {suffix}"
+
+
 def apply_news_overlay(scores: pd.DataFrame, news: dict) -> pd.DataFrame:
     if scores.empty or not news or numeric_from_mapping(news, "news_confidence", 0.0) <= 0:
         return scores.copy()
     out = scores.copy()
     idx = out.index[0]
+    mixed = str(news.get("news_market_bias", "")) == "mixed"
+    directional_weight = 0.1 if mixed else 0.3
     mappings = {
         "risk_on_score": "risk_on_news_score",
         "risk_off_score": "risk_off_news_score",
@@ -294,7 +311,8 @@ def apply_news_overlay(scores: pd.DataFrame, news: dict) -> pd.DataFrame:
     }
     for proxy_col, news_col in mappings.items():
         if proxy_col in out.columns:
-            out.at[idx, proxy_col] = blend(numeric_value(out.at[idx, proxy_col]), numeric_from_mapping(news, news_col))
+            weight = directional_weight if proxy_col in {"risk_on_score", "risk_off_score"} else 0.3
+            out.at[idx, proxy_col] = blend(numeric_value(out.at[idx, proxy_col]), numeric_from_mapping(news, news_col), weight)
     if "gold_safe_haven_score" in out.columns:
         news_gold = max(numeric_from_mapping(news, "gold_safe_haven_news_score"), numeric_from_mapping(news, "geopolitical_risk_news_score") * 0.8)
         out.at[idx, "gold_safe_haven_score"] = blend(numeric_value(out.at[idx, "gold_safe_haven_score"]), news_gold)
@@ -313,6 +331,45 @@ def apply_news_overlay(scores: pd.DataFrame, news: dict) -> pd.DataFrame:
     out.at[idx, "news_narrative_available"] = True
     out.at[idx, "news_mode_summary"] = news_mode_summary(news)
     out.at[idx, "narrative_source_mix"] = narrative_source_mix(scores, news)
+    return out
+
+
+def apply_news_context_to_alignment(alignment: pd.DataFrame, news: dict) -> pd.DataFrame:
+    if alignment.empty or not news or numeric_from_mapping(news, "news_confidence", 0.0) <= 0:
+        return alignment.copy()
+    out = alignment.copy()
+    mixed = str(news.get("news_market_bias", "")) == "mixed"
+    conflict = numeric_from_mapping(news, "news_conflict_score", 0.0)
+    geo = numeric_from_mapping(news, "geopolitical_risk_news_score", 0.0)
+    summary = str(news.get("news_summary_ja", "") or "")
+    for idx, row in out.iterrows():
+        asset = str(row.get("asset", "")).upper()
+        side = str(row.get("side", "")).upper()
+        score = numeric_value(row.get("narrative_alignment_score", 0), 0.0)
+        comments = [str(row.get("narrative_comment", "") or "")]
+        if mixed:
+            score *= 0.65
+            comments.append("ニュースは混在しているため、整合性判定を中立寄りに補正しました。")
+        if conflict >= 60:
+            comments.append("ニュース材料は強い一方で方向感が割れているため、単方向の判断は慎重に扱います。")
+        if geo >= 70:
+            if asset == "GOLD" and side == "LONG":
+                comments.append("地政学リスクが高く、GOLD LONGは安全資産需要の追い風を受けやすい一方で急反転に注意します。")
+            elif asset in {"USDJPY", "VIX"} and side == "LONG":
+                comments.append("地政学リスクが高く、警戒モードの継続を想定します。")
+            elif asset in {"BTC", "NASDAQ"} and side == "LONG":
+                comments.append("地政学リスクが高く、BTC/NASDAQ LONGは慎重化が必要です。")
+        if summary:
+            comments.append(f"ニュース要約: {summary}")
+        out.at[idx, "narrative_alignment_score"] = int(round(max(-100.0, min(100.0, score))))
+        adjusted = out.at[idx, "narrative_alignment_score"]
+        if adjusted >= 15:
+            out.at[idx, "narrative_alignment"] = "aligned"
+        elif adjusted <= -15:
+            out.at[idx, "narrative_alignment"] = "conflicted"
+        else:
+            out.at[idx, "narrative_alignment"] = "neutral"
+        out.at[idx, "narrative_comment"] = " ".join(part for part in comments if part)
     return out
 
 
@@ -635,7 +692,7 @@ def build_report(
         "timezone": "Asia/Tokyo",
         "date": report_date,
         "data_source": data_source,
-        "market_mode_summary": narratives.market_mode_summary(scores),
+        "market_mode_summary": combined_market_mode_summary(scores, news),
         "news_narrative_available": bool(numeric_from_mapping(news, "news_confidence", 0.0) > 0),
         "news_mode_summary": news_mode_summary(news),
         "top_news_drivers": top_news_drivers(news),
@@ -659,7 +716,7 @@ def build_report(
                 "timezone": "Asia/Tokyo",
                 "date": report_date,
                 "data_source": data_source,
-                "market_mode_summary": narratives.market_mode_summary(scores),
+                "market_mode_summary": combined_market_mode_summary(scores, news),
                 "news_narrative_available": bool(numeric_from_mapping(news, "news_confidence", 0.0) > 0),
                 "news_mode_summary": news_mode_summary(news),
                 "narrative_source_mix": source_mix,
@@ -677,8 +734,10 @@ Actions実行時刻（UTC）: {generated_at_utc}
 
 ## 1. 今日の総合判断
 
-- 今日の市場モード: {narratives.market_mode_summary(scores)}
+- 今日の市場モード: {combined_market_mode_summary(scores, news)}
 - ニュースモード: {news_mode_summary(news)}
+- ニュース市場バイアス: {news.get("news_market_bias", "insufficient_data") if news else "insufficient_data"}
+- ニュース矛盾スコア: {numeric_from_mapping(news, "news_conflict_score", 0.0)}
 - ナラティブ入力: {source_mix}
 - risk_on: {score_row.get("risk_on_score", "データなし")}
 - risk_off: {score_row.get("risk_off_score", "データなし")}
@@ -762,7 +821,7 @@ def write_outputs(
         "timezone": "Asia/Tokyo",
         "date": report_date,
         "data_source": data_source,
-        "market_mode_summary": narratives.market_mode_summary(scores),
+        "market_mode_summary": combined_market_mode_summary(scores, news),
         "news_narrative_available": bool(numeric_from_mapping(news, "news_confidence", 0.0) > 0),
         "news_mode_summary": news_mode_summary(news),
         "top_news_drivers": top_news_drivers(news),
@@ -847,7 +906,7 @@ def build_ai_feedback() -> dict:
     proxy_scores = narratives.score_market_narratives(market_snapshot)
     scores = apply_news_overlay(proxy_scores, news)
     source_mix = narrative_source_mix(proxy_scores, news)
-    alignment = narratives.evaluate_signal_alignment(signals, scores)
+    alignment = apply_news_context_to_alignment(narratives.evaluate_signal_alignment(signals, scores), news)
     feedback_rows = build_feedback_rows(generated_at, generated_at_jst, generated_at_utc, report_date, signals, evaluations, scores, alignment, news, source_mix)
     reflections = recent_evaluation_reflection(evaluations, alignment)
     hypotheses = improvement_hypotheses(scores, alignment, evaluations)
