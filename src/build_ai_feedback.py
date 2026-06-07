@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 import json
 import os
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -95,6 +95,39 @@ def read_json(path: Path):
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def sanitize_for_json(value):
+    if isinstance(value, dict):
+        return {str(k): sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [sanitize_for_json(v) for v in value]
+    if isinstance(value, tuple):
+        return [sanitize_for_json(v) for v in value]
+    if isinstance(value, pd.DataFrame):
+        return sanitize_for_json(value.to_dict(orient="records"))
+    if isinstance(value, pd.Series):
+        return sanitize_for_json(value.to_dict())
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        if pd.isna(value):
+            return None
+        return value.isoformat()
+    if not isinstance(value, (str, bytes)):
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+    if hasattr(value, "item"):
+        try:
+            return sanitize_for_json(value.item())
+        except (TypeError, ValueError):
+            pass
+    return value
+
+
+def safe_json_dumps(obj) -> str:
+    return json.dumps(sanitize_for_json(obj), ensure_ascii=False, indent=2, default=str)
 
 
 def get_sheets_client():
@@ -440,7 +473,20 @@ def build_report(
         "rule_proposal_crosscheck": crosscheck,
         "safety_notes": SAFETY_NOTES,
     }
-    json_block = json.dumps(payload, ensure_ascii=False, indent=2)
+    try:
+        json_block = safe_json_dumps(payload)
+    except Exception as exc:  # noqa: BLE001 - markdown should not fail the workflow.
+        print(f"warning: ai feedback markdown json serialization fallback used: {exc}")
+        json_block = safe_json_dumps(
+            {
+                "generated_at": generated_at,
+                "date": report_date,
+                "data_source": data_source,
+                "market_mode_summary": narratives.market_mode_summary(scores),
+                "serialization_warning": "full payload omitted from markdown because it contained non-JSON values",
+                "safety_notes": SAFETY_NOTES,
+            }
+        )
 
     return f"""# Tactical Swing OS AI Feedback Report
 
@@ -513,7 +559,7 @@ def write_outputs(
 ) -> dict:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {
+    payload = sanitize_for_json({
         "generated_at": generated_at,
         "date": report_date,
         "data_source": data_source,
@@ -524,16 +570,41 @@ def write_outputs(
         "improvement_hypotheses": hypotheses,
         "rule_proposal_crosscheck": crosscheck,
         "safety_notes": SAFETY_NOTES,
-    }
+    })
     (RESULTS_DIR / "ai_feedback.csv").write_text(feedback_rows.to_csv(index=False), encoding="utf-8")
-    (RESULTS_DIR / "ai_feedback.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    report = build_report(generated_at, report_date, data_source, scores, alignment, feedback_rows, reflections, hypotheses, crosscheck)
+    (RESULTS_DIR / "ai_feedback.json").write_text(safe_json_dumps(payload), encoding="utf-8")
+    try:
+        report = build_report(generated_at, report_date, data_source, scores, alignment, feedback_rows, reflections, hypotheses, crosscheck)
+    except Exception as exc:  # noqa: BLE001 - preserve artifacts even if markdown rendering regresses.
+        print(f"warning: ai feedback markdown fallback used: {exc}")
+        report = fallback_report(generated_at, report_date, data_source, payload, exc)
     report_path = REPORTS_DIR / f"{report_date}_ai_feedback.md"
     report_path.write_text(report, encoding="utf-8")
     print(f"ai feedback report generated: {report_path}")
     print("ai feedback csv generated: results/ai_feedback.csv")
     print("ai feedback json generated: results/ai_feedback.json")
     return payload
+
+
+def fallback_report(generated_at: str, report_date: str, data_source: str, payload: dict, exc: Exception) -> str:
+    return f"""# Tactical Swing OS AI Feedback Report
+
+生成日時: {generated_at}
+対象日: {report_date}
+データソース: {data_source}
+
+warning: ai feedback markdown fallback used: {html.escape(str(exc))}
+
+## 今日の総合判断
+
+{html.escape(str(payload.get("market_mode_summary", "データなし")))}
+
+## AI_FEEDBACK_LOG JSON
+
+```json
+{safe_json_dumps(payload)}
+```
+"""
 
 
 def build_ai_feedback() -> dict:
