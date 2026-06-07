@@ -1,0 +1,29 @@
+{
+  "sources": [
+    {
+      "name": "Reuters Markets",
+      "url": "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best",
+      "category": "macro"
+    },
+    {
+      "name": "CNBC Markets",
+      "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+      "category": "equity"
+    },
+    {
+      "name": "MarketWatch Top Stories",
+      "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+      "category": "macro"
+    },
+    {
+      "name": "CoinDesk",
+      "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+      "category": "crypto"
+    },
+    {
+      "name": "Investing.com Commodities",
+      "url": "https://www.investing.com/rss/news_25.rss",
+      "category": "commodities"
+    }
+  ]
+}

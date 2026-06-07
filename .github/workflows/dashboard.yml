@@ -31,6 +31,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Fetch news for dashboard
+        run: |
+          python src/fetch_news.py --hours 48 --max-items 100 || echo "warning: news fetch failed; continuing dashboard"
+
+      - name: Classify news narratives for dashboard
+        run: |
+          python src/classify_news_narratives.py || echo "warning: news narrative classification failed; continuing dashboard"
+
       - name: Build AI feedback for dashboard
         run: |
           python src/build_ai_feedback.py || echo "warning: AI feedback generation failed; dashboard will continue without it"
@@ -55,6 +63,11 @@ jobs:
             results/ai_feedback.json
             results/ai_feedback.csv
             reports/ai_feedback/*.md
+            reports/news/*.md
+            results/news_headlines.csv
+            results/news_headlines.json
+            results/news_narrative_scores.csv
+            results/news_narrative_scores.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

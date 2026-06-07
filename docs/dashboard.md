@@ -25,6 +25,7 @@ Secretsが未設定、またはSheets読み込みに失敗した場合は、ロ�
 - `results/monthly_calibration.csv`
 - `results/reason_code_analysis.csv`
 - `results/rule_update_proposals.csv`
+- `results/news_narrative_scores.csv`
 - 対応するJSONファイル
 
 週次・月次・Reason Code・Rule Proposalは、現時点では主にローカルartifactを参照します。runner上に該当ファイルがない場合、そのセクションは「データなし」と表示されます。
@@ -54,6 +55,7 @@ GitHub Actions runner はUTC基準で動くため、そのまま表示すると�
 - `Reason Code Performance`: positive / negative / insufficient data の理由コード
 - `No Trade Reason Analysis`: NO_TRADE理由ごとの暫定評価
 - `Rule Update Proposals`: ルール更新提案一覧
+- `News Narrative Summary`: RSS/公開見出しから推定したニュースナラティブ要約
 - `Weekly / Monthly Mode`: 翌週・翌月モードとリスク上限
 - `Safety Notes`: 自動売買ではないことの確認
 
