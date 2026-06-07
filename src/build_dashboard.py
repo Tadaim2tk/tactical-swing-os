@@ -39,6 +39,7 @@ DISPLAY_LABELS = {
     "latest monthly calibration": "最新月次較正",
     "latest reason_code_analysis": "最新理由コード分析",
     "latest rule_update_proposals": "最新ルール改善候補",
+    "latest ai feedback": "最新AIフィードバック",
     "A": "Aランク",
     "B": "Bランク",
     "NO_TRADE": "見送り",
@@ -88,6 +89,10 @@ DISPLAY_LABELS = {
     "worst_asset": "最悪資産",
     "best_rank": "最良ランク",
     "worst_rank": "最悪ランク",
+    "aligned": "整合",
+    "conflicted": "衝突",
+    "insufficient_data": "データ不足",
+    "market_mode_summary": "市場モード",
 }
 VALUE_LABELS = {
     "not available": "未取得",
@@ -202,10 +207,12 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "monthly_calibration": read_csv(RESULTS_DIR / "monthly_calibration.csv"),
         "reason_code_analysis": read_csv(RESULTS_DIR / "reason_code_analysis.csv"),
         "rule_update_proposals": read_csv(RESULTS_DIR / "rule_update_proposals.csv"),
+        "ai_feedback": read_csv(RESULTS_DIR / "ai_feedback.csv"),
         "weekly_review_json": read_json(RESULTS_DIR / "weekly_review.json"),
         "monthly_calibration_json": read_json(RESULTS_DIR / "monthly_calibration.json"),
         "reason_code_analysis_json": read_json(RESULTS_DIR / "reason_code_analysis.json"),
         "rule_update_proposals_json": read_json(RESULTS_DIR / "rule_update_proposals.json"),
+        "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
     }
     return data, extras, source
 
@@ -450,6 +457,42 @@ def weekly_monthly_mode(weekly: pd.DataFrame, monthly: pd.DataFrame) -> dict:
     }
 
 
+def ai_feedback_summary(ai_feedback: pd.DataFrame, ai_feedback_json) -> dict:
+    if not ai_feedback_json and ai_feedback.empty:
+        return {
+            "available": False,
+            "latest_date": "",
+            "market_mode_summary": "AIフィードバック未取得",
+            "alignment_counts": {"aligned": 0, "conflicted": 0, "neutral": 0, "insufficient_data": 0},
+            "improvement_hypotheses": [],
+        }
+    counts = {"aligned": 0, "conflicted": 0, "neutral": 0, "insufficient_data": 0}
+    if not ai_feedback.empty and "narrative_alignment" in ai_feedback.columns:
+        raw_counts = ai_feedback["narrative_alignment"].fillna("neutral").astype(str).value_counts().to_dict()
+        counts = {key: int(raw_counts.get(key, 0)) for key in counts}
+    latest = ""
+    market_mode = "データなし"
+    hypotheses = []
+    if ai_feedback_json:
+        latest = str(ai_feedback_json.get("date", "") or "")
+        market_mode = str(ai_feedback_json.get("market_mode_summary", "データなし"))
+        hypotheses = list(ai_feedback_json.get("improvement_hypotheses", []) or [])
+        if not any(counts.values()):
+            for row in ai_feedback_json.get("signal_alignment", []) or []:
+                key = str(row.get("narrative_alignment", "neutral"))
+                if key in counts:
+                    counts[key] += 1
+    elif not ai_feedback.empty:
+        latest = latest_date(ai_feedback, ["date"])
+    return {
+        "available": True,
+        "latest_date": latest,
+        "market_mode_summary": market_mode,
+        "alignment_counts": counts,
+        "improvement_hypotheses": hypotheses[:3],
+    }
+
+
 def top_reason_codes(reason_table: pd.DataFrame) -> dict:
     if reason_table.empty:
         return {"positive": [], "negative": [], "insufficient": []}
@@ -497,8 +540,10 @@ def build_dashboard() -> tuple[dict, str]:
     evaluations = data["evaluations"]
     weekly = extras["weekly_review"]
     monthly = extras["monthly_calibration"]
+    ai_feedback = extras["ai_feedback"]
     reason_table, no_trade_table = reason_code_data(signals, evaluations, extras["reason_code_analysis"], extras["reason_code_analysis_json"])
     rule_updates = extras["rule_update_proposals"]
+    ai_summary = ai_feedback_summary(ai_feedback, extras["ai_feedback_json"])
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -514,6 +559,7 @@ def build_dashboard() -> tuple[dict, str]:
         "monthly_calibration": len(monthly),
         "reason_code_analysis": len(reason_table),
         "rule_update_proposals": len(rule_updates),
+        "ai_feedback": len(ai_feedback),
     }
     latest_dates = {
         "latest_signal_date": latest_date(signals, ["signal_date", "date"]),
@@ -523,6 +569,7 @@ def build_dashboard() -> tuple[dict, str]:
         "latest_monthly_calibration_date": latest_file_date("reports/monthly/*_monthly_calibration.md"),
         "latest_reason_code_analysis_date": latest_file_date("reports/reason_codes/*_reason_code_analysis.md"),
         "latest_rule_update_proposals_date": latest_file_date("reports/rule_updates/*_rule_update_proposals.md"),
+        "latest_ai_feedback_date": latest_file_date("reports/ai_feedback/*_ai_feedback.md") or ai_summary["latest_date"],
     }
     apply_false = True
     if not rule_updates.empty and "apply_automatically" in rule_updates.columns:
@@ -543,6 +590,7 @@ def build_dashboard() -> tuple[dict, str]:
         "asset_performance": asset_table.to_dict(orient="records"),
         "top_reason_codes": reason_tops,
         "rule_update_summary": rule_update_summary,
+        "ai_feedback_summary": ai_summary,
         "safety_notes": SAFETY_NOTES,
     })
 
@@ -561,6 +609,7 @@ def build_dashboard() -> tuple[dict, str]:
         no_trade_table=no_trade_table,
         rule_updates=rule_updates,
         mode=mode,
+        ai_summary=ai_summary,
         apply_false=apply_false,
         summary=summary,
     )
@@ -585,6 +634,7 @@ def render_html(
     no_trade_table: pd.DataFrame,
     rule_updates: pd.DataFrame,
     mode: dict,
+    ai_summary: dict,
     apply_false: bool,
     summary: dict,
 ) -> str:
@@ -606,11 +656,25 @@ def render_html(
             stat_card("latest monthly calibration", latest_dates["latest_monthly_calibration_date"] or "未取得"),
             stat_card("latest reason_code_analysis", latest_dates["latest_reason_code_analysis_date"] or "未取得"),
             stat_card("latest rule_update_proposals", latest_dates["latest_rule_update_proposals_date"] or "未取得"),
+            stat_card("latest ai feedback", latest_dates["latest_ai_feedback_date"] or "未取得"),
         ]
     )
     eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
     signal_stats = "".join(stat_card(k, v) for k, v in signal_counts.items())
     mode_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else display_optional(str(v))) for k, v in mode.items())
+    ai_counts = ai_summary.get("alignment_counts", {})
+    ai_stats = "".join(
+        [
+            stat_card("latest ai feedback", ai_summary.get("latest_date") or "未取得"),
+            stat_card("market_mode_summary", ai_summary.get("market_mode_summary", "AIフィードバック未取得")),
+            stat_card("aligned", ai_counts.get("aligned", 0)),
+            stat_card("conflicted", ai_counts.get("conflicted", 0)),
+            stat_card("neutral", ai_counts.get("neutral", 0)),
+            stat_card("insufficient_data", ai_counts.get("insufficient_data", 0)),
+        ]
+    )
+    ai_hypotheses = ai_summary.get("improvement_hypotheses") or ["AIフィードバック未取得"]
+    ai_hypothesis_list = "".join(f"<li>{html.escape(str(item))}</li>" for item in ai_hypotheses[:3])
     safe = "".join(f"<li>{html.escape(note)}</li>" for note in SAFETY_NOTES)
     return f"""<!doctype html>
 <html lang="ja">
@@ -671,6 +735,7 @@ def render_html(
     <section class="card"><h2>判断理由コード別成績</h2><h3>プラス寄与が大きい理由</h3>{table_html(top_positive, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>マイナス寄与が大きい理由</h3>{table_html(top_negative, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>データ不足</h3>{table_html(insufficient, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}</section>
     <section class="card"><h2>見送り理由分析</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "見送り理由データなし")}</section>
     <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
+    <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>週次・月次モード</h2><div class="grid">{mode_stats}</div></section>
     <section class="card"><h2>安全上の注意</h2><p class="notice">{html.escape(DASHBOARD_DESCRIPTION)}</p><ul>{safe}</ul></section>
   </main>

@@ -1,0 +1,43 @@
+name: Tactical Swing OS AI feedback
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 22:00 UTC is 07:00 JST.
+    - cron: "0 22 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  ai-feedback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build AI feedback
+        run: python src/build_ai_feedback.py
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+      - name: Upload AI feedback artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-ai-feedback-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            reports/ai_feedback/*.md
+            results/ai_feedback.csv
+            results/ai_feedback.json
