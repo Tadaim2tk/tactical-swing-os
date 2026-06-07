@@ -236,6 +236,38 @@ def latest_evaluation_lookup(evaluations: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def dedupe_by_signal_id(df: pd.DataFrame, label: str = "data") -> pd.DataFrame:
+    if df.empty or "signal_id" not in df.columns:
+        return df.copy()
+
+    before = len(df)
+    out = df[df["signal_id"].notna()].copy()
+    out["signal_id"] = out["signal_id"].astype(str).str.strip()
+    out = out[~out["signal_id"].str.lower().isin(["", "nan", "nat", "none"])]
+
+    if out.empty:
+        return out
+
+    duplicate_rows = int(out.duplicated(subset=["signal_id"], keep=False).sum())
+    out["_row_order"] = range(len(out))
+    sort_candidates = ["evaluation_date", "date", "generated_at"]
+    sort_col = next((col for col in sort_candidates if col in out.columns), "")
+    if sort_col:
+        out["_sort_key"] = pd.to_datetime(out[sort_col], errors="coerce", utc=True).dt.tz_localize(None)
+        out["_has_sort_key"] = out["_sort_key"].notna()
+        out = out.sort_values(["_has_sort_key", "_sort_key", "_row_order"])
+    else:
+        out = out.sort_values("_row_order")
+
+    out = out.drop_duplicates(subset=["signal_id"], keep="last")
+    out = out.drop(columns=["_row_order", "_sort_key", "_has_sort_key"], errors="ignore")
+
+    if duplicate_rows:
+        print(f"warning: {label} duplicate signal_id rows detected; using latest rows")
+        print(f"warning: deduped {label} rows from {before} to {len(out)}")
+    return out
+
+
 def build_feedback_rows(
     generated_at: str,
     report_date: str,
@@ -324,7 +356,12 @@ def recent_evaluation_reflection(evaluations: pd.DataFrame, alignment: pd.DataFr
     if "outcome" in df.columns:
         df = df[df["outcome"].astype(str).isin(interesting) | df.get("missed_opportunity", pd.Series(False, index=df.index)).astype(str).str.lower().isin(["true", "1", "yes"])]
     rows = []
-    align_lookup = alignment.set_index("signal_id").to_dict(orient="index") if not alignment.empty and "signal_id" in alignment.columns else {}
+    deduped_alignment = dedupe_by_signal_id(alignment, "alignment")
+    align_lookup = (
+        deduped_alignment.set_index("signal_id").to_dict(orient="index")
+        if not deduped_alignment.empty and "signal_id" in deduped_alignment.columns
+        else {}
+    )
     for _, row in df.head(8).iterrows():
         signal_id = row.get("signal_id", "")
         outcome = row.get("outcome", "")
