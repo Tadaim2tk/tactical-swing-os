@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "description": "Rule-based narrative proxy schema for Tactical Swing OS AI Feedback Loop.",
+  "score_range": {
+    "min": 0,
+    "max": 100
+  },
+  "alignment_score_range": {
+    "min": -100,
+    "max": 100
+  },
+  "narrative_scores": [
+    "risk_on_score",
+    "risk_off_score",
+    "dollar_strength_score",
+    "rate_pressure_score",
+    "gold_safe_haven_score",
+    "oil_supply_risk_proxy_score",
+    "crypto_liquidity_score",
+    "equity_momentum_score",
+    "volatility_stress_score",
+    "narrative_confidence"
+  ],
+  "alignment_labels": [
+    "aligned",
+    "conflicted",
+    "neutral",
+    "insufficient_data"
+  ],
+  "data_sources": {
+    "google_sheets": [
+      "MARKET_SNAPSHOT",
+      "SIGNALS",
+      "EVALUATIONS"
+    ],
+    "local_fallback": [
+      "results/market_snapshot.csv",
+      "results/signals.csv",
+      "results/evaluations.csv",
+      "results/reason_code_analysis.csv",
+      "results/rule_update_proposals.csv",
+      "results/weekly_review.csv",
+      "results/monthly_calibration.csv",
+      "results/dashboard_summary.json"
+    ]
+  },
+  "safety": {
+    "apply_automatically": false,
+    "writes_google_sheets": false,
+    "updates_weights_json": false,
+    "updates_generate_signal_py": false,
+    "places_orders": false
+  }
+}

@@ -15,3 +15,6 @@ results/rule_update_proposals.csv
 results/rule_update_proposals.json
 reports/dashboard/index.html
 reports/dashboard/dashboard_summary.json
+reports/ai_feedback/*.md
+results/ai_feedback.csv
+results/ai_feedback.json
