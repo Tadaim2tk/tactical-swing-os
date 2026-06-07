@@ -41,6 +41,16 @@ DISPLAY_LABELS = {
     "latest reason_code_analysis": "最新理由コード分析",
     "latest rule_update_proposals": "最新ルール改善候補",
     "latest ai feedback": "最新AIフィードバック",
+    "latest_news_fetched_at": "最新ニュース取得日時",
+    "headline_count": "headline件数",
+    "news_confidence": "ニュース信頼度",
+    "risk_on_news_score": "ニュースRisk On",
+    "risk_off_news_score": "ニュースRisk Off",
+    "dollar_strength_news_score": "ニュースドル高",
+    "rate_pressure_news_score": "ニュース金利圧力",
+    "geopolitical_risk_news_score": "ニュース地政学リスク",
+    "oil_supply_risk_news_score": "ニュース原油供給リスク",
+    "crypto_liquidity_news_score": "ニュース暗号資産流動性",
     "A": "Aランク",
     "B": "Bランク",
     "NO_TRADE": "見送り",
@@ -209,11 +219,13 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "reason_code_analysis": read_csv(RESULTS_DIR / "reason_code_analysis.csv"),
         "rule_update_proposals": read_csv(RESULTS_DIR / "rule_update_proposals.csv"),
         "ai_feedback": read_csv(RESULTS_DIR / "ai_feedback.csv"),
+        "news_narrative_scores": read_csv(RESULTS_DIR / "news_narrative_scores.csv"),
         "weekly_review_json": read_json(RESULTS_DIR / "weekly_review.json"),
         "monthly_calibration_json": read_json(RESULTS_DIR / "monthly_calibration.json"),
         "reason_code_analysis_json": read_json(RESULTS_DIR / "reason_code_analysis.json"),
         "rule_update_proposals_json": read_json(RESULTS_DIR / "rule_update_proposals.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
+        "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
     }
     return data, extras, source
 
@@ -244,6 +256,11 @@ def fmt_num(value) -> str:
     if pd.isna(value):
         return ""
     return f"{float(value):.2f}"
+
+
+def numeric_or(value, default: float = 0.0) -> float:
+    number = pd.to_numeric(value, errors="coerce")
+    return float(number) if not pd.isna(number) else default
 
 
 def display_label(label: str) -> str:
@@ -494,6 +511,60 @@ def ai_feedback_summary(ai_feedback: pd.DataFrame, ai_feedback_json) -> dict:
     }
 
 
+def news_narrative_summary(news_csv: pd.DataFrame, news_json) -> dict:
+    if isinstance(news_json, dict) and news_json:
+        return {
+            "available": True,
+            "latest_news_fetched_at": news_json.get("generated_at_jst", ""),
+            "headline_count": int(numeric_or(news_json.get("headline_count", 0), 0)),
+            "news_confidence": numeric_or(news_json.get("news_confidence", 0), 0.0),
+            "risk_on_news_score": numeric_or(news_json.get("risk_on_news_score", 0), 0.0),
+            "risk_off_news_score": numeric_or(news_json.get("risk_off_news_score", 0), 0.0),
+            "dollar_strength_news_score": numeric_or(news_json.get("dollar_strength_news_score", 0), 0.0),
+            "rate_pressure_news_score": numeric_or(news_json.get("rate_pressure_news_score", 0), 0.0),
+            "geopolitical_risk_news_score": numeric_or(news_json.get("geopolitical_risk_news_score", 0), 0.0),
+            "oil_supply_risk_news_score": numeric_or(news_json.get("oil_supply_risk_news_score", 0), 0.0),
+            "crypto_liquidity_news_score": numeric_or(news_json.get("crypto_liquidity_news_score", 0), 0.0),
+            "top_news_drivers": list(news_json.get("top_news_drivers", []) or [])[:5],
+        }
+    if not news_csv.empty:
+        row = news_csv.iloc[-1].to_dict()
+        drivers = row.get("top_news_drivers", [])
+        if isinstance(drivers, str):
+            try:
+                drivers = json.loads(drivers)
+            except json.JSONDecodeError:
+                drivers = []
+        return {
+            "available": True,
+            "latest_news_fetched_at": row.get("generated_at_jst", ""),
+            "headline_count": int(numeric_or(row.get("headline_count", 0), 0)),
+            "news_confidence": numeric_or(row.get("news_confidence", 0), 0.0),
+            "risk_on_news_score": numeric_or(row.get("risk_on_news_score", 0), 0.0),
+            "risk_off_news_score": numeric_or(row.get("risk_off_news_score", 0), 0.0),
+            "dollar_strength_news_score": numeric_or(row.get("dollar_strength_news_score", 0), 0.0),
+            "rate_pressure_news_score": numeric_or(row.get("rate_pressure_news_score", 0), 0.0),
+            "geopolitical_risk_news_score": numeric_or(row.get("geopolitical_risk_news_score", 0), 0.0),
+            "oil_supply_risk_news_score": numeric_or(row.get("oil_supply_risk_news_score", 0), 0.0),
+            "crypto_liquidity_news_score": numeric_or(row.get("crypto_liquidity_news_score", 0), 0.0),
+            "top_news_drivers": drivers[:5] if isinstance(drivers, list) else [],
+        }
+    return {
+        "available": False,
+        "latest_news_fetched_at": "",
+        "headline_count": 0,
+        "news_confidence": 0.0,
+        "risk_on_news_score": 0.0,
+        "risk_off_news_score": 0.0,
+        "dollar_strength_news_score": 0.0,
+        "rate_pressure_news_score": 0.0,
+        "geopolitical_risk_news_score": 0.0,
+        "oil_supply_risk_news_score": 0.0,
+        "crypto_liquidity_news_score": 0.0,
+        "top_news_drivers": [],
+    }
+
+
 def top_reason_codes(reason_table: pd.DataFrame) -> dict:
     if reason_table.empty:
         return {"positive": [], "negative": [], "insufficient": []}
@@ -542,6 +613,7 @@ def build_dashboard() -> tuple[dict, str]:
     weekly = extras["weekly_review"]
     monthly = extras["monthly_calibration"]
     ai_feedback = extras["ai_feedback"]
+    news_summary = news_narrative_summary(extras["news_narrative_scores"], extras["news_narrative_scores_json"])
     reason_table, no_trade_table = reason_code_data(signals, evaluations, extras["reason_code_analysis"], extras["reason_code_analysis_json"])
     rule_updates = extras["rule_update_proposals"]
     ai_summary = ai_feedback_summary(ai_feedback, extras["ai_feedback_json"])
@@ -564,6 +636,7 @@ def build_dashboard() -> tuple[dict, str]:
         "reason_code_analysis": len(reason_table),
         "rule_update_proposals": len(rule_updates),
         "ai_feedback": len(ai_feedback),
+        "news_narrative_scores": 1 if news_summary.get("available") else 0,
     }
     latest_signal_date = latest_date(signals, ["signal_date", "date"])
     latest_evaluation_date = latest_date(evaluations, ["evaluation_date", "hit_date", "signal_date"])
@@ -602,6 +675,7 @@ def build_dashboard() -> tuple[dict, str]:
         "top_reason_codes": reason_tops,
         "rule_update_summary": rule_update_summary,
         "ai_feedback_summary": ai_summary,
+        "news_narrative_summary": news_summary,
         "safety_notes": SAFETY_NOTES,
     })
 
@@ -624,6 +698,7 @@ def build_dashboard() -> tuple[dict, str]:
         rule_updates=rule_updates,
         mode=mode,
         ai_summary=ai_summary,
+        news_summary=news_summary,
         apply_false=apply_false,
         summary=summary,
     )
@@ -652,6 +727,7 @@ def render_html(
     rule_updates: pd.DataFrame,
     mode: dict,
     ai_summary: dict,
+    news_summary: dict,
     apply_false: bool,
     summary: dict,
 ) -> str:
@@ -692,6 +768,24 @@ def render_html(
     )
     ai_hypotheses = ai_summary.get("improvement_hypotheses") or ["AIフィードバック未取得"]
     ai_hypothesis_list = "".join(f"<li>{html.escape(str(item))}</li>" for item in ai_hypotheses[:3])
+    news_stats = "".join(
+        [
+            stat_card("latest_news_fetched_at", news_summary.get("latest_news_fetched_at") or "ニュースナラティブ未取得"),
+            stat_card("headline_count", news_summary.get("headline_count", 0)),
+            stat_card("news_confidence", fmt_num(news_summary.get("news_confidence", 0))),
+            stat_card("risk_on_news_score", fmt_num(news_summary.get("risk_on_news_score", 0))),
+            stat_card("risk_off_news_score", fmt_num(news_summary.get("risk_off_news_score", 0))),
+            stat_card("dollar_strength_news_score", fmt_num(news_summary.get("dollar_strength_news_score", 0))),
+            stat_card("rate_pressure_news_score", fmt_num(news_summary.get("rate_pressure_news_score", 0))),
+            stat_card("geopolitical_risk_news_score", fmt_num(news_summary.get("geopolitical_risk_news_score", 0))),
+            stat_card("oil_supply_risk_news_score", fmt_num(news_summary.get("oil_supply_risk_news_score", 0))),
+            stat_card("crypto_liquidity_news_score", fmt_num(news_summary.get("crypto_liquidity_news_score", 0))),
+        ]
+    )
+    news_drivers = news_summary.get("top_news_drivers") or []
+    news_driver_list = "".join(f"<li>{html.escape(str(item.get('title', item)))}</li>" if isinstance(item, dict) else f"<li>{html.escape(str(item))}</li>" for item in news_drivers[:5])
+    if not news_driver_list:
+        news_driver_list = "<li>ニュースナラティブ未取得</li>"
     safe = "".join(f"<li>{html.escape(note)}</li>" for note in SAFETY_NOTES)
     return f"""<!doctype html>
 <html lang="ja">
@@ -754,6 +848,7 @@ def render_html(
     <section class="card"><h2>判断理由コード別成績</h2><h3>プラス寄与が大きい理由</h3>{table_html(top_positive, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>マイナス寄与が大きい理由</h3>{table_html(top_negative, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>データ不足</h3>{table_html(insufficient, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}</section>
     <section class="card"><h2>見送り理由分析</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "見送り理由データなし")}</section>
     <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
+    <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>週次・月次モード</h2><div class="grid">{mode_stats}</div></section>
     <section class="card"><h2>安全上の注意</h2><p class="notice">{html.escape(DASHBOARD_DESCRIPTION)}</p><ul>{safe}</ul></section>

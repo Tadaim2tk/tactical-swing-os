@@ -25,8 +25,10 @@ LOCAL_EXTRA_FILES = {
     "rule_update_proposals": RESULTS_DIR / "rule_update_proposals.csv",
     "weekly_review": RESULTS_DIR / "weekly_review.csv",
     "monthly_calibration": RESULTS_DIR / "monthly_calibration.csv",
+    "news_narrative_scores": RESULTS_DIR / "news_narrative_scores.csv",
     "dashboard_summary": RESULTS_DIR / "dashboard_summary.json",
     "rule_update_proposals_json": RESULTS_DIR / "rule_update_proposals.json",
+    "news_narrative_scores_json": RESULTS_DIR / "news_narrative_scores.json",
 }
 AI_FEEDBACK_COLUMNS = [
     "generated_at",
@@ -49,6 +51,8 @@ AI_FEEDBACK_COLUMNS = [
     "crypto_liquidity_score",
     "volatility_stress_score",
     "narrative_confidence",
+    "news_confidence",
+    "narrative_source_mix",
     "latest_outcome",
     "latest_r_multiple",
     "feedback_type",
@@ -205,6 +209,113 @@ def latest_date(signals: pd.DataFrame, evaluations: pd.DataFrame) -> str:
     return max(candidates).strftime("%Y-%m-%d")
 
 
+def numeric_from_mapping(row: dict, key: str, default: float = 0.0) -> float:
+    value = pd.to_numeric(row.get(key, default), errors="coerce")
+    return float(value) if not pd.isna(value) else default
+
+
+def numeric_value(value, default: float = 50.0) -> float:
+    number = pd.to_numeric(value, errors="coerce")
+    return float(number) if not pd.isna(number) else default
+
+
+def news_payload(extras: dict) -> dict:
+    news_json = extras.get("news_narrative_scores_json")
+    if isinstance(news_json, dict):
+        return news_json
+    news_csv = extras.get("news_narrative_scores", pd.DataFrame())
+    if isinstance(news_csv, pd.DataFrame) and not news_csv.empty:
+        row = news_csv.iloc[-1].to_dict()
+        drivers = row.get("top_news_drivers", [])
+        if isinstance(drivers, str):
+            try:
+                drivers = json.loads(drivers)
+            except json.JSONDecodeError:
+                drivers = []
+        row["top_news_drivers"] = drivers
+        return row
+    return {}
+
+
+def narrative_source_mix(scores: pd.DataFrame, news: dict) -> str:
+    market_conf = float(scores.iloc[0].get("narrative_confidence", 0)) if not scores.empty else 0.0
+    news_conf = numeric_from_mapping(news, "news_confidence", 0.0)
+    if market_conf >= 45 and news_conf > 0:
+        return "market_proxy_plus_news"
+    if market_conf >= 45:
+        return "market_proxy_only"
+    if news_conf > 0:
+        return "news_only"
+    return "insufficient_data"
+
+
+def news_mode_summary(news: dict) -> str:
+    if not news or numeric_from_mapping(news, "news_confidence", 0.0) <= 0:
+        return "ニュースナラティブ未取得"
+    summary = str(news.get("news_mode_summary", "") or "")
+    if summary:
+        return summary
+    risk_on = numeric_from_mapping(news, "risk_on_news_score")
+    risk_off = numeric_from_mapping(news, "risk_off_news_score")
+    parts = ["ニュースはリスクオン寄り" if risk_on > risk_off else "ニュースはリスクオフ寄り" if risk_off > risk_on else "ニュースは中立"]
+    if numeric_from_mapping(news, "geopolitical_risk_news_score") >= 35:
+        parts.append("地政学リスク材料あり")
+    if numeric_from_mapping(news, "dollar_strength_news_score") >= 35:
+        parts.append("ドル高材料あり")
+    return " / ".join(parts)
+
+
+def top_news_drivers(news: dict, limit: int = 5) -> list[dict]:
+    drivers = news.get("top_news_drivers", []) if isinstance(news, dict) else []
+    if isinstance(drivers, str):
+        try:
+            drivers = json.loads(drivers)
+        except json.JSONDecodeError:
+            drivers = []
+    return drivers[:limit] if isinstance(drivers, list) else []
+
+
+def blend(proxy: float, news_value: float, weight: float = 0.3) -> float:
+    return round(max(0.0, min(100.0, proxy * (1.0 - weight) + news_value * weight)), 2)
+
+
+def apply_news_overlay(scores: pd.DataFrame, news: dict) -> pd.DataFrame:
+    if scores.empty or not news or numeric_from_mapping(news, "news_confidence", 0.0) <= 0:
+        return scores.copy()
+    out = scores.copy()
+    idx = out.index[0]
+    mappings = {
+        "risk_on_score": "risk_on_news_score",
+        "risk_off_score": "risk_off_news_score",
+        "dollar_strength_score": "dollar_strength_news_score",
+        "rate_pressure_score": "rate_pressure_news_score",
+        "crypto_liquidity_score": "crypto_liquidity_news_score",
+        "equity_momentum_score": "equity_momentum_news_score",
+    }
+    for proxy_col, news_col in mappings.items():
+        if proxy_col in out.columns:
+            out.at[idx, proxy_col] = blend(numeric_value(out.at[idx, proxy_col]), numeric_from_mapping(news, news_col))
+    if "gold_safe_haven_score" in out.columns:
+        news_gold = max(numeric_from_mapping(news, "gold_safe_haven_news_score"), numeric_from_mapping(news, "geopolitical_risk_news_score") * 0.8)
+        out.at[idx, "gold_safe_haven_score"] = blend(numeric_value(out.at[idx, "gold_safe_haven_score"]), news_gold)
+    if "oil_supply_risk_proxy_score" in out.columns:
+        out.at[idx, "oil_supply_risk_proxy_score"] = blend(numeric_value(out.at[idx, "oil_supply_risk_proxy_score"]), numeric_from_mapping(news, "oil_supply_risk_news_score"))
+    if "narrative_confidence" in out.columns:
+        proxy_conf = numeric_value(out.at[idx, "narrative_confidence"], 0.0)
+        news_conf = numeric_from_mapping(news, "news_confidence")
+        if proxy_conf < 45 <= news_conf:
+            out.at[idx, "narrative_confidence"] = round(min(100.0, max(45.0, news_conf * 0.8)), 2)
+        else:
+            out.at[idx, "narrative_confidence"] = round(max(proxy_conf, min(100.0, proxy_conf * 0.85 + news_conf * 0.15)), 2)
+    for key, value in news.items():
+        if key.endswith("_news_score") or key in {"news_confidence", "headline_count"}:
+            out.at[idx, key] = value
+    out.at[idx, "news_narrative_available"] = True
+    out.at[idx, "news_mode_summary"] = news_mode_summary(news)
+    out.at[idx, "narrative_source_mix"] = narrative_source_mix(scores, news)
+    return out
+
+
 def latest_signals(signals: pd.DataFrame) -> pd.DataFrame:
     if signals.empty:
         return signals.copy()
@@ -280,7 +391,10 @@ def build_feedback_rows(
     evaluations: pd.DataFrame,
     narrative_scores: pd.DataFrame,
     alignment: pd.DataFrame,
+    news: dict | None = None,
+    source_mix: str = "market_proxy_only",
 ) -> pd.DataFrame:
+    news = news or {}
     latest_eval = latest_evaluation_lookup(evaluations)
     score = narrative_scores.iloc[0].to_dict() if not narrative_scores.empty else {}
     rows = alignment.copy()
@@ -332,6 +446,8 @@ def build_feedback_rows(
     rows["feedback_summary"] = rows.get("narrative_comment", "")
     rows["proposed_next_action"] = rows.apply(proposed_action_for_row, axis=1)
     rows["apply_automatically"] = False
+    rows["news_confidence"] = numeric_from_mapping(news, "news_confidence", 0.0)
+    rows["narrative_source_mix"] = source_mix
     for col in AI_FEEDBACK_COLUMNS:
         if col not in rows.columns:
             rows[col] = ""
@@ -481,9 +597,12 @@ def build_report(
     crosscheck: list[dict],
     generated_at_jst: str | None = None,
     generated_at_utc: str | None = None,
+    news: dict | None = None,
+    source_mix: str = "market_proxy_only",
 ) -> str:
     generated_at_jst = generated_at_jst or generated_at
     generated_at_utc = generated_at_utc or ""
+    news = news or {}
     score_row = scores.iloc[0].to_dict() if not scores.empty else {}
     counts = narratives.alignment_counts(alignment)
     score_cols = [
@@ -517,6 +636,10 @@ def build_report(
         "date": report_date,
         "data_source": data_source,
         "market_mode_summary": narratives.market_mode_summary(scores),
+        "news_narrative_available": bool(numeric_from_mapping(news, "news_confidence", 0.0) > 0),
+        "news_mode_summary": news_mode_summary(news),
+        "top_news_drivers": top_news_drivers(news),
+        "narrative_source_mix": source_mix,
         "narrative_scores": scores.to_dict(orient="records"),
         "signal_alignment": alignment.to_dict(orient="records"),
         "recent_evaluation_reflection": reflections,
@@ -537,6 +660,9 @@ def build_report(
                 "date": report_date,
                 "data_source": data_source,
                 "market_mode_summary": narratives.market_mode_summary(scores),
+                "news_narrative_available": bool(numeric_from_mapping(news, "news_confidence", 0.0) > 0),
+                "news_mode_summary": news_mode_summary(news),
+                "narrative_source_mix": source_mix,
                 "serialization_warning": "full payload omitted from markdown because it contained non-JSON values",
                 "safety_notes": SAFETY_NOTES,
             }
@@ -552,11 +678,14 @@ Actions実行時刻（UTC）: {generated_at_utc}
 ## 1. 今日の総合判断
 
 - 今日の市場モード: {narratives.market_mode_summary(scores)}
+- ニュースモード: {news_mode_summary(news)}
+- ナラティブ入力: {source_mix}
 - risk_on: {score_row.get("risk_on_score", "データなし")}
 - risk_off: {score_row.get("risk_off_score", "データなし")}
 - dollar: {score_row.get("dollar_strength_score", "データなし")}
 - rate: {score_row.get("rate_pressure_score", "データなし")}
 - volatility: {score_row.get("volatility_stress_score", "データなし")}
+- news_confidence: {numeric_from_mapping(news, "news_confidence", 0.0)}
 - シグナル整合性: aligned={counts["aligned"]}, conflicted={counts["conflicted"]}, neutral={counts["neutral"]}, insufficient_data={counts["insufficient_data"]}
 
 ## 2. 資産別ナラティブスコア
@@ -579,21 +708,28 @@ Actions実行時刻（UTC）: {generated_at_utc}
 
 {markdown_table(crosscheck, ["proposal_id", "target_name", "proposal_strength", "proposed_change", "narrative_crosscheck", "apply_automatically"])}
 
-## 7. 今日の注意点
+## 7. ニュースナラティブ補助入力
 
+- news_narrative_available: {bool(numeric_from_mapping(news, "news_confidence", 0.0) > 0)}
+- news_mode_summary: {news_mode_summary(news)}
+- top_news_drivers: {", ".join(str(item.get("title", item)) for item in top_news_drivers(news, 5)) or "ニュースドライバーなし"}
+
+## 8. 今日の注意点
+
+- ニュース分類はRSS見出しのキーワード分類であり、本文読解やLLM評価ではありません。
 - データ不足の可能性があります。
 - 評価件数不足の場合、結論は仮説扱いです。
 - LLM未使用のためニュース本文は未評価です。
 - 実売買には使いません。
 - 自動発注、weights.json自動更新、generate_signal.py自動変更は行いません。
 
-## 8. AI_FEEDBACK_LOG CSV
+## 9. AI_FEEDBACK_LOG CSV
 
 ```csv
 {csv_block}
 ```
 
-## 9. AI_FEEDBACK_LOG JSON
+## 10. AI_FEEDBACK_LOG JSON
 
 ```json
 {json_block}
@@ -613,7 +749,10 @@ def write_outputs(
     reflections: list[dict],
     hypotheses: list[str],
     crosscheck: list[dict],
+    news: dict | None = None,
+    source_mix: str = "market_proxy_only",
 ) -> dict:
+    news = news or {}
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     payload = sanitize_for_json({
@@ -624,6 +763,10 @@ def write_outputs(
         "date": report_date,
         "data_source": data_source,
         "market_mode_summary": narratives.market_mode_summary(scores),
+        "news_narrative_available": bool(numeric_from_mapping(news, "news_confidence", 0.0) > 0),
+        "news_mode_summary": news_mode_summary(news),
+        "top_news_drivers": top_news_drivers(news),
+        "narrative_source_mix": source_mix,
         "narrative_scores": scores.to_dict(orient="records"),
         "signal_alignment": alignment.to_dict(orient="records"),
         "recent_evaluation_reflection": reflections,
@@ -646,6 +789,8 @@ def write_outputs(
             crosscheck,
             generated_at_jst=generated_at_jst,
             generated_at_utc=generated_at_utc,
+            news=news,
+            source_mix=source_mix,
         )
     except Exception as exc:  # noqa: BLE001 - preserve artifacts even if markdown rendering regresses.
         print(f"warning: ai feedback markdown fallback used: {exc}")
@@ -694,13 +839,16 @@ def build_ai_feedback() -> dict:
     generated_at_jst = format_jst(generated_dt_utc)
     generated_at_utc = format_utc(generated_dt_utc)
     data, extras, source = load_input_data()
+    news = news_payload(extras)
     market_snapshot = data.get("market_snapshot", pd.DataFrame())
     signals = latest_signals(data.get("signals", pd.DataFrame()))
     evaluations = data.get("evaluations", pd.DataFrame())
     report_date = latest_date(signals, evaluations)
-    scores = narratives.score_market_narratives(market_snapshot)
+    proxy_scores = narratives.score_market_narratives(market_snapshot)
+    scores = apply_news_overlay(proxy_scores, news)
+    source_mix = narrative_source_mix(proxy_scores, news)
     alignment = narratives.evaluate_signal_alignment(signals, scores)
-    feedback_rows = build_feedback_rows(generated_at, generated_at_jst, generated_at_utc, report_date, signals, evaluations, scores, alignment)
+    feedback_rows = build_feedback_rows(generated_at, generated_at_jst, generated_at_utc, report_date, signals, evaluations, scores, alignment, news, source_mix)
     reflections = recent_evaluation_reflection(evaluations, alignment)
     hypotheses = improvement_hypotheses(scores, alignment, evaluations)
     rule_updates = extras.get("rule_update_proposals", pd.DataFrame())
@@ -717,6 +865,8 @@ def build_ai_feedback() -> dict:
         reflections,
         hypotheses,
         crosscheck,
+        news=news,
+        source_mix=source_mix,
     )
 
 
