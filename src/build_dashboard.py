@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 import analyze_reason_codes as arc
+from time_utils import format_jst, format_utc, now_utc
 
 
 RESULTS_DIR = Path("results")
@@ -550,7 +551,10 @@ def build_dashboard() -> tuple[dict, str]:
     asset_table = asset_performance(signals, evaluations)
     mode = weekly_monthly_mode(weekly, monthly)
     reason_tops = top_reason_codes(reason_table)
-    generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    generated_dt_utc = now_utc()
+    generated_at_jst = format_jst(generated_dt_utc)
+    generated_at_utc = format_utc(generated_dt_utc)
+    generated = generated_at_jst
     row_counts = {
         "market_snapshot": len(snapshot),
         "signals": len(signals),
@@ -561,9 +565,12 @@ def build_dashboard() -> tuple[dict, str]:
         "rule_update_proposals": len(rule_updates),
         "ai_feedback": len(ai_feedback),
     }
+    latest_signal_date = latest_date(signals, ["signal_date", "date"])
+    latest_evaluation_date = latest_date(evaluations, ["evaluation_date", "hit_date", "signal_date"])
+    data_reference_date = latest_signal_date or latest_evaluation_date or latest_date(snapshot, ["date", "timestamp", "run_ts"])
     latest_dates = {
-        "latest_signal_date": latest_date(signals, ["signal_date", "date"]),
-        "latest_evaluation_date": latest_date(evaluations, ["evaluation_date", "hit_date", "signal_date"]),
+        "latest_signal_date": latest_signal_date,
+        "latest_evaluation_date": latest_evaluation_date,
         "latest_daily_report_date": latest_file_date("reports/*.md"),
         "latest_weekly_review_date": latest_file_date("reports/weekly/*_weekly_review.md"),
         "latest_monthly_calibration_date": latest_file_date("reports/monthly/*_monthly_calibration.md"),
@@ -581,6 +588,10 @@ def build_dashboard() -> tuple[dict, str]:
     }
     summary = json_safe({
         "generated_at": generated,
+        "generated_at_jst": generated_at_jst,
+        "generated_at_utc": generated_at_utc,
+        "timezone": "Asia/Tokyo",
+        "data_reference_date": data_reference_date,
         "display_language": "ja",
         "data_source": source,
         "row_counts": row_counts,
@@ -598,6 +609,9 @@ def build_dashboard() -> tuple[dict, str]:
     (REPORTS_DIR / "dashboard_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     html_text = render_html(
         generated=generated,
+        generated_at_jst=generated_at_jst,
+        generated_at_utc=generated_at_utc,
+        data_reference_date=data_reference_date,
         source=source,
         latest_dates=latest_dates,
         row_counts=row_counts,
@@ -623,6 +637,9 @@ def build_dashboard() -> tuple[dict, str]:
 def render_html(
     *,
     generated: str,
+    generated_at_jst: str,
+    generated_at_utc: str,
+    data_reference_date: str,
     source: str,
     latest_dates: dict,
     row_counts: dict,
@@ -720,7 +737,9 @@ def render_html(
   <header>
     <h1>Tactical Swing OS ダッシュボード</h1>
     <div class="meta">
-      <span>生成日時: {html.escape(generated)}</span>
+      <span>生成日時（JST）: {html.escape(generated_at_jst or generated)}</span>
+      <span>Actions実行時刻（UTC）: {html.escape(generated_at_utc)}</span>
+      <span>データ基準日: {html.escape(display_optional(data_reference_date))}</span>
       <span>データソース: {html.escape(display_source(source))}</span>
       <span>最新シグナル日: {html.escape(display_optional(latest_dates["latest_signal_date"]))}</span>
       <span>最新評価日: {html.escape(display_optional(latest_dates["latest_evaluation_date"]))}</span>

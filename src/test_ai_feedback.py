@@ -8,6 +8,7 @@ import pandas as pd
 
 import build_ai_feedback
 import score_narratives as narratives
+from time_utils import UTC, format_jst, format_utc
 
 
 def market(rows):
@@ -115,6 +116,14 @@ def test_insufficient_data_and_no_auto_apply():
     scores = narratives.score_market_narratives(pd.DataFrame())
     aligned = narratives.evaluate_signal_alignment(signals("BTC", "LONG"), scores)
     assert aligned.iloc[0]["narrative_alignment"] == "insufficient_data"
+
+
+def test_jst_time_display_is_utc_plus_nine_hours():
+    utc_dt = datetime(2026, 6, 7, 11, 49, 53, tzinfo=UTC)
+
+    assert format_utc(utc_dt) == "2026-06-07 11:49:53 UTC"
+    assert format_jst(utc_dt) == "2026-06-07 20:49:53 JST"
+    assert "JST" in format_jst(utc_dt)
 
 
 def test_safe_json_dumps_handles_pandas_numpy_datetime_and_nan():

@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 import score_narratives as narratives
+from time_utils import format_jst, format_utc, legacy_utc_iso, now_utc
 
 
 RESULTS_DIR = Path("results")
@@ -29,6 +30,8 @@ LOCAL_EXTRA_FILES = {
 }
 AI_FEEDBACK_COLUMNS = [
     "generated_at",
+    "generated_at_jst",
+    "generated_at_utc",
     "date",
     "asset",
     "signal_id",
@@ -270,6 +273,8 @@ def dedupe_by_signal_id(df: pd.DataFrame, label: str = "data") -> pd.DataFrame:
 
 def build_feedback_rows(
     generated_at: str,
+    generated_at_jst: str,
+    generated_at_utc: str,
     report_date: str,
     signals: pd.DataFrame,
     evaluations: pd.DataFrame,
@@ -302,6 +307,8 @@ def build_feedback_rows(
         rows["latest_r_multiple"] = ""
 
     rows["generated_at"] = generated_at
+    rows["generated_at_jst"] = generated_at_jst
+    rows["generated_at_utc"] = generated_at_utc
     rows["date"] = report_date
     for col in [
         "risk_on_score",
@@ -472,7 +479,11 @@ def build_report(
     reflections: list[dict],
     hypotheses: list[str],
     crosscheck: list[dict],
+    generated_at_jst: str | None = None,
+    generated_at_utc: str | None = None,
 ) -> str:
+    generated_at_jst = generated_at_jst or generated_at
+    generated_at_utc = generated_at_utc or ""
     score_row = scores.iloc[0].to_dict() if not scores.empty else {}
     counts = narratives.alignment_counts(alignment)
     score_cols = [
@@ -500,6 +511,9 @@ def build_report(
     csv_block = feedback_rows.to_csv(index=False)
     payload = {
         "generated_at": generated_at,
+        "generated_at_jst": generated_at_jst,
+        "generated_at_utc": generated_at_utc,
+        "timezone": "Asia/Tokyo",
         "date": report_date,
         "data_source": data_source,
         "market_mode_summary": narratives.market_mode_summary(scores),
@@ -517,6 +531,9 @@ def build_report(
         json_block = safe_json_dumps(
             {
                 "generated_at": generated_at,
+                "generated_at_jst": generated_at_jst,
+                "generated_at_utc": generated_at_utc,
+                "timezone": "Asia/Tokyo",
                 "date": report_date,
                 "data_source": data_source,
                 "market_mode_summary": narratives.market_mode_summary(scores),
@@ -527,7 +544,8 @@ def build_report(
 
     return f"""# Tactical Swing OS AI Feedback Report
 
-生成日時: {generated_at}
+生成日時（JST）: {generated_at_jst}
+Actions実行時刻（UTC）: {generated_at_utc}
 対象日: {report_date}
 データソース: {data_source}
 
@@ -585,6 +603,8 @@ def build_report(
 
 def write_outputs(
     generated_at: str,
+    generated_at_jst: str,
+    generated_at_utc: str,
     report_date: str,
     data_source: str,
     scores: pd.DataFrame,
@@ -598,6 +618,9 @@ def write_outputs(
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     payload = sanitize_for_json({
         "generated_at": generated_at,
+        "generated_at_jst": generated_at_jst,
+        "generated_at_utc": generated_at_utc,
+        "timezone": "Asia/Tokyo",
         "date": report_date,
         "data_source": data_source,
         "market_mode_summary": narratives.market_mode_summary(scores),
@@ -611,10 +634,22 @@ def write_outputs(
     (RESULTS_DIR / "ai_feedback.csv").write_text(feedback_rows.to_csv(index=False), encoding="utf-8")
     (RESULTS_DIR / "ai_feedback.json").write_text(safe_json_dumps(payload), encoding="utf-8")
     try:
-        report = build_report(generated_at, report_date, data_source, scores, alignment, feedback_rows, reflections, hypotheses, crosscheck)
+        report = build_report(
+            generated_at,
+            report_date,
+            data_source,
+            scores,
+            alignment,
+            feedback_rows,
+            reflections,
+            hypotheses,
+            crosscheck,
+            generated_at_jst=generated_at_jst,
+            generated_at_utc=generated_at_utc,
+        )
     except Exception as exc:  # noqa: BLE001 - preserve artifacts even if markdown rendering regresses.
         print(f"warning: ai feedback markdown fallback used: {exc}")
-        report = fallback_report(generated_at, report_date, data_source, payload, exc)
+        report = fallback_report(generated_at, generated_at_jst, generated_at_utc, report_date, data_source, payload, exc)
     report_path = REPORTS_DIR / f"{report_date}_ai_feedback.md"
     report_path.write_text(report, encoding="utf-8")
     print(f"ai feedback report generated: {report_path}")
@@ -623,10 +658,19 @@ def write_outputs(
     return payload
 
 
-def fallback_report(generated_at: str, report_date: str, data_source: str, payload: dict, exc: Exception) -> str:
+def fallback_report(
+    generated_at: str,
+    generated_at_jst: str,
+    generated_at_utc: str,
+    report_date: str,
+    data_source: str,
+    payload: dict,
+    exc: Exception,
+) -> str:
     return f"""# Tactical Swing OS AI Feedback Report
 
-生成日時: {generated_at}
+生成日時（JST）: {generated_at_jst or generated_at}
+Actions実行時刻（UTC）: {generated_at_utc}
 対象日: {report_date}
 データソース: {data_source}
 
@@ -645,7 +689,10 @@ warning: ai feedback markdown fallback used: {html.escape(str(exc))}
 
 
 def build_ai_feedback() -> dict:
-    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    generated_dt_utc = now_utc()
+    generated_at = legacy_utc_iso(generated_dt_utc)
+    generated_at_jst = format_jst(generated_dt_utc)
+    generated_at_utc = format_utc(generated_dt_utc)
     data, extras, source = load_input_data()
     market_snapshot = data.get("market_snapshot", pd.DataFrame())
     signals = latest_signals(data.get("signals", pd.DataFrame()))
@@ -653,12 +700,24 @@ def build_ai_feedback() -> dict:
     report_date = latest_date(signals, evaluations)
     scores = narratives.score_market_narratives(market_snapshot)
     alignment = narratives.evaluate_signal_alignment(signals, scores)
-    feedback_rows = build_feedback_rows(generated_at, report_date, signals, evaluations, scores, alignment)
+    feedback_rows = build_feedback_rows(generated_at, generated_at_jst, generated_at_utc, report_date, signals, evaluations, scores, alignment)
     reflections = recent_evaluation_reflection(evaluations, alignment)
     hypotheses = improvement_hypotheses(scores, alignment, evaluations)
     rule_updates = extras.get("rule_update_proposals", pd.DataFrame())
     crosscheck = rule_proposal_crosscheck(rule_updates if isinstance(rule_updates, pd.DataFrame) else pd.DataFrame(), alignment)
-    return write_outputs(generated_at, report_date, source, scores, alignment, feedback_rows, reflections, hypotheses, crosscheck)
+    return write_outputs(
+        generated_at,
+        generated_at_jst,
+        generated_at_utc,
+        report_date,
+        source,
+        scores,
+        alignment,
+        feedback_rows,
+        reflections,
+        hypotheses,
+        crosscheck,
+    )
 
 
 def main() -> int:
