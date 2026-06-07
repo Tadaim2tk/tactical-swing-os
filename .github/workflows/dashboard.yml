@@ -46,6 +46,17 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
+      - name: Fetch market data for pending reevaluation
+        run: |
+          python src/fetch_market.py || echo "warning: market fetch failed; pending reevaluation may use local fallback only"
+
+      - name: Reevaluate pending signals for dashboard
+        run: |
+          python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10 || echo "warning: pending reevaluation failed; continuing dashboard"
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -68,6 +79,9 @@ jobs:
             results/news_headlines.json
             results/news_narrative_scores.csv
             results/news_narrative_scores.json
+            reports/reevaluation/*.md
+            results/pending_reevaluations.csv
+            results/pending_reevaluations.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

@@ -51,6 +51,15 @@ DISPLAY_LABELS = {
     "news_conflict_score": "ニュース矛盾スコア",
     "dominant_news_themes": "主要ニューステーマ",
     "news_summary_ja": "日本語ニュース要約",
+    "pending_reevaluation_count": "再評価対象件数",
+    "pending_reevaluation_closed_count": "決着件数",
+    "pending_reevaluation_open_count": "open継続件数",
+    "pending_reevaluation_no_entry_count": "no_entry継続件数",
+    "pending_reevaluation_missed_count": "取り逃し候補数",
+    "previous_outcome": "前回outcome",
+    "outcome": "今回outcome",
+    "r_multiple": "R倍数",
+    "error_type": "エラー分類",
     "news_confidence": "ニュース信頼度",
     "risk_on_news_score": "ニュースRisk On",
     "risk_off_news_score": "ニュースRisk Off",
@@ -228,6 +237,7 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "rule_update_proposals": read_csv(RESULTS_DIR / "rule_update_proposals.csv"),
         "ai_feedback": read_csv(RESULTS_DIR / "ai_feedback.csv"),
         "news_narrative_scores": read_csv(RESULTS_DIR / "news_narrative_scores.csv"),
+        "pending_reevaluations": read_csv(RESULTS_DIR / "pending_reevaluations.csv"),
         "weekly_review_json": read_json(RESULTS_DIR / "weekly_review.json"),
         "monthly_calibration_json": read_json(RESULTS_DIR / "monthly_calibration.json"),
         "reason_code_analysis_json": read_json(RESULTS_DIR / "reason_code_analysis.json"),
@@ -597,6 +607,34 @@ def news_narrative_summary(news_csv: pd.DataFrame, news_json) -> dict:
     }
 
 
+def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
+    if pending.empty:
+        return {
+            "available": False,
+            "pending_reevaluation_count": 0,
+            "pending_reevaluation_closed_count": 0,
+            "pending_reevaluation_open_count": 0,
+            "pending_reevaluation_no_entry_count": 0,
+            "pending_reevaluation_missed_count": 0,
+            "recent_closed": [],
+        }
+    out = pending.copy()
+    status = out.get("evaluation_status", out.get("status", pd.Series("", index=out.index))).fillna("").astype(str).str.lower()
+    outcome = out.get("outcome", pd.Series("", index=out.index)).fillna("").astype(str).str.lower()
+    missed = out.get("missed_opportunity", pd.Series("", index=out.index)).fillna("").astype(str).str.lower().isin(["true", "1", "yes"])
+    closed_mask = (status == "closed") | outcome.isin(["win_tp1", "win_tp2", "loss_sl"])
+    recent_closed = out[closed_mask].tail(5)
+    return {
+        "available": True,
+        "pending_reevaluation_count": int(len(out)),
+        "pending_reevaluation_closed_count": int(closed_mask.sum()),
+        "pending_reevaluation_open_count": int((outcome == "open_unresolved").sum()),
+        "pending_reevaluation_no_entry_count": int((outcome == "no_entry").sum()),
+        "pending_reevaluation_missed_count": int(missed.sum()),
+        "recent_closed": recent_closed.to_dict(orient="records"),
+    }
+
+
 def top_reason_codes(reason_table: pd.DataFrame) -> dict:
     if reason_table.empty:
         return {"positive": [], "negative": [], "insufficient": []}
@@ -646,6 +684,7 @@ def build_dashboard() -> tuple[dict, str]:
     monthly = extras["monthly_calibration"]
     ai_feedback = extras["ai_feedback"]
     news_summary = news_narrative_summary(extras["news_narrative_scores"], extras["news_narrative_scores_json"])
+    pending_summary = pending_reevaluation_summary(extras["pending_reevaluations"])
     reason_table, no_trade_table = reason_code_data(signals, evaluations, extras["reason_code_analysis"], extras["reason_code_analysis_json"])
     rule_updates = extras["rule_update_proposals"]
     ai_summary = ai_feedback_summary(ai_feedback, extras["ai_feedback_json"])
@@ -669,6 +708,7 @@ def build_dashboard() -> tuple[dict, str]:
         "rule_update_proposals": len(rule_updates),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
+        "pending_reevaluations": len(extras["pending_reevaluations"]),
     }
     latest_signal_date = latest_date(signals, ["signal_date", "date"])
     latest_evaluation_date = latest_date(evaluations, ["evaluation_date", "hit_date", "signal_date"])
@@ -708,6 +748,7 @@ def build_dashboard() -> tuple[dict, str]:
         "rule_update_summary": rule_update_summary,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
+        "pending_reevaluation_summary": pending_summary,
         "safety_notes": SAFETY_NOTES,
     })
 
@@ -731,6 +772,7 @@ def build_dashboard() -> tuple[dict, str]:
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
+        pending_summary=pending_summary,
         apply_false=apply_false,
         summary=summary,
     )
@@ -760,6 +802,7 @@ def render_html(
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
+    pending_summary: dict,
     apply_false: bool,
     summary: dict,
 ) -> str:
@@ -831,6 +874,16 @@ def render_html(
     )
     if not news_driver_list:
         news_driver_list = "<li>ニュースナラティブ未取得</li>"
+    pending_stats = "".join(
+        [
+            stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
+            stat_card("pending_reevaluation_closed_count", pending_summary.get("pending_reevaluation_closed_count", 0)),
+            stat_card("pending_reevaluation_open_count", pending_summary.get("pending_reevaluation_open_count", 0)),
+            stat_card("pending_reevaluation_no_entry_count", pending_summary.get("pending_reevaluation_no_entry_count", 0)),
+            stat_card("pending_reevaluation_missed_count", pending_summary.get("pending_reevaluation_missed_count", 0)),
+        ]
+    )
+    pending_closed = pd.DataFrame(pending_summary.get("recent_closed", []) or [])
     safe = "".join(f"<li>{html.escape(note)}</li>" for note in SAFETY_NOTES)
     return f"""<!doctype html>
 <html lang="ja">
@@ -895,6 +948,7 @@ def render_html(
     <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
+    <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
     <section class="card"><h2>週次・月次モード</h2><div class="grid">{mode_stats}</div></section>
     <section class="card"><h2>安全上の注意</h2><p class="notice">{html.escape(DASHBOARD_DESCRIPTION)}</p><ul>{safe}</ul></section>
   </main>

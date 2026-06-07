@@ -23,3 +23,6 @@ results/news_headlines.csv
 results/news_headlines.json
 results/news_narrative_scores.csv
 results/news_narrative_scores.json
+reports/reevaluation/*.md
+results/pending_reevaluations.csv
+results/pending_reevaluations.json

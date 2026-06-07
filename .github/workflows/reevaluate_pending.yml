@@ -1,0 +1,46 @@
+name: Tactical Swing OS pending reevaluation
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 22:05 UTC is 07:05 JST.
+    - cron: "5 22 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  reevaluate-pending:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch market data
+        run: python src/fetch_market.py
+
+      - name: Reevaluate pending signals
+        run: python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+      - name: Upload pending reevaluation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-pending-reevaluation-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            reports/reevaluation/*.md
+            results/pending_reevaluations.csv
+            results/pending_reevaluations.json
