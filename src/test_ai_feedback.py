@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
+import json
+
+import numpy as np
 import pandas as pd
 
+import build_ai_feedback
 import score_narratives as narratives
 
 
@@ -110,3 +115,83 @@ def test_insufficient_data_and_no_auto_apply():
     scores = narratives.score_market_narratives(pd.DataFrame())
     aligned = narratives.evaluate_signal_alignment(signals("BTC", "LONG"), scores)
     assert aligned.iloc[0]["narrative_alignment"] == "insufficient_data"
+
+
+def test_safe_json_dumps_handles_pandas_numpy_datetime_and_nan():
+    payload = {
+        "timestamp": pd.Timestamp("2026-06-07 07:00:00"),
+        "datetime": datetime(2026, 6, 7, 7, 0, 0),
+        "np_float": np.float64(1.25),
+        "np_int": np.int64(7),
+        "np_bool": np.bool_(True),
+        "nan": np.nan,
+        "nat": pd.NaT,
+        "series": pd.Series({"a": np.float64(2.5), "b": np.nan}),
+    }
+    dumped = build_ai_feedback.safe_json_dumps(payload)
+    loaded = json.loads(dumped)
+    assert loaded["timestamp"] == "2026-06-07T07:00:00"
+    assert loaded["datetime"] == "2026-06-07T07:00:00"
+    assert loaded["np_float"] == 1.25
+    assert loaded["np_int"] == 7
+    assert loaded["np_bool"] is True
+    assert loaded["nan"] is None
+    assert loaded["nat"] is None
+    assert loaded["series"]["b"] is None
+
+
+def test_build_report_handles_non_json_values_in_payload_sections():
+    scores = pd.DataFrame(
+        [
+            {
+                "asset": "GLOBAL",
+                "risk_on_score": np.float64(60.0),
+                "risk_off_score": np.float64(40.0),
+                "dollar_strength_score": np.float64(45.0),
+                "rate_pressure_score": np.float64(50.0),
+                "gold_safe_haven_score": np.float64(42.0),
+                "crypto_liquidity_score": np.float64(61.0),
+                "volatility_stress_score": np.float64(38.0),
+                "narrative_confidence": np.float64(95.0),
+            }
+        ]
+    )
+    alignment = pd.DataFrame(
+        [
+            {
+                "signal_id": "x",
+                "asset": "BTC",
+                "side": "LONG",
+                "rank": "B",
+                "recommended_action": "TRADE",
+                "reason_codes": "test",
+                "narrative_alignment": "aligned",
+                "narrative_alignment_score": np.int64(31),
+                "narrative_comment": "テスト",
+            }
+        ]
+    )
+    feedback_rows = pd.DataFrame(
+        [
+            {
+                "generated_at": pd.Timestamp("2026-06-07"),
+                "date": "2026-06-07",
+                "asset": "BTC",
+                "signal_id": "x",
+                "apply_automatically": np.bool_(False),
+            }
+        ]
+    )
+    markdown = build_ai_feedback.build_report(
+        "2026-06-07T07:00:00",
+        "2026-06-07",
+        "Google Sheets",
+        scores,
+        alignment,
+        feedback_rows,
+        [{"signal_id": "x", "r_multiple": np.float64(1.0), "checked_at": pd.Timestamp("2026-06-07")}],
+        ["BTCのLONGはリスクオン時に監視強化。"],
+        [{"proposal_id": "p", "apply_automatically": np.bool_(False)}],
+    )
+    assert "AI_FEEDBACK_LOG JSON" in markdown
+    assert "2026-06-07T00:00:00" in markdown
