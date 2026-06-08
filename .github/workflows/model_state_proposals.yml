@@ -44,6 +44,9 @@ jobs:
       - name: Propose model state updates
         run: python src/propose_model_state_updates.py
 
+      - name: Audit model state proposals
+        run: python src/audit_model_state_proposals.py
+
       - name: Upload model state proposal artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -54,3 +57,6 @@ jobs:
             results/model_state_update_proposals.csv
             results/model_state_update_proposals.json
             results/model_state_update_summary.json
+            results/model_state_proposal_audit.csv
+            results/model_state_proposal_audit.json
+            reports/model_state/*_model_state_proposal_audit.md

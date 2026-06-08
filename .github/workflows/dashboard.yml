@@ -64,6 +64,28 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
+      - name: Analyze reason codes for dashboard
+        run: |
+          python src/analyze_reason_codes.py || echo "warning: reason code analysis failed; continuing dashboard"
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+      - name: Propose rule updates for dashboard
+        run: |
+          python src/propose_rule_updates.py || echo "warning: rule update proposals failed; continuing dashboard"
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+      - name: Propose model state updates for dashboard
+        run: |
+          python src/propose_model_state_updates.py || echo "warning: model state proposals failed; continuing dashboard"
+
+      - name: Audit model state proposals for dashboard
+        run: |
+          python src/audit_model_state_proposals.py || echo "warning: model state audit failed; continuing dashboard"
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -94,6 +116,12 @@ jobs:
             results/latest_evaluations.csv
             results/latest_evaluations.json
             results/latest_evaluations_summary.json
+            reports/model_state/*.md
+            results/model_state_update_proposals.csv
+            results/model_state_update_proposals.json
+            results/model_state_update_summary.json
+            results/model_state_proposal_audit.csv
+            results/model_state_proposal_audit.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

@@ -66,6 +66,17 @@
 
 Dashboardにもこの値を表示し、自動適用されないことを明示します。
 
+## 安全監査
+
+提案生成後は `audit_model_state_proposals.py` による安全監査を行います。
+
+監査では、`apply_automatically=true`、過大な `proposed_delta`、データ不足なのに変更しようとする提案などを検出します。
+
+- `audit_status=blocked` の場合は絶対に反映しません
+- `audit_status=warning` の場合も人間確認が必要です
+- `weights.json` は監査でも更新しません
+- 安全監査は自動反映を許可するものではありません
+
 ## 今後のPhase
 
 今後のPhaseでは、十分な評価件数が蓄積したあとに、人間承認を前提として `weights.json` へ反映する仕組みを検討できます。
