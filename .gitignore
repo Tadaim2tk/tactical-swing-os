@@ -31,3 +31,7 @@ reports/evaluations/*.md
 results/latest_evaluations.csv
 results/latest_evaluations.json
 results/latest_evaluations_summary.json
+reports/model_state/*.md
+results/model_state_update_proposals.csv
+results/model_state_update_proposals.json
+results/model_state_update_summary.json
