@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pandas as pd
 
+import evaluation_loader
+
 
 RESULTS_DIR = Path("results")
 REPORTS_DIR = Path("reports/weekly")
@@ -35,6 +37,9 @@ REVIEW_COLUMNS = [
     "rule_change_1",
     "rule_change_2",
     "rule_change_3",
+    "evaluation_source",
+    "latest_evaluations_available",
+    "fallback_used",
 ]
 DATE_COLUMNS = ["date", "signal_date", "evaluation_date", "hit_date", "run_ts"]
 SHEET_MAPPINGS = {
@@ -433,6 +438,9 @@ def reason_code_weekly_summary(reasons: pd.DataFrame, no_trade: pd.DataFrame) ->
 
 def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, str]:
     input_data = load_input_data()
+    preferred_evaluations, evaluation_meta = evaluation_loader.load_evaluations_prefer_latest()
+    if not preferred_evaluations.empty or evaluation_meta.get("evaluation_source") != "none":
+        input_data["evaluations"] = preferred_evaluations
     signals = filter_period(input_data["signals"], start, end)
     evaluations = filter_period(input_data["evaluations"], start, end)
     market_snapshot = filter_period(input_data["market_snapshot"], start, end)
@@ -477,6 +485,9 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
         "rule_change_1": changes[0],
         "rule_change_2": changes[1],
         "rule_change_3": changes[2],
+        "evaluation_source": evaluation_meta["evaluation_source"],
+        "latest_evaluations_available": evaluation_meta["latest_evaluations_available"],
+        "fallback_used": evaluation_meta["fallback_used"],
     }
     review = pd.DataFrame([review_row], columns=REVIEW_COLUMNS)
 
@@ -504,6 +515,8 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
 ## 2. 週次サマリー
 
 {markdown_table(review)}
+
+評価データソース: {evaluation_meta["evaluation_source"]} / latest_evaluations_available: {evaluation_meta["latest_evaluations_available"]} / fallback_used: {evaluation_meta["fallback_used"]}
 
 ## 3. Rank別成績
 
