@@ -208,6 +208,23 @@ DISPLAY_LABELS = {
     "version_id": "Version",
     "description": "説明",
     "notes": "備考",
+    "meta_learning_status": "meta_learning_status",
+    "meta_learning_total_candidates": "Meta Learning候補数",
+    "meta_learning_success_pattern_count": "成功パターン",
+    "meta_learning_failure_pattern_count": "失敗パターン",
+    "meta_learning_neutral_pattern_count": "中立パターン",
+    "meta_learning_insufficient_data_count": "データ不足",
+    "meta_learning_recommended_next_action": "推奨次アクション",
+    "meta_learning_apply_automatically": "自動適用",
+    "meta_learning_weights_json_updated": "weights.json更新",
+    "meta_learning_patch_applied": "patch適用",
+    "meta_learning_requires_human_approval": "人間承認",
+    "meta_learning_id": "Meta Learning ID",
+    "pattern_type": "パターン",
+    "impact_score": "impact score",
+    "impact_direction": "impact方向",
+    "learning_hypothesis": "学習仮説",
+    "evidence_summary": "根拠要約",
 }
 VALUE_LABELS = {
     "not available": "未取得",
@@ -257,6 +274,12 @@ VALUE_LABELS = {
     "superseded": "superseded（置き換え済み）",
     "tracked": "tracked（追跡対象）",
     "approved": "approved（承認済み）",
+    "success_pattern": "成功パターン",
+    "failure_pattern": "失敗パターン",
+    "neutral_pattern": "中立パターン",
+    "positive": "プラス",
+    "negative": "マイナス",
+    "human_review": "human_review（人間確認）",
     "derived_from_review": "レビュー由来",
     "manual": "手動判断",
 }
@@ -379,6 +402,9 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "weight_version_history": read_csv(RESULTS_DIR / "weight_version_history.csv"),
         "weight_version_history_json": read_json(RESULTS_DIR / "weight_version_history.json"),
         "weight_version_history_summary_json": read_json(RESULTS_DIR / "weight_version_history_summary.json"),
+        "meta_learning": read_csv(RESULTS_DIR / "meta_learning.csv"),
+        "meta_learning_json": read_json(RESULTS_DIR / "meta_learning.json"),
+        "meta_learning_summary_json": read_json(RESULTS_DIR / "meta_learning_summary.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
@@ -1070,6 +1096,64 @@ def weight_version_history_summary(history_csv: pd.DataFrame, history_json, summ
     }
 
 
+def meta_learning_summary(meta_csv: pd.DataFrame, meta_json, summary_json) -> dict:
+    payload = meta_json if isinstance(meta_json, dict) and meta_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = meta_json.get("meta_learning_candidates", []) if isinstance(meta_json, dict) else []
+        if not rows and not meta_csv.empty:
+            rows = meta_csv.to_dict(orient="records")
+        return {
+            "available": True,
+            "meta_learning_status": payload.get("meta_learning_status", "unavailable"),
+            "meta_learning_total_candidates": int(numeric_or(payload.get("total_candidates", len(rows)), 0)),
+            "meta_learning_success_pattern_count": int(numeric_or(payload.get("success_pattern_count", 0), 0)),
+            "meta_learning_failure_pattern_count": int(numeric_or(payload.get("failure_pattern_count", 0), 0)),
+            "meta_learning_neutral_pattern_count": int(numeric_or(payload.get("neutral_pattern_count", 0), 0)),
+            "meta_learning_insufficient_data_count": int(numeric_or(payload.get("insufficient_data_count", 0), 0)),
+            "meta_learning_recommended_next_action": payload.get("recommended_next_action", "wait_for_more_data"),
+            "meta_learning_apply_automatically": str(payload.get("apply_automatically", False)).lower(),
+            "meta_learning_weights_json_updated": str(payload.get("weights_json_updated", False)).lower(),
+            "meta_learning_patch_applied": str(payload.get("patch_applied", False)).lower(),
+            "meta_learning_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "success_rows": [row for row in rows if str(row.get("pattern_type", "")) == "success_pattern"][:5],
+            "failure_rows": [row for row in rows if str(row.get("pattern_type", "")) == "failure_pattern"][:5],
+        }
+    if not meta_csv.empty and "pattern_type" in meta_csv.columns:
+        pattern = meta_csv["pattern_type"].fillna("").astype(str)
+        return {
+            "available": True,
+            "meta_learning_status": "active",
+            "meta_learning_total_candidates": int(len(meta_csv)),
+            "meta_learning_success_pattern_count": int((pattern == "success_pattern").sum()),
+            "meta_learning_failure_pattern_count": int((pattern == "failure_pattern").sum()),
+            "meta_learning_neutral_pattern_count": int((pattern == "neutral_pattern").sum()),
+            "meta_learning_insufficient_data_count": int((pattern == "insufficient_data").sum()),
+            "meta_learning_recommended_next_action": "human_review" if pattern.isin(["success_pattern", "failure_pattern"]).any() else "wait_for_more_data",
+            "meta_learning_apply_automatically": "false",
+            "meta_learning_weights_json_updated": "false",
+            "meta_learning_patch_applied": "false",
+            "meta_learning_requires_human_approval": "必須",
+            "success_rows": meta_csv[pattern == "success_pattern"].head(5).to_dict(orient="records"),
+            "failure_rows": meta_csv[pattern == "failure_pattern"].head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "meta_learning_status": "unavailable",
+        "meta_learning_total_candidates": 0,
+        "meta_learning_success_pattern_count": 0,
+        "meta_learning_failure_pattern_count": 0,
+        "meta_learning_neutral_pattern_count": 0,
+        "meta_learning_insufficient_data_count": 0,
+        "meta_learning_recommended_next_action": "wait_for_more_data",
+        "meta_learning_apply_automatically": "false",
+        "meta_learning_weights_json_updated": "false",
+        "meta_learning_patch_applied": "false",
+        "meta_learning_requires_human_approval": "必須",
+        "success_rows": [],
+        "failure_rows": [],
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {
@@ -1240,6 +1324,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["weight_version_history_json"],
         extras["weight_version_history_summary_json"],
     )
+    meta_learning = meta_learning_summary(
+        extras["meta_learning"],
+        extras["meta_learning_json"],
+        extras["meta_learning_summary_json"],
+    )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -1265,6 +1354,7 @@ def build_dashboard() -> tuple[dict, str]:
         "weights_patch_review": len(extras["weights_patch_review"]),
         "proposal_adoption_tracking": len(extras["proposal_adoption_tracking"]),
         "weight_version_history": len(extras["weight_version_history"]),
+        "meta_learning": len(extras["meta_learning"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -1313,6 +1403,7 @@ def build_dashboard() -> tuple[dict, str]:
         "weights_patch_review_summary": weights_patch_review,
         "proposal_adoption_summary": proposal_adoption,
         "weight_version_history_summary": weight_history,
+        "meta_learning_summary": meta_learning,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -1343,6 +1434,7 @@ def build_dashboard() -> tuple[dict, str]:
         weights_patch_review=weights_patch_review,
         proposal_adoption=proposal_adoption,
         weight_history=weight_history,
+        meta_learning=meta_learning,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
@@ -1382,6 +1474,7 @@ def render_html(
     weights_patch_review: dict,
     proposal_adoption: dict,
     weight_history: dict,
+    meta_learning: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -1540,6 +1633,23 @@ def render_html(
         ]
     )
     weight_history_rows = pd.DataFrame(weight_history.get("proposal_rows", []) or [])
+    meta_learning_stats = "".join(
+        [
+            stat_card("meta_learning_status", meta_learning.get("meta_learning_status", "unavailable")),
+            stat_card("meta_learning_total_candidates", meta_learning.get("meta_learning_total_candidates", 0)),
+            stat_card("meta_learning_success_pattern_count", meta_learning.get("meta_learning_success_pattern_count", 0)),
+            stat_card("meta_learning_failure_pattern_count", meta_learning.get("meta_learning_failure_pattern_count", 0)),
+            stat_card("meta_learning_neutral_pattern_count", meta_learning.get("meta_learning_neutral_pattern_count", 0)),
+            stat_card("meta_learning_insufficient_data_count", meta_learning.get("meta_learning_insufficient_data_count", 0)),
+            stat_card("meta_learning_recommended_next_action", meta_learning.get("meta_learning_recommended_next_action", "wait_for_more_data")),
+            stat_card("meta_learning_apply_automatically", meta_learning.get("meta_learning_apply_automatically", "false")),
+            stat_card("meta_learning_weights_json_updated", meta_learning.get("meta_learning_weights_json_updated", "false")),
+            stat_card("meta_learning_patch_applied", meta_learning.get("meta_learning_patch_applied", "false")),
+            stat_card("meta_learning_requires_human_approval", meta_learning.get("meta_learning_requires_human_approval", "必須")),
+        ]
+    )
+    meta_learning_success = pd.DataFrame(meta_learning.get("success_rows", []) or [])
+    meta_learning_failure = pd.DataFrame(meta_learning.get("failure_rows", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -1630,6 +1740,7 @@ def render_html(
     <section class="card"><h2>Weights Patchレビュー</h2>{'<div class="empty">Weights Patchレビュー未取得</div>' if not weights_patch_review.get('available') else f'<div class="grid">{weights_patch_review_stats}</div>'}<h3>承認候補 上位5件</h3>{table_html(weights_patch_review_candidates, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","patch_risk_level","review_reason"], "承認候補なし")}<h3>保留候補 上位5件</h3>{table_html(weights_patch_review_holds, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","evidence_quality","missing_conditions","review_reason"], "保留候補なし")}</section>
     <section class="card"><h2>Proposal Adoption Tracking</h2>{'<div class="empty">Proposal Adoption Tracking未取得</div>' if not proposal_adoption.get('available') else f'<div class="grid">{proposal_adoption_stats}</div>'}<h3>承認判断待ち 上位5件</h3>{table_html(proposal_adoption_pending, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "承認判断待ちなし")}<h3>保留中 上位5件</h3>{table_html(proposal_adoption_held, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "保留中なし")}</section>
     <section class="card"><h2>Weight Version History</h2>{'<div class="empty">Weight Version History未取得</div>' if not weight_history.get('available') else f'<div class="grid">{weight_history_stats}</div>'}<h3>Proposal一覧 上位5件</h3>{table_html(weight_history_rows, ["version_id","source","proposal_id","review_decision","adoption_status","description","weights_json_updated","patch_applied","requires_human_approval","notes"], "履歴Proposalなし")}</section>
+    <section class="card"><h2>Meta Learning</h2>{'<div class="empty">Meta Learning未取得</div>' if not meta_learning.get('available') else f'<div class="grid">{meta_learning_stats}</div>'}<h3>成功パターン候補 上位5件</h3>{table_html(meta_learning_success, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "成功パターン候補なし")}<h3>失敗パターン候補 上位5件</h3>{table_html(meta_learning_failure, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "失敗パターン候補なし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
