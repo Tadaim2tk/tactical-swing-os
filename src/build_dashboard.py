@@ -225,6 +225,24 @@ DISPLAY_LABELS = {
     "impact_direction": "impact方向",
     "learning_hypothesis": "学習仮説",
     "evidence_summary": "根拠要約",
+    "auto_calibration_status": "auto calibration status",
+    "auto_calibration_candidate_count": "candidate count",
+    "auto_calibration_increase_count": "increase",
+    "auto_calibration_decrease_count": "decrease",
+    "auto_calibration_hold_count": "hold",
+    "auto_calibration_blocked_count": "blocked",
+    "auto_calibration_insufficient_data_count": "データ不足",
+    "auto_calibration_recommended_next_action": "recommended next action",
+    "auto_calibration_requires_human_approval": "人間承認",
+    "auto_calibration_patch_applied": "patch適用",
+    "auto_calibration_weights_json_updated": "weights.json更新",
+    "candidate_id": "Candidate ID",
+    "factor": "factor",
+    "classification": "分類",
+    "confidence": "confidence",
+    "sample_size": "サンプル数",
+    "suggested_delta": "suggested delta",
+    "suggested_value": "suggested value",
     "datetime_audit_status": "datetime audit status",
     "datetime_issues_found": "issues found",
     "datetime_timezone_mismatch": "timezone mismatch",
@@ -288,6 +306,7 @@ VALUE_LABELS = {
     "human_review": "human_review（人間確認）",
     "derived_from_review": "レビュー由来",
     "manual": "手動判断",
+    "generate_meta_learning_or_proposal_impact": "Meta LearningまたはImpact生成待ち",
 }
 
 
@@ -411,6 +430,9 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "meta_learning": read_csv(RESULTS_DIR / "meta_learning.csv"),
         "meta_learning_json": read_json(RESULTS_DIR / "meta_learning.json"),
         "meta_learning_summary_json": read_json(RESULTS_DIR / "meta_learning_summary.json"),
+        "auto_calibration_candidates": read_csv(RESULTS_DIR / "auto_calibration_candidates.csv"),
+        "auto_calibration_candidates_json": read_json(RESULTS_DIR / "auto_calibration_candidates.json"),
+        "auto_calibration_candidates_summary_json": read_json(RESULTS_DIR / "auto_calibration_candidates_summary.json"),
         "datetime_audit": read_csv(RESULTS_DIR / "datetime_audit.csv"),
         "datetime_audit_json": read_json(RESULTS_DIR / "datetime_audit.json"),
         "datetime_audit_summary_json": read_json(RESULTS_DIR / "datetime_audit_summary.json"),
@@ -529,9 +551,24 @@ def table_html(df: pd.DataFrame, columns: list[str], empty: str = "データな�
         out.append("<tr>")
         for col in view.columns:
             raw = row.get(col, "")
-            if col in {"rank", "side", "recommended_action", "proposal_strength", "proposal_direction", "reliability_label", "assessment"}:
+            if col in {"rank", "side", "recommended_action", "proposal_strength", "proposal_direction", "reliability_label", "assessment", "classification"}:
                 cell = badge(raw, col)
-            elif col in {"average_r", "avg_r", "total_r", "r_multiple", "win_rate", "best_r", "worst_r", "average_mfe_r", "proposed_delta", "proposed_weight"}:
+            elif col in {
+                "average_r",
+                "avg_r",
+                "total_r",
+                "r_multiple",
+                "win_rate",
+                "best_r",
+                "worst_r",
+                "average_mfe_r",
+                "proposed_delta",
+                "proposed_weight",
+                "suggested_delta",
+                "suggested_value",
+                "current_value",
+                "confidence",
+            }:
                 cell = f'<span class="{value_class(raw)}">{fmt_num(raw)}</span>'
             elif is_numeric_cell(raw):
                 cell = fmt_num(raw)
@@ -1163,6 +1200,63 @@ def meta_learning_summary(meta_csv: pd.DataFrame, meta_json, summary_json) -> di
     }
 
 
+def auto_calibration_summary(candidate_csv: pd.DataFrame, candidate_json, summary_json) -> dict:
+    payload = candidate_json if isinstance(candidate_json, dict) and candidate_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = candidate_json.get("candidates", []) if isinstance(candidate_json, dict) else []
+        if not rows and not candidate_csv.empty:
+            rows = candidate_csv.to_dict(orient="records")
+        sorted_rows = sorted(rows, key=lambda row: numeric_or(row.get("confidence", 0), 0), reverse=True)
+        return {
+            "available": True,
+            "auto_calibration_status": payload.get("candidate_status", "unavailable"),
+            "auto_calibration_candidate_count": int(numeric_or(payload.get("candidate_count", len(rows)), 0)),
+            "auto_calibration_increase_count": int(numeric_or(payload.get("increase_count", 0), 0)),
+            "auto_calibration_decrease_count": int(numeric_or(payload.get("decrease_count", 0), 0)),
+            "auto_calibration_hold_count": int(numeric_or(payload.get("hold_count", 0), 0)),
+            "auto_calibration_blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+            "auto_calibration_insufficient_data_count": int(numeric_or(payload.get("insufficient_data_count", 0), 0)),
+            "auto_calibration_recommended_next_action": payload.get("recommended_next_action", "wait_for_more_data"),
+            "auto_calibration_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "auto_calibration_patch_applied": str(payload.get("patch_applied", False)).lower(),
+            "auto_calibration_weights_json_updated": str(payload.get("weights_json_updated", False)).lower(),
+            "top_candidates": sorted_rows[:5],
+        }
+    if not candidate_csv.empty and "classification" in candidate_csv.columns:
+        classification = candidate_csv["classification"].fillna("").astype(str)
+        top = candidate_csv.sort_values("confidence", ascending=False).head(5) if "confidence" in candidate_csv.columns else candidate_csv.head(5)
+        return {
+            "available": True,
+            "auto_calibration_status": "active",
+            "auto_calibration_candidate_count": int(len(candidate_csv)),
+            "auto_calibration_increase_count": int((classification == "increase").sum()),
+            "auto_calibration_decrease_count": int((classification == "decrease").sum()),
+            "auto_calibration_hold_count": int((classification == "hold").sum()),
+            "auto_calibration_blocked_count": int((classification == "blocked").sum()),
+            "auto_calibration_insufficient_data_count": int((classification == "insufficient_data").sum()),
+            "auto_calibration_recommended_next_action": "human_review" if classification.isin(["increase", "decrease"]).any() else "wait_for_more_data",
+            "auto_calibration_requires_human_approval": "必須",
+            "auto_calibration_patch_applied": "false",
+            "auto_calibration_weights_json_updated": "false",
+            "top_candidates": top.to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "auto_calibration_status": "unavailable",
+        "auto_calibration_candidate_count": 0,
+        "auto_calibration_increase_count": 0,
+        "auto_calibration_decrease_count": 0,
+        "auto_calibration_hold_count": 0,
+        "auto_calibration_blocked_count": 0,
+        "auto_calibration_insufficient_data_count": 0,
+        "auto_calibration_recommended_next_action": "wait_for_more_data",
+        "auto_calibration_requires_human_approval": "必須",
+        "auto_calibration_patch_applied": "false",
+        "auto_calibration_weights_json_updated": "false",
+        "top_candidates": [],
+    }
+
+
 def datetime_audit_summary(audit_json, summary_json, audit_csv: pd.DataFrame) -> dict:
     payload = audit_json if isinstance(audit_json, dict) and audit_json else summary_json if isinstance(summary_json, dict) else {}
     if payload:
@@ -1373,6 +1467,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["meta_learning_json"],
         extras["meta_learning_summary_json"],
     )
+    auto_calibration = auto_calibration_summary(
+        extras["auto_calibration_candidates"],
+        extras["auto_calibration_candidates_json"],
+        extras["auto_calibration_candidates_summary_json"],
+    )
     datetime_health = datetime_audit_summary(
         extras["datetime_audit_json"],
         extras["datetime_audit_summary_json"],
@@ -1404,6 +1503,7 @@ def build_dashboard() -> tuple[dict, str]:
         "proposal_adoption_tracking": len(extras["proposal_adoption_tracking"]),
         "weight_version_history": len(extras["weight_version_history"]),
         "meta_learning": len(extras["meta_learning"]),
+        "auto_calibration_candidates": len(extras["auto_calibration_candidates"]),
         "datetime_audit": len(extras["datetime_audit"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
@@ -1454,6 +1554,7 @@ def build_dashboard() -> tuple[dict, str]:
         "proposal_adoption_summary": proposal_adoption,
         "weight_version_history_summary": weight_history,
         "meta_learning_summary": meta_learning,
+        "auto_calibration_summary": auto_calibration,
         "datetime_audit_summary": datetime_health,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
@@ -1486,6 +1587,7 @@ def build_dashboard() -> tuple[dict, str]:
         proposal_adoption=proposal_adoption,
         weight_history=weight_history,
         meta_learning=meta_learning,
+        auto_calibration=auto_calibration,
         datetime_health=datetime_health,
         mode=mode,
         ai_summary=ai_summary,
@@ -1527,6 +1629,7 @@ def render_html(
     proposal_adoption: dict,
     weight_history: dict,
     meta_learning: dict,
+    auto_calibration: dict,
     datetime_health: dict,
     mode: dict,
     ai_summary: dict,
@@ -1713,6 +1816,22 @@ def render_html(
     )
     meta_learning_success = pd.DataFrame(meta_learning.get("success_rows", []) or [])
     meta_learning_failure = pd.DataFrame(meta_learning.get("failure_rows", []) or [])
+    auto_calibration_stats = "".join(
+        [
+            stat_card("auto_calibration_status", auto_calibration.get("auto_calibration_status", "unavailable")),
+            stat_card("auto_calibration_candidate_count", auto_calibration.get("auto_calibration_candidate_count", 0)),
+            stat_card("auto_calibration_increase_count", auto_calibration.get("auto_calibration_increase_count", 0)),
+            stat_card("auto_calibration_decrease_count", auto_calibration.get("auto_calibration_decrease_count", 0)),
+            stat_card("auto_calibration_hold_count", auto_calibration.get("auto_calibration_hold_count", 0)),
+            stat_card("auto_calibration_blocked_count", auto_calibration.get("auto_calibration_blocked_count", 0)),
+            stat_card("auto_calibration_insufficient_data_count", auto_calibration.get("auto_calibration_insufficient_data_count", 0)),
+            stat_card("auto_calibration_recommended_next_action", auto_calibration.get("auto_calibration_recommended_next_action", "wait_for_more_data")),
+            stat_card("auto_calibration_requires_human_approval", auto_calibration.get("auto_calibration_requires_human_approval", "必須")),
+            stat_card("auto_calibration_patch_applied", auto_calibration.get("auto_calibration_patch_applied", "false")),
+            stat_card("auto_calibration_weights_json_updated", auto_calibration.get("auto_calibration_weights_json_updated", "false")),
+        ]
+    )
+    auto_calibration_top = pd.DataFrame(auto_calibration.get("top_candidates", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -1805,6 +1924,7 @@ def render_html(
     <section class="card"><h2>Proposal Adoption Tracking</h2>{'<div class="empty">Proposal Adoption Tracking未取得</div>' if not proposal_adoption.get('available') else f'<div class="grid">{proposal_adoption_stats}</div>'}<h3>承認判断待ち 上位5件</h3>{table_html(proposal_adoption_pending, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "承認判断待ちなし")}<h3>保留中 上位5件</h3>{table_html(proposal_adoption_held, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "保留中なし")}</section>
     <section class="card"><h2>Weight Version History</h2>{'<div class="empty">Weight Version History未取得</div>' if not weight_history.get('available') else f'<div class="grid">{weight_history_stats}</div>'}<h3>Proposal一覧 上位5件</h3>{table_html(weight_history_rows, ["version_id","source","proposal_id","review_decision","adoption_status","description","weights_json_updated","patch_applied","requires_human_approval","notes"], "履歴Proposalなし")}</section>
     <section class="card"><h2>Meta Learning</h2>{'<div class="empty">Meta Learning未取得</div>' if not meta_learning.get('available') else f'<div class="grid">{meta_learning_stats}</div>'}<h3>成功パターン候補 上位5件</h3>{table_html(meta_learning_success, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "成功パターン候補なし")}<h3>失敗パターン候補 上位5件</h3>{table_html(meta_learning_failure, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "失敗パターン候補なし")}</section>
+    <section class="card"><h2>Auto Calibration Candidates</h2>{'<div class="empty">Auto Calibration Candidates未取得</div>' if not auto_calibration.get('available') else f'<div class="grid">{auto_calibration_stats}</div>'}<h3>top confidence candidates</h3>{table_html(auto_calibration_top, ["candidate_id","asset","category","target","factor","classification","current_value","suggested_delta","suggested_value","confidence","sample_size","source","rationale"], "候補なし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>

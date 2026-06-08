@@ -106,6 +106,10 @@ jobs:
         run: |
           python src/build_meta_learning.py || echo "warning: meta learning failed; continuing dashboard"
 
+      - name: Build auto calibration candidates for dashboard
+        run: |
+          python src/build_auto_calibration_candidates.py || echo "warning: auto calibration candidates failed; continuing dashboard"
+
       - name: Audit datetime consistency for dashboard
         run: |
           python src/audit_datetime_consistency.py || echo "warning: datetime audit failed; continuing dashboard"
@@ -161,6 +165,10 @@ jobs:
             results/meta_learning.csv
             results/meta_learning.json
             results/meta_learning_summary.json
+            results/auto_calibration_candidates.csv
+            results/auto_calibration_candidates.json
+            results/auto_calibration_candidates_summary.json
+            reports/model_state/*_auto_calibration_candidates.md
             results/datetime_audit.csv
             results/datetime_audit.json
             results/datetime_audit_summary.json
