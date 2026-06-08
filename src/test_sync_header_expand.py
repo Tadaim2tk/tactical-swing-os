@@ -271,6 +271,59 @@ class TestAppendCsv(unittest.TestCase):
         self.assertIn("added 1 new columns", output)
         self.assertIn("mfe", output)
 
+    def test_pending_reevaluation_key_does_not_use_signal_id_alone(self) -> None:
+        candidates = sts.key_candidates_for("PENDING_REEVALUATIONS")
+
+        self.assertNotIn(["signal_id"], candidates)
+        self.assertEqual(candidates[0], ["reevaluation_run_id", "signal_id"])
+
+    def test_pending_reevaluation_same_signal_new_run_appends(self) -> None:
+        header = ["reevaluation_run_id", "signal_id", "evaluation_date", "outcome"]
+        existing_row = ["run-1", "S001", "2026-06-02", "open_unresolved"]
+        ws = _make_ws([header, existing_row])
+        ss = self._make_spreadsheet(ws)
+        df = pd.DataFrame(
+            [
+                {
+                    "reevaluation_run_id": "run-2",
+                    "signal_id": "S001",
+                    "evaluation_date": "2026-06-03",
+                    "outcome": "win_tp1",
+                }
+            ]
+        )
+        csv_path = self._write_csv("pending_reevaluations.csv", df)
+
+        result = sts.append_csv_with_result(ss, csv_path, "PENDING_REEVALUATIONS")
+
+        self.assertEqual(result["key_columns"], ["reevaluation_run_id", "signal_id"])
+        self.assertEqual(result["appended_rows"], 1)
+        self.assertEqual(result["skipped_duplicates"], 0)
+        ws.append_rows.assert_called_once()
+
+    def test_pending_reevaluation_same_run_signal_skips_duplicate(self) -> None:
+        header = ["reevaluation_run_id", "signal_id", "evaluation_date", "outcome"]
+        existing_row = ["run-1", "S001", "2026-06-02", "open_unresolved"]
+        ws = _make_ws([header, existing_row])
+        ss = self._make_spreadsheet(ws)
+        df = pd.DataFrame(
+            [
+                {
+                    "reevaluation_run_id": "run-1",
+                    "signal_id": "S001",
+                    "evaluation_date": "2026-06-02",
+                    "outcome": "open_unresolved",
+                }
+            ]
+        )
+        csv_path = self._write_csv("pending_reevaluations.csv", df)
+
+        result = sts.append_csv_with_result(ss, csv_path, "PENDING_REEVALUATIONS")
+
+        self.assertEqual(result["appended_rows"], 0)
+        self.assertEqual(result["skipped_duplicates"], 1)
+        ws.append_rows.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

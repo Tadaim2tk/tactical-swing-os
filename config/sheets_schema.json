@@ -11,6 +11,10 @@
     {
       "csv_path": "results/evaluations.csv",
       "sheet_name": "EVALUATIONS"
+    },
+    {
+      "csv_path": "results/pending_reevaluations.csv",
+      "sheet_name": "PENDING_REEVALUATIONS"
     }
   ],
   "future_sheets": [
