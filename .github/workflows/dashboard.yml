@@ -110,6 +110,10 @@ jobs:
         run: |
           python src/build_auto_calibration_candidates.py || echo "warning: auto calibration candidates failed; continuing dashboard"
 
+      - name: Build human override analytics for dashboard
+        run: |
+          python src/build_human_override_analytics.py || echo "warning: human override analytics failed; continuing dashboard"
+
       - name: Audit datetime consistency for dashboard
         run: |
           python src/audit_datetime_consistency.py || echo "warning: datetime audit failed; continuing dashboard"
@@ -169,6 +173,10 @@ jobs:
             results/auto_calibration_candidates.json
             results/auto_calibration_candidates_summary.json
             reports/model_state/*_auto_calibration_candidates.md
+            results/human_override_analytics.csv
+            results/human_override_analytics.json
+            results/human_override_analytics_summary.json
+            reports/model_state/*_human_override_analytics.md
             results/datetime_audit.csv
             results/datetime_audit.json
             results/datetime_audit_summary.json
