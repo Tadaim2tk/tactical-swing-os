@@ -46,3 +46,7 @@ results/weights_patch_review.csv
 results/weights_patch_review.json
 results/weights_patch_review_summary.json
 reports/model_state/*_weights_patch_review.md
+results/proposal_adoption_tracking.csv
+results/proposal_adoption_tracking.json
+results/proposal_adoption_tracking_summary.json
+reports/model_state/*_proposal_adoption_tracking.md

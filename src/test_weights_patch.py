@@ -59,6 +59,11 @@ def test_low_sample_is_excluded():
     assert wp.exclusion_reason(row, "passed", "passed") == "sample_count_under_5"
 
 
+def test_unavailable_audit_status_is_excluded():
+    row = pd.Series(proposal())
+    assert wp.exclusion_reason(row, "passed", "unavailable") == "audit_status_unavailable"
+
+
 def test_eligible_increase_decrease_only_become_patches():
     proposals = pd.DataFrame(
         [

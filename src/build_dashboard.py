@@ -179,6 +179,21 @@ DISPLAY_LABELS = {
     "evidence_quality": "根拠品質",
     "patch_risk_level": "patchリスク",
     "missing_conditions": "不足条件",
+    "proposal_adoption_tracking_status": "tracking_status",
+    "proposal_adoption_total_count": "追跡対象",
+    "proposal_adoption_accepted_count": "採用済み",
+    "proposal_adoption_pending_review_count": "承認判断待ち",
+    "proposal_adoption_held_count": "保留",
+    "proposal_adoption_rejected_count": "却下",
+    "proposal_adoption_blocked_count": "ブロック",
+    "proposal_adoption_superseded_count": "置き換え済み",
+    "proposal_adoption_manual_decision_count": "手動判断",
+    "proposal_adoption_derived_decision_count": "レビュー由来",
+    "proposal_adoption_recommended_next_action": "推奨次アクション",
+    "adoption_status": "採用状態",
+    "adoption_source": "採用判断ソース",
+    "human_decision_recorded": "人間判断記録",
+    "tracking_reason": "追跡理由",
 }
 VALUE_LABELS = {
     "not available": "未取得",
@@ -220,6 +235,14 @@ VALUE_LABELS = {
     "wait_for_more_data": "wait_for_more_data（データ蓄積待ち）",
     "manual_review": "manual_review（人間確認）",
     "no_action": "no_action（対応なし）",
+    "active": "active（追跡中）",
+    "pending_review": "pending_review（承認判断待ち）",
+    "held": "held（保留）",
+    "accepted": "accepted（採用済み）",
+    "rejected": "rejected（却下）",
+    "superseded": "superseded（置き換え済み）",
+    "derived_from_review": "レビュー由来",
+    "manual": "手動判断",
 }
 
 
@@ -334,6 +357,9 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "weights_patch_review": read_csv(RESULTS_DIR / "weights_patch_review.csv"),
         "weights_patch_review_json": read_json(RESULTS_DIR / "weights_patch_review.json"),
         "weights_patch_review_summary_json": read_json(RESULTS_DIR / "weights_patch_review_summary.json"),
+        "proposal_adoption_tracking": read_csv(RESULTS_DIR / "proposal_adoption_tracking.csv"),
+        "proposal_adoption_tracking_json": read_json(RESULTS_DIR / "proposal_adoption_tracking.json"),
+        "proposal_adoption_tracking_summary_json": read_json(RESULTS_DIR / "proposal_adoption_tracking_summary.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
@@ -911,6 +937,65 @@ def weights_patch_review_summary(review_csv: pd.DataFrame, review_json, summary_
     }
 
 
+def proposal_adoption_summary(adoption_csv: pd.DataFrame, adoption_json, summary_json) -> dict:
+    payload = adoption_json if isinstance(adoption_json, dict) and adoption_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = adoption_json.get("adoptions", []) if isinstance(adoption_json, dict) else []
+        if not rows and not adoption_csv.empty:
+            rows = adoption_csv.to_dict(orient="records")
+        return {
+            "available": True,
+            "proposal_adoption_tracking_status": payload.get("tracking_status", "unavailable"),
+            "proposal_adoption_total_count": int(numeric_or(payload.get("total_tracked_proposals", len(rows)), 0)),
+            "proposal_adoption_accepted_count": int(numeric_or(payload.get("accepted_count", 0), 0)),
+            "proposal_adoption_pending_review_count": int(numeric_or(payload.get("pending_review_count", 0), 0)),
+            "proposal_adoption_held_count": int(numeric_or(payload.get("held_count", 0), 0)),
+            "proposal_adoption_rejected_count": int(numeric_or(payload.get("rejected_count", 0), 0)),
+            "proposal_adoption_blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+            "proposal_adoption_superseded_count": int(numeric_or(payload.get("superseded_count", 0), 0)),
+            "proposal_adoption_manual_decision_count": int(numeric_or(payload.get("manual_decision_count", 0), 0)),
+            "proposal_adoption_derived_decision_count": int(numeric_or(payload.get("derived_decision_count", 0), 0)),
+            "proposal_adoption_recommended_next_action": payload.get("recommended_next_action", "no_action"),
+            "pending_rows": [row for row in rows if str(row.get("adoption_status", "")) == "pending_review"][:5],
+            "held_rows": [row for row in rows if str(row.get("adoption_status", "")) == "held"][:5],
+        }
+    if not adoption_csv.empty and "adoption_status" in adoption_csv.columns:
+        status = adoption_csv["adoption_status"].fillna("").astype(str)
+        source = adoption_csv.get("adoption_source", pd.Series("", index=adoption_csv.index)).fillna("").astype(str)
+        return {
+            "available": True,
+            "proposal_adoption_tracking_status": "active",
+            "proposal_adoption_total_count": int(len(adoption_csv)),
+            "proposal_adoption_accepted_count": int((status == "accepted").sum()),
+            "proposal_adoption_pending_review_count": int((status == "pending_review").sum()),
+            "proposal_adoption_held_count": int((status == "held").sum()),
+            "proposal_adoption_rejected_count": int((status == "rejected").sum()),
+            "proposal_adoption_blocked_count": int((status == "blocked").sum()),
+            "proposal_adoption_superseded_count": int((status == "superseded").sum()),
+            "proposal_adoption_manual_decision_count": int((source == "manual").sum()),
+            "proposal_adoption_derived_decision_count": int((source == "derived_from_review").sum()),
+            "proposal_adoption_recommended_next_action": "manual_review" if (status == "pending_review").any() else "wait_for_more_data" if (status == "held").any() else "no_action",
+            "pending_rows": adoption_csv[status == "pending_review"].head(5).to_dict(orient="records"),
+            "held_rows": adoption_csv[status == "held"].head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "proposal_adoption_tracking_status": "unavailable",
+        "proposal_adoption_total_count": 0,
+        "proposal_adoption_accepted_count": 0,
+        "proposal_adoption_pending_review_count": 0,
+        "proposal_adoption_held_count": 0,
+        "proposal_adoption_rejected_count": 0,
+        "proposal_adoption_blocked_count": 0,
+        "proposal_adoption_superseded_count": 0,
+        "proposal_adoption_manual_decision_count": 0,
+        "proposal_adoption_derived_decision_count": 0,
+        "proposal_adoption_recommended_next_action": "no_action",
+        "pending_rows": [],
+        "held_rows": [],
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {
@@ -1071,6 +1156,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["weights_patch_review_json"],
         extras["weights_patch_review_summary_json"],
     )
+    proposal_adoption = proposal_adoption_summary(
+        extras["proposal_adoption_tracking"],
+        extras["proposal_adoption_tracking_json"],
+        extras["proposal_adoption_tracking_summary_json"],
+    )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -1094,6 +1184,7 @@ def build_dashboard() -> tuple[dict, str]:
         "model_state_update_proposals": len(model_state_updates),
         "weights_patch_proposal": len(extras["weights_patch_proposal"]),
         "weights_patch_review": len(extras["weights_patch_review"]),
+        "proposal_adoption_tracking": len(extras["proposal_adoption_tracking"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -1140,6 +1231,7 @@ def build_dashboard() -> tuple[dict, str]:
         "model_state_update_summary": model_state_summary,
         "weights_patch_summary": weights_patch,
         "weights_patch_review_summary": weights_patch_review,
+        "proposal_adoption_summary": proposal_adoption,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -1168,6 +1260,7 @@ def build_dashboard() -> tuple[dict, str]:
         model_state_summary=model_state_summary,
         weights_patch=weights_patch,
         weights_patch_review=weights_patch_review,
+        proposal_adoption=proposal_adoption,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
@@ -1205,6 +1298,7 @@ def render_html(
     model_state_summary: dict,
     weights_patch: dict,
     weights_patch_review: dict,
+    proposal_adoption: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -1330,6 +1424,23 @@ def render_html(
     )
     weights_patch_review_candidates = pd.DataFrame(weights_patch_review.get("candidate_rows", []) or [])
     weights_patch_review_holds = pd.DataFrame(weights_patch_review.get("hold_rows", []) or [])
+    proposal_adoption_stats = "".join(
+        [
+            stat_card("proposal_adoption_tracking_status", proposal_adoption.get("proposal_adoption_tracking_status", "unavailable")),
+            stat_card("proposal_adoption_total_count", proposal_adoption.get("proposal_adoption_total_count", 0)),
+            stat_card("proposal_adoption_accepted_count", proposal_adoption.get("proposal_adoption_accepted_count", 0)),
+            stat_card("proposal_adoption_pending_review_count", proposal_adoption.get("proposal_adoption_pending_review_count", 0)),
+            stat_card("proposal_adoption_held_count", proposal_adoption.get("proposal_adoption_held_count", 0)),
+            stat_card("proposal_adoption_rejected_count", proposal_adoption.get("proposal_adoption_rejected_count", 0)),
+            stat_card("proposal_adoption_blocked_count", proposal_adoption.get("proposal_adoption_blocked_count", 0)),
+            stat_card("proposal_adoption_superseded_count", proposal_adoption.get("proposal_adoption_superseded_count", 0)),
+            stat_card("proposal_adoption_manual_decision_count", proposal_adoption.get("proposal_adoption_manual_decision_count", 0)),
+            stat_card("proposal_adoption_derived_decision_count", proposal_adoption.get("proposal_adoption_derived_decision_count", 0)),
+            stat_card("proposal_adoption_recommended_next_action", proposal_adoption.get("proposal_adoption_recommended_next_action", "no_action")),
+        ]
+    )
+    proposal_adoption_pending = pd.DataFrame(proposal_adoption.get("pending_rows", []) or [])
+    proposal_adoption_held = pd.DataFrame(proposal_adoption.get("held_rows", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -1418,6 +1529,7 @@ def render_html(
     <section class="card"><h2>Model State 更新提案</h2>{'<div class="empty">Model State更新提案未取得</div>' if not model_state_summary.get('available') else f'<div class="grid">{model_state_stats}</div>'}<h3>strong候補 上位5件</h3>{table_html(model_state_strong, ["category","target","sample_count","win_rate","avg_r","proposal_direction","proposal_strength","proposed_delta","proposed_weight","rationale"], "strong候補なし")}</section>
     <section class="card"><h2>Weights Patch候補</h2>{'<div class="empty">Weights Patch候補未取得</div>' if not weights_patch.get('available') else f'<div class="grid">{weights_patch_stats}</div>'}<h3>patch候補 上位5件</h3>{table_html(weights_patch_candidates, ["weight_path","patch_action","current_weight","proposed_delta","proposed_value","proposal_direction","proposal_strength","rationale"], "patch候補なし")}</section>
     <section class="card"><h2>Weights Patchレビュー</h2>{'<div class="empty">Weights Patchレビュー未取得</div>' if not weights_patch_review.get('available') else f'<div class="grid">{weights_patch_review_stats}</div>'}<h3>承認候補 上位5件</h3>{table_html(weights_patch_review_candidates, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","patch_risk_level","review_reason"], "承認候補なし")}<h3>保留候補 上位5件</h3>{table_html(weights_patch_review_holds, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","evidence_quality","missing_conditions","review_reason"], "保留候補なし")}</section>
+    <section class="card"><h2>Proposal Adoption Tracking</h2>{'<div class="empty">Proposal Adoption Tracking未取得</div>' if not proposal_adoption.get('available') else f'<div class="grid">{proposal_adoption_stats}</div>'}<h3>承認判断待ち 上位5件</h3>{table_html(proposal_adoption_pending, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "承認判断待ちなし")}<h3>保留中 上位5件</h3>{table_html(proposal_adoption_held, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "保留中なし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
