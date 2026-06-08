@@ -107,6 +107,12 @@ def key_candidates_for(sheet_name: str) -> list[list[str]]:
             ["date", "asset", "side"],
             ["evaluation_date", "asset", "side"],
         ]
+    if sheet_name == "PENDING_REEVALUATIONS":
+        return [
+            ["reevaluation_run_id", "signal_id"],
+            ["reevaluation_at_jst", "signal_id"],
+            ["signal_id", "evaluation_date", "outcome"],
+        ]
     return []
 
 
@@ -125,6 +131,10 @@ def has_valid_header(sheet_name: str, header: list[str]) -> bool:
         return ("date" in header_map and "asset" in header_map) or ("run_ts" in header_map and "asset" in header_map)
     if sheet_name in {"SIGNALS", "EVALUATIONS"}:
         return "signal_id" in header_map
+    if sheet_name == "PENDING_REEVALUATIONS":
+        return ("reevaluation_run_id" in header_map and "signal_id" in header_map) or (
+            "reevaluation_at_jst" in header_map and "signal_id" in header_map
+        )
     return bool(header)
 
 
@@ -215,15 +225,26 @@ def row_key(record: pd.Series, csv_map: dict[str, str], key_columns: list[str]) 
     return tuple(normalize_value(record[csv_map[col]]) for col in key_columns)
 
 
-def append_csv(spreadsheet, csv_path: Path, sheet_name: str) -> bool:
+def append_csv_with_result(spreadsheet, csv_path: Path, sheet_name: str) -> dict:
+    result = {
+        "sheet_name": sheet_name,
+        "csv_path": str(csv_path),
+        "status": "failed",
+        "appended_rows": 0,
+        "skipped_duplicates": 0,
+        "key_columns": [],
+        "error": "",
+    }
     if not csv_path.exists():
+        result.update({"status": "skipped", "error": f"{csv_path} not found"})
         print(f"warning: {csv_path} not found; skipped")
-        return False
+        return result
 
     df = read_csv(csv_path)
     if df.empty:
+        result.update({"status": "skipped", "error": f"{csv_path} is empty"})
         print(f"warning: {csv_path} is empty; skipped")
-        return False
+        return result
 
     worksheet = get_or_create_worksheet(spreadsheet, sheet_name)
     csv_columns = list(df.columns)
@@ -238,6 +259,7 @@ def append_csv(spreadsheet, csv_path: Path, sheet_name: str) -> bool:
         print(f"ok: {sheet_name} using key columns {key_columns}")
     else:
         print(f"warning: {sheet_name} has no usable dedup key columns; appending all rows")
+    result["key_columns"] = key_columns
 
     rows = []
     duplicate_count = 0
@@ -261,11 +283,18 @@ def append_csv(spreadsheet, csv_path: Path, sheet_name: str) -> bool:
 
     if key_columns:
         print(f"ok: {sheet_name} skipped {duplicate_count} duplicate rows")
+    result["skipped_duplicates"] = duplicate_count
 
     if rows:
         worksheet.append_rows(rows, value_input_option="RAW")
     print(f"ok: {sheet_name} appended {len(rows)} rows")
-    return True
+    result["appended_rows"] = len(rows)
+    result["status"] = "success" if len(rows) or duplicate_count else "skipped"
+    return result
+
+
+def append_csv(spreadsheet, csv_path: Path, sheet_name: str) -> bool:
+    return append_csv_with_result(spreadsheet, csv_path, sheet_name)["status"] == "success"
 
 
 def main() -> int:

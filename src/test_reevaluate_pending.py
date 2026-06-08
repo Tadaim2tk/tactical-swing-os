@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 import reevaluate_pending_signals as rps
@@ -92,3 +94,54 @@ def test_changed_outcome_flag_uses_latest_previous_row():
     assert bool(row["changed_outcome"]) is True
     assert bool(row["changed_status"]) is True
     assert bool(row["is_latest_evaluation"]) is True
+
+
+def test_default_sheets_result_skips_when_not_requested():
+    result = rps.default_sheets_result(False)
+
+    assert result["write_sheets_requested"] is False
+    assert result["write_sheets_status"] == "skipped"
+    assert result["sheets_appended_rows"] == 0
+
+
+def test_write_sheets_missing_secrets_skips_without_error(monkeypatch, tmp_path):
+    monkeypatch.delenv("GOOGLE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("GOOGLE_SHEET_ID", raising=False)
+    csv_path = tmp_path / "pending_reevaluations.csv"
+    pd.DataFrame([{"reevaluation_run_id": "run-1", "signal_id": "S001"}]).to_csv(csv_path, index=False)
+
+    result = rps.append_pending_reevaluations_to_sheets(csv_path)
+
+    assert result["write_sheets_requested"] is True
+    assert result["write_sheets_status"] == "skipped"
+    assert result["sheets_appended_rows"] == 0
+    assert "missing" in result["sheets_error"]
+
+
+def test_summary_payload_includes_sheets_metadata():
+    rows = pd.DataFrame([{"signal_id": "S001", "outcome": "win_tp1", "evaluation_status": "closed", "missed_opportunity": False}])
+    sheets = rps.default_sheets_result(True)
+    sheets.update({"write_sheets_status": "success", "sheets_appended_rows": 1, "sheets_skipped_duplicates": 2})
+
+    payload = rps.build_summary_payload(
+        rows,
+        generated_at_utc=pd.Timestamp("2026-06-08T00:00:00Z").to_pydatetime(),
+        source="local_csv",
+        total_signals=3,
+        target_count=1,
+        run_id="run-1",
+        sheets_result=sheets,
+    )
+
+    assert payload["write_sheets_requested"] is True
+    assert payload["write_sheets_status"] == "success"
+    assert payload["sheets_appended_rows"] == 1
+    assert payload["sheets_skipped_duplicates"] == 2
+
+
+def test_dashboard_workflow_does_not_write_sheets():
+    workflow = Path(".github/workflows/dashboard.yml").read_text(encoding="utf-8")
+    reevaluate_lines = [line for line in workflow.splitlines() if "reevaluate_pending_signals.py" in line]
+
+    assert reevaluate_lines, "dashboard workflow should run pending reevaluation for display"
+    assert all("--write-sheets" not in line for line in reevaluate_lines)

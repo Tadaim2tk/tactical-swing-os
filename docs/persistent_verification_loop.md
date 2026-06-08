@@ -63,13 +63,25 @@ NO_TRADEは初期状態では再評価しません。必要な場合のみ `--in
 
 ## Google Sheets書き込み
 
-初期workflowでは Google Sheets へ書き込みません。artifactで結果を確認するだけです。
+Phase 12.1 では、再評価結果を専用worksheet `PENDING_REEVALUATIONS` へappend-onlyで保存できます。
 
-手動で `--write-sheets` を付けた場合のみ、`EVALUATIONS` へ append-only で追記します。既存行や元のSIGNALSは削除しません。
+`PENDING_REEVALUATIONS` は `results/pending_reevaluations.csv` の内容を蓄積する監査ログです。既存の `SIGNALS` や `EVALUATIONS` は削除・更新しません。
+
+重複判定キーは、以下の優先順位で選びます。
+
+1. `reevaluation_run_id` + `signal_id`
+2. `reevaluation_at_jst` + `signal_id`
+3. `signal_id` + `evaluation_date` + `outcome`
+
+`signal_id` 単独では重複排除しません。同じシグナルでも、別の日・別runの再評価は学習データとして意味があるためです。同じ `reevaluation_run_id` の再実行だけを重複として避けます。
+
+`reevaluate_pending.yml` では `--write-sheets` を有効化し、`PENDING_REEVALUATIONS` へ保存します。Sheets保存に失敗した場合はwarningを出し、CSV/JSON/Markdown artifactは残します。
+
+Dashboard workflowでは `--write-sheets` を付けません。Dashboardは表示生成が目的であり、同じ再評価結果が二重にSheetsへappendされるのを避けるためです。
 
 append-only運用では、同じ `signal_id` に複数の評価行が存在し得ます。そのため、週次レビュー、月次較正、AI Feedbackなどの分析側では、将来的に `reevaluation_at_utc`、`evaluation_date`、行順などを使って最新評価行を採用する必要があります。
 
-将来的には `config/sheets_schema.json` に `results/pending_reevaluations.csv` → `PENDING_REEVALUATIONS` を追加し、EVALUATIONS本体とは別の監査ログとして同期する案もあります。
+`EVALUATIONS` 本体への統合、または最新評価だけをupsertする方式は次フェーズで検討します。Phase 12.1 では、まず `PENDING_REEVALUATIONS` へ恒久的な再評価履歴を残します。
 
 ## workflow
 
@@ -79,12 +91,10 @@ append-only運用では、同じ `signal_id` に複数の評価行が存在し�
 
 1. 依存関係をインストール
 2. `python src/fetch_market.py`
-3. `python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10`
+3. `python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10 --write-sheets`
 4. Markdown / CSV / JSON をartifact保存
 
-初期workflowでは `--write-sheets` を付けません。
-
-Dashboard workflowでも表示用に同じ再評価を試行します。失敗した場合でもDashboard生成は続行し、その場合は `Pending再評価未取得` と表示されます。
+Dashboard workflowでも表示用に同じ再評価を試行しますが、Sheetsへは書き込みません。失敗した場合でもDashboard生成は続行し、その場合は `Pending再評価未取得` と表示されます。
 
 ## 注意
 

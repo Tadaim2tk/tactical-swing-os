@@ -26,3 +26,4 @@ results/news_narrative_scores.json
 reports/reevaluation/*.md
 results/pending_reevaluations.csv
 results/pending_reevaluations.json
+results/pending_reevaluation_summary.json

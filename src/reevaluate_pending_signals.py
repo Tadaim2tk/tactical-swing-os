@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lookback-days", type=int, default=30, help="Signal lookback window in days")
     parser.add_argument("--horizon", type=int, default=10, help="Future bars to evaluate")
     parser.add_argument("--include-no-trade", action="store_true", help="Also reevaluate NO_TRADE signals")
-    parser.add_argument("--write-sheets", action="store_true", help="Append reevaluations to Google Sheets EVALUATIONS")
+    parser.add_argument("--write-sheets", action="store_true", help="Append reevaluations to Google Sheets PENDING_REEVALUATIONS")
     return parser.parse_args()
 
 
@@ -307,6 +307,7 @@ def build_report(
     total_signals: int,
     target_count: int,
     include_no_trade: bool,
+    sheets_result: dict,
 ) -> str:
     closed_count = int(reevaluations.apply(is_closed_row, axis=1).sum()) if not reevaluations.empty else 0
     outcome = reevaluations.get("outcome", pd.Series(dtype=str)).fillna("").astype(str).str.lower() if not reevaluations.empty else pd.Series(dtype=str)
@@ -331,6 +332,10 @@ def build_report(
         f"* no_entry継続件数: {no_entry_count}",
         f"* open継続件数: {open_count}",
         f"* missed_opportunity件数: {missed_count}",
+        f"* Sheets保存: {sheets_result.get('requested_label', '未実行')}",
+        f"* Sheets保存成功件数: {sheets_result.get('appended_rows', 0)}",
+        f"* Sheets重複スキップ件数: {sheets_result.get('skipped_duplicates', 0)}",
+        f"* Sheets保存warning: {sheets_result.get('error', '') or 'なし'}",
         "",
         "## 2. 決着したシグナル",
         "",
@@ -365,47 +370,100 @@ def safe_json_records(df: pd.DataFrame) -> list[dict]:
     return clean.to_dict(orient="records")
 
 
-def get_or_create_worksheet(spreadsheet, title: str):
-    import gspread
+def default_sheets_result(write_requested: bool) -> dict:
+    return {
+        "write_sheets_requested": bool(write_requested),
+        "write_sheets_status": "skipped",
+        "requested_label": "未実行" if not write_requested else "実行",
+        "sheets_appended_rows": 0,
+        "sheets_skipped_duplicates": 0,
+        "sheets_error": "",
+        "appended_rows": 0,
+        "skipped_duplicates": 0,
+        "error": "",
+        "sheet_name": "PENDING_REEVALUATIONS",
+    }
 
+
+def append_pending_reevaluations_to_sheets(csv_path: Path) -> dict:
+    result = default_sheets_result(True)
     try:
-        return spreadsheet.worksheet(title)
-    except gspread.WorksheetNotFound:
-        return spreadsheet.add_worksheet(title=title, rows=1000, cols=80)
+        from sync_to_sheets import append_csv_with_result, get_client, open_spreadsheet
+
+        client = get_client()
+        if client is None:
+            result.update(
+                {
+                    "write_sheets_status": "skipped",
+                    "sheets_error": "GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SHEET_ID is missing",
+                    "error": "GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SHEET_ID is missing",
+                }
+            )
+            print("warning: pending reevaluation Sheets append skipped; credentials are missing")
+            return result
+
+        spreadsheet = open_spreadsheet(client)
+        sync_result = append_csv_with_result(spreadsheet, csv_path, "PENDING_REEVALUATIONS")
+        status = sync_result.get("status", "failed")
+        if status == "success":
+            write_status = "success"
+        elif sync_result.get("appended_rows", 0) > 0:
+            write_status = "partial"
+        elif status == "skipped":
+            write_status = "skipped"
+        else:
+            write_status = "failed"
+        result.update(
+            {
+                "write_sheets_status": write_status,
+                "sheets_appended_rows": int(sync_result.get("appended_rows", 0)),
+                "sheets_skipped_duplicates": int(sync_result.get("skipped_duplicates", 0)),
+                "sheets_error": sync_result.get("error", ""),
+                "appended_rows": int(sync_result.get("appended_rows", 0)),
+                "skipped_duplicates": int(sync_result.get("skipped_duplicates", 0)),
+                "error": sync_result.get("error", ""),
+                "key_columns": sync_result.get("key_columns", []),
+            }
+        )
+        return result
+    except Exception as exc:  # noqa: BLE001 - artifacts should survive Sheets failures.
+        message = str(exc)
+        print(f"warning: pending reevaluation Sheets append failed; artifacts kept: {message}")
+        result.update({"write_sheets_status": "failed", "sheets_error": message, "error": message})
+        return result
 
 
-def append_to_evaluations_sheet(reevaluations: pd.DataFrame) -> None:
-    if reevaluations.empty:
-        print("warning: no reevaluations to write to Google Sheets")
-        return
-    client = get_sheets_client()
-    if client is None:
-        print("warning: Sheets write skipped because GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SHEET_ID is missing")
-        return
-    spreadsheet = client.open_by_key(os.environ["GOOGLE_SHEET_ID"])
-    worksheet = get_or_create_worksheet(spreadsheet, "EVALUATIONS")
-    values = worksheet.get_all_values()
-    header = values[0] if values else list(reevaluations.columns)
-    if not values:
-        worksheet.append_row(header, value_input_option="RAW")
-    header_norm = {normalize_column_name(col): col for col in header}
-    for col in reevaluations.columns:
-        norm = normalize_column_name(col)
-        if norm not in header_norm:
-            header.append(col)
-            header_norm[norm] = col
-    if values and header != values[0]:
-        import gspread.utils as gspread_utils
-
-        end_cell = gspread_utils.rowcol_to_a1(1, len(header))
-        worksheet.update(f"A1:{end_cell}", [header], value_input_option="RAW")
-    rows = []
-    csv_map = {normalize_column_name(col): col for col in reevaluations.columns}
-    for _, record in reevaluations.iterrows():
-        rows.append([clean_text(record.get(csv_map.get(normalize_column_name(col), ""), "")) for col in header])
-    if rows:
-        worksheet.append_rows(rows, value_input_option="RAW")
-    print(f"ok: appended {len(rows)} reevaluation rows to Google Sheets EVALUATIONS")
+def build_summary_payload(
+    reevaluations: pd.DataFrame,
+    *,
+    generated_at_utc,
+    source: str,
+    total_signals: int,
+    target_count: int,
+    run_id: str,
+    sheets_result: dict,
+) -> dict:
+    outcome = reevaluations.get("outcome", pd.Series(dtype=str)).fillna("").astype(str).str.lower() if not reevaluations.empty else pd.Series(dtype=str)
+    closed_count = int(reevaluations.apply(is_closed_row, axis=1).sum()) if not reevaluations.empty else 0
+    return {
+        "generated_at_jst": format_jst(generated_at_utc),
+        "generated_at_utc": format_utc(generated_at_utc),
+        "reevaluation_run_id": run_id,
+        "source": source,
+        "total_signals": int(total_signals),
+        "target_signals": int(target_count),
+        "reevaluated_rows": int(len(reevaluations)),
+        "closed_count": closed_count,
+        "open_count": int((outcome == "open_unresolved").sum()),
+        "no_entry_count": int((outcome == "no_entry").sum()),
+        "missed_opportunity_count": int(truthy_series(reevaluations, "missed_opportunity").sum()) if not reevaluations.empty else 0,
+        "write_sheets_requested": bool(sheets_result.get("write_sheets_requested", False)),
+        "write_sheets_status": sheets_result.get("write_sheets_status", "skipped"),
+        "sheets_appended_rows": int(sheets_result.get("sheets_appended_rows", 0)),
+        "sheets_skipped_duplicates": int(sheets_result.get("sheets_skipped_duplicates", 0)),
+        "sheets_error": sheets_result.get("sheets_error", ""),
+        "sheets_key_columns": sheets_result.get("key_columns", []),
+    }
 
 
 def main() -> int:
@@ -431,10 +489,32 @@ def main() -> int:
 
     csv_path = RESULTS_DIR / "pending_reevaluations.csv"
     json_path = RESULTS_DIR / "pending_reevaluations.json"
+    summary_path = RESULTS_DIR / "pending_reevaluation_summary.json"
     report_path = REPORTS_DIR / f"{generated_at_utc.astimezone(JST).strftime('%Y-%m-%d')}_pending_reevaluation.md"
 
     reevaluations.to_csv(csv_path, index=False)
     json_path.write_text(json.dumps(safe_json_records(reevaluations), ensure_ascii=False, indent=2), encoding="utf-8")
+    sheets_result = default_sheets_result(args.write_sheets)
+    if args.write_sheets:
+        sheets_result = append_pending_reevaluations_to_sheets(csv_path)
+    else:
+        print("ok: Google Sheets write skipped; --write-sheets was not set")
+    summary_path.write_text(
+        json.dumps(
+            build_summary_payload(
+                reevaluations,
+                generated_at_utc=generated_at_utc,
+                source=source,
+                total_signals=len(signals),
+                target_count=len(targets),
+                run_id=run_id,
+                sheets_result=sheets_result,
+            ),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     report_path.write_text(
         build_report(
             reevaluations,
@@ -443,16 +523,13 @@ def main() -> int:
             total_signals=len(signals),
             target_count=len(targets),
             include_no_trade=args.include_no_trade,
+            sheets_result=sheets_result,
         ),
         encoding="utf-8",
     )
     print(f"pending reevaluations generated: {len(reevaluations)}")
+    print(f"pending reevaluation summary generated: {summary_path}")
     print(f"pending reevaluations report generated: {report_path}")
-
-    if args.write_sheets:
-        append_to_evaluations_sheet(reevaluations)
-    else:
-        print("ok: Google Sheets write skipped; --write-sheets was not set")
     return 0
 
 

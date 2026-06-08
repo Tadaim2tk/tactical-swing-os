@@ -30,7 +30,7 @@ jobs:
         run: python src/fetch_market.py
 
       - name: Reevaluate pending signals
-        run: python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10
+        run: python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10 --write-sheets
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
@@ -44,3 +44,4 @@ jobs:
             reports/reevaluation/*.md
             results/pending_reevaluations.csv
             results/pending_reevaluations.json
+            results/pending_reevaluation_summary.json
