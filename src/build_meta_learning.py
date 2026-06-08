@@ -74,15 +74,18 @@ def read_csv(path: Path) -> pd.DataFrame:
 
 
 def load_proposal_impact() -> tuple[pd.DataFrame, dict[str, Any]]:
+    summary_payload = read_json(IMPACT_SUMMARY_JSON, {})
+    summary_payload = summary_payload if isinstance(summary_payload, dict) else {}
     payload = read_json(IMPACT_JSON, {})
     if isinstance(payload, dict):
+        merged_payload = {**summary_payload, **payload}
         for key in ("proposal_impacts", "impacts", "proposal_impact", "impact_rows"):
             rows = payload.get(key, [])
             if isinstance(rows, list):
-                return normalize_headers(pd.DataFrame(rows)), payload
+                return normalize_headers(pd.DataFrame(rows)), merged_payload
     if isinstance(payload, list):
-        return normalize_headers(pd.DataFrame(payload)), {"proposal_impacts": payload}
-    return read_csv(IMPACT_CSV), {}
+        return normalize_headers(pd.DataFrame(payload)), {**summary_payload, "proposal_impacts": payload}
+    return read_csv(IMPACT_CSV), summary_payload
 
 
 def load_adoption_payload() -> dict[str, Any]:

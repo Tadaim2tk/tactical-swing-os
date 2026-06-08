@@ -54,6 +54,12 @@ def test_missing_input_summary_is_unavailable_and_safe():
     assert summary["requires_human_approval"] is True
 
 
+def test_summary_payload_can_mark_proposal_impact_status():
+    rows = meta.build_meta_rows(pd.DataFrame(), "2026-06-09 12:00:00 JST")
+    summary = meta.summary_from(rows, {"impact_status": "unavailable"}, "2026-06-09 12:00:00 JST", "2026-06-09 03:00:00 UTC")
+    assert summary["proposal_impact_status"] == "unavailable"
+
+
 def test_summary_counts_are_correct():
     rows = meta.build_meta_rows(
         pd.DataFrame(
