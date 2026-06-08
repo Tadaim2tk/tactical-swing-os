@@ -243,6 +243,20 @@ DISPLAY_LABELS = {
     "sample_size": "サンプル数",
     "suggested_delta": "suggested delta",
     "suggested_value": "suggested value",
+    "human_override_status": "human override status",
+    "human_override_total_overrides": "total overrides",
+    "human_override_accepted_count": "accepted",
+    "human_override_held_count": "held",
+    "human_override_rejected_count": "rejected",
+    "human_override_blocked_count": "blocked",
+    "human_override_positive_count": "positive override",
+    "human_override_negative_count": "negative override",
+    "human_override_unknown_count": "unknown outcome",
+    "human_override_recommended_next_action": "recommended next action",
+    "human_override_requires_human_approval": "人間承認",
+    "override_type": "override type",
+    "override_reason": "override reason",
+    "impact_status": "impact status",
     "datetime_audit_status": "datetime audit status",
     "datetime_issues_found": "issues found",
     "datetime_timezone_mismatch": "timezone mismatch",
@@ -307,6 +321,10 @@ VALUE_LABELS = {
     "derived_from_review": "レビュー由来",
     "manual": "手動判断",
     "generate_meta_learning_or_proposal_impact": "Meta LearningまたはImpact生成待ち",
+    "wait_for_proposal_impact": "Proposal Impact待ち",
+    "review_successful_overrides": "有効な介入を確認",
+    "review_negative_overrides": "悪化した介入を確認",
+    "generate_adoption_tracking": "Adoption Tracking生成待ち",
 }
 
 
@@ -433,6 +451,9 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "auto_calibration_candidates": read_csv(RESULTS_DIR / "auto_calibration_candidates.csv"),
         "auto_calibration_candidates_json": read_json(RESULTS_DIR / "auto_calibration_candidates.json"),
         "auto_calibration_candidates_summary_json": read_json(RESULTS_DIR / "auto_calibration_candidates_summary.json"),
+        "human_override_analytics": read_csv(RESULTS_DIR / "human_override_analytics.csv"),
+        "human_override_analytics_json": read_json(RESULTS_DIR / "human_override_analytics.json"),
+        "human_override_analytics_summary_json": read_json(RESULTS_DIR / "human_override_analytics_summary.json"),
         "datetime_audit": read_csv(RESULTS_DIR / "datetime_audit.csv"),
         "datetime_audit_json": read_json(RESULTS_DIR / "datetime_audit.json"),
         "datetime_audit_summary_json": read_json(RESULTS_DIR / "datetime_audit_summary.json"),
@@ -551,7 +572,7 @@ def table_html(df: pd.DataFrame, columns: list[str], empty: str = "データな�
         out.append("<tr>")
         for col in view.columns:
             raw = row.get(col, "")
-            if col in {"rank", "side", "recommended_action", "proposal_strength", "proposal_direction", "reliability_label", "assessment", "classification"}:
+            if col in {"rank", "side", "recommended_action", "proposal_strength", "proposal_direction", "reliability_label", "assessment", "classification", "override_type", "impact_status"}:
                 cell = badge(raw, col)
             elif col in {
                 "average_r",
@@ -568,6 +589,7 @@ def table_html(df: pd.DataFrame, columns: list[str], empty: str = "データな�
                 "suggested_value",
                 "current_value",
                 "confidence",
+                "impact_score",
             }:
                 cell = f'<span class="{value_class(raw)}">{fmt_num(raw)}</span>'
             elif is_numeric_cell(raw):
@@ -1257,6 +1279,65 @@ def auto_calibration_summary(candidate_csv: pd.DataFrame, candidate_json, summar
     }
 
 
+def human_override_summary(override_csv: pd.DataFrame, override_json, summary_json) -> dict:
+    payload = override_json if isinstance(override_json, dict) and override_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = override_json.get("overrides", []) if isinstance(override_json, dict) else []
+        if not rows and not override_csv.empty:
+            rows = override_csv.to_dict(orient="records")
+        top_rows = sorted(rows, key=lambda row: abs(numeric_or(row.get("impact_score", 0), 0)), reverse=True)
+        return {
+            "available": True,
+            "human_override_status": payload.get("analytics_status", "unavailable"),
+            "human_override_total_overrides": int(numeric_or(payload.get("total_overrides", len(rows)), 0)),
+            "human_override_accepted_count": int(numeric_or(payload.get("accepted_count", 0), 0)),
+            "human_override_held_count": int(numeric_or(payload.get("held_count", 0), 0)),
+            "human_override_rejected_count": int(numeric_or(payload.get("rejected_count", 0), 0)),
+            "human_override_blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+            "human_override_positive_count": int(numeric_or(payload.get("positive_override_count", 0), 0)),
+            "human_override_negative_count": int(numeric_or(payload.get("negative_override_count", 0), 0)),
+            "human_override_unknown_count": int(numeric_or(payload.get("unknown_outcome_count", 0), 0)),
+            "human_override_recommended_next_action": payload.get("recommended_next_action", "wait_for_more_data"),
+            "human_override_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "top_rows": top_rows[:5],
+        }
+    if not override_csv.empty and "override_type" in override_csv.columns:
+        override_type = override_csv["override_type"].fillna("").astype(str)
+        impact_status = override_csv.get("impact_status", pd.Series("", index=override_csv.index)).fillna("").astype(str)
+        impact_score = pd.to_numeric(override_csv.get("impact_score", pd.Series(0, index=override_csv.index)), errors="coerce").fillna(0)
+        top = override_csv.reindex(impact_score.abs().sort_values(ascending=False).index).head(5) if "impact_score" in override_csv.columns else override_csv.head(5)
+        return {
+            "available": True,
+            "human_override_status": "active",
+            "human_override_total_overrides": int(len(override_csv)),
+            "human_override_accepted_count": int((override_type == "accepted").sum()),
+            "human_override_held_count": int((override_type == "held").sum()),
+            "human_override_rejected_count": int((override_type == "rejected").sum()),
+            "human_override_blocked_count": int((override_type == "blocked").sum()),
+            "human_override_positive_count": int((impact_status == "positive").sum()),
+            "human_override_negative_count": int((impact_status == "negative").sum()),
+            "human_override_unknown_count": int((impact_status == "unknown").sum()),
+            "human_override_recommended_next_action": "wait_for_proposal_impact" if (impact_status == "unknown").any() else "review_successful_overrides",
+            "human_override_requires_human_approval": "必須",
+            "top_rows": top.to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "human_override_status": "unavailable",
+        "human_override_total_overrides": 0,
+        "human_override_accepted_count": 0,
+        "human_override_held_count": 0,
+        "human_override_rejected_count": 0,
+        "human_override_blocked_count": 0,
+        "human_override_positive_count": 0,
+        "human_override_negative_count": 0,
+        "human_override_unknown_count": 0,
+        "human_override_recommended_next_action": "wait_for_more_data",
+        "human_override_requires_human_approval": "必須",
+        "top_rows": [],
+    }
+
+
 def datetime_audit_summary(audit_json, summary_json, audit_csv: pd.DataFrame) -> dict:
     payload = audit_json if isinstance(audit_json, dict) and audit_json else summary_json if isinstance(summary_json, dict) else {}
     if payload:
@@ -1472,6 +1553,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["auto_calibration_candidates_json"],
         extras["auto_calibration_candidates_summary_json"],
     )
+    human_override = human_override_summary(
+        extras["human_override_analytics"],
+        extras["human_override_analytics_json"],
+        extras["human_override_analytics_summary_json"],
+    )
     datetime_health = datetime_audit_summary(
         extras["datetime_audit_json"],
         extras["datetime_audit_summary_json"],
@@ -1504,6 +1590,7 @@ def build_dashboard() -> tuple[dict, str]:
         "weight_version_history": len(extras["weight_version_history"]),
         "meta_learning": len(extras["meta_learning"]),
         "auto_calibration_candidates": len(extras["auto_calibration_candidates"]),
+        "human_override_analytics": len(extras["human_override_analytics"]),
         "datetime_audit": len(extras["datetime_audit"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
@@ -1555,6 +1642,7 @@ def build_dashboard() -> tuple[dict, str]:
         "weight_version_history_summary": weight_history,
         "meta_learning_summary": meta_learning,
         "auto_calibration_summary": auto_calibration,
+        "human_override_summary": human_override,
         "datetime_audit_summary": datetime_health,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
@@ -1588,6 +1676,7 @@ def build_dashboard() -> tuple[dict, str]:
         weight_history=weight_history,
         meta_learning=meta_learning,
         auto_calibration=auto_calibration,
+        human_override=human_override,
         datetime_health=datetime_health,
         mode=mode,
         ai_summary=ai_summary,
@@ -1630,6 +1719,7 @@ def render_html(
     weight_history: dict,
     meta_learning: dict,
     auto_calibration: dict,
+    human_override: dict,
     datetime_health: dict,
     mode: dict,
     ai_summary: dict,
@@ -1832,6 +1922,22 @@ def render_html(
         ]
     )
     auto_calibration_top = pd.DataFrame(auto_calibration.get("top_candidates", []) or [])
+    human_override_stats = "".join(
+        [
+            stat_card("human_override_status", human_override.get("human_override_status", "unavailable")),
+            stat_card("human_override_total_overrides", human_override.get("human_override_total_overrides", 0)),
+            stat_card("human_override_accepted_count", human_override.get("human_override_accepted_count", 0)),
+            stat_card("human_override_held_count", human_override.get("human_override_held_count", 0)),
+            stat_card("human_override_rejected_count", human_override.get("human_override_rejected_count", 0)),
+            stat_card("human_override_blocked_count", human_override.get("human_override_blocked_count", 0)),
+            stat_card("human_override_positive_count", human_override.get("human_override_positive_count", 0)),
+            stat_card("human_override_negative_count", human_override.get("human_override_negative_count", 0)),
+            stat_card("human_override_unknown_count", human_override.get("human_override_unknown_count", 0)),
+            stat_card("human_override_recommended_next_action", human_override.get("human_override_recommended_next_action", "wait_for_more_data")),
+            stat_card("human_override_requires_human_approval", human_override.get("human_override_requires_human_approval", "必須")),
+        ]
+    )
+    human_override_top = pd.DataFrame(human_override.get("top_rows", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -1925,6 +2031,7 @@ def render_html(
     <section class="card"><h2>Weight Version History</h2>{'<div class="empty">Weight Version History未取得</div>' if not weight_history.get('available') else f'<div class="grid">{weight_history_stats}</div>'}<h3>Proposal一覧 上位5件</h3>{table_html(weight_history_rows, ["version_id","source","proposal_id","review_decision","adoption_status","description","weights_json_updated","patch_applied","requires_human_approval","notes"], "履歴Proposalなし")}</section>
     <section class="card"><h2>Meta Learning</h2>{'<div class="empty">Meta Learning未取得</div>' if not meta_learning.get('available') else f'<div class="grid">{meta_learning_stats}</div>'}<h3>成功パターン候補 上位5件</h3>{table_html(meta_learning_success, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "成功パターン候補なし")}<h3>失敗パターン候補 上位5件</h3>{table_html(meta_learning_failure, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "失敗パターン候補なし")}</section>
     <section class="card"><h2>Auto Calibration Candidates</h2>{'<div class="empty">Auto Calibration Candidates未取得</div>' if not auto_calibration.get('available') else f'<div class="grid">{auto_calibration_stats}</div>'}<h3>top confidence candidates</h3>{table_html(auto_calibration_top, ["candidate_id","asset","category","target","factor","classification","current_value","suggested_delta","suggested_value","confidence","sample_size","source","rationale"], "候補なし")}</section>
+    <section class="card"><h2>Human Override Analytics</h2>{'<div class="empty">Human Override Analytics未取得</div>' if not human_override.get('available') else f'<div class="grid">{human_override_stats}</div>'}<h3>override impact 上位5件</h3>{table_html(human_override_top, ["proposal_id","review_decision","adoption_status","override_type","override_reason","impact_status","impact_score","source","recommended_next_action"], "override分析なし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
