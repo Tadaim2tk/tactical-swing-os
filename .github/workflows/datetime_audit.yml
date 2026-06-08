@@ -1,0 +1,38 @@
+name: Tactical Swing OS datetime audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  datetime-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run datetime consistency audit
+        run: python src/audit_datetime_consistency.py
+
+      - name: Upload datetime audit artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-datetime-audit-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            results/datetime_audit.csv
+            results/datetime_audit.json
+            results/datetime_audit_summary.json
+            reports/system/*_datetime_audit.md

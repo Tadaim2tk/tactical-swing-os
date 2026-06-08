@@ -172,7 +172,10 @@ def filter_period(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> p
         return df.copy()
     out = df.copy()
     out["_review_date"] = pd.to_datetime(out[date_col], errors="coerce", utc=True).dt.tz_localize(None)
-    mask = (out["_review_date"].dt.date >= start.date()) & (out["_review_date"].dt.date <= end.date())
+    start_ts = pd.Timestamp(start).tz_localize(None).normalize()
+    end_ts = pd.Timestamp(end).tz_localize(None).normalize()
+    review_date = out["_review_date"].dt.normalize()
+    mask = (review_date >= start_ts) & (review_date <= end_ts)
     return out[mask].drop(columns=["_review_date"])
 
 
