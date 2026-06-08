@@ -569,10 +569,24 @@ def build_model_state_update_proposals() -> tuple[pd.DataFrame, dict[str, Any], 
     return csv_df, payload, str(report_path)
 
 
-def markdown_table(df: pd.DataFrame, empty: str = "該当なし") -> str:
-    if df.empty:
+def markdown_table(df: pd.DataFrame, empty: str = "データなし") -> str:
+    if df is None or df.empty:
         return empty
-    return df.to_markdown(index=False)
+    try:
+        return df.to_markdown(index=False)
+    except ImportError:
+        cols = [str(col) for col in df.columns]
+        lines = [
+            "| " + " | ".join(cols) + " |",
+            "| " + " | ".join(["---"] * len(cols)) + " |",
+        ]
+        for _, row in df.iterrows():
+            values = []
+            for col in df.columns:
+                value = str(row.get(col, ""))
+                values.append(value.replace("\n", " ").replace("|", "/"))
+            lines.append("| " + " | ".join(values) + " |")
+        return "\n".join(lines)
 
 
 def render_markdown(payload: dict[str, Any], proposals: pd.DataFrame) -> str:
