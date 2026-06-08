@@ -1,0 +1,44 @@
+name: Tactical Swing OS latest evaluations
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 22:07 UTC is 07:07 JST.
+    - cron: "7 22 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  latest-evaluations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build latest evaluations
+        run: python src/build_latest_evaluations.py
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+      - name: Upload latest evaluation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-latest-evaluations-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            reports/evaluations/*.md
+            results/latest_evaluations.csv
+            results/latest_evaluations.json
+            results/latest_evaluations_summary.json
