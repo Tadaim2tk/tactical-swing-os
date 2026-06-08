@@ -28,18 +28,50 @@ def normalize_column_name(column: str) -> str:
 
 
 def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
+    if len(df.columns) == 0:
         return df
     out = df.copy()
     out.columns = [normalize_column_name(col) for col in out.columns]
-    return out
+    return dedupe_columns(out)
+
+
+def is_blank_value(value) -> bool:
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().lower() in {"", "nan", "none", "null", "nat"}
+
+
+def dedupe_columns(df: pd.DataFrame, label: str = "DataFrame") -> pd.DataFrame:
+    if len(df.columns) == 0:
+        return df
+    out = df.copy()
+    out.columns = [str(col).strip() for col in out.columns]
+    duplicated = pd.Index(out.columns)[pd.Index(out.columns).duplicated()].unique().tolist()
+    if duplicated:
+        print(f"warning: duplicate columns detected in {label}: {duplicated}")
+    merged = pd.DataFrame(index=out.index)
+    for col in pd.Index(out.columns).unique():
+        same = out.loc[:, out.columns == col]
+        if same.shape[1] == 1:
+            merged[col] = same.iloc[:, 0]
+            continue
+        normalized = same.mask(same.apply(lambda col: col.map(is_blank_value)))
+        merged[col] = normalized.bfill(axis=1).iloc[:, 0]
+    if duplicated:
+        print("warning: duplicate columns merged before latest evaluation view")
+    return merged
 
 
 def read_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     try:
-        return normalize_headers(pd.read_csv(path))
+        return normalize_headers(dedupe_columns(pd.read_csv(path), str(path)))
     except pd.errors.EmptyDataError:
         return pd.DataFrame()
 
@@ -69,7 +101,7 @@ def worksheet_to_dataframe(worksheet) -> pd.DataFrame:
         trimmed = padded[: len(header)]
         if any(str(cell).strip() for cell in trimmed):
             rows.append(trimmed)
-    return pd.DataFrame(rows, columns=header)
+    return dedupe_columns(pd.DataFrame(rows, columns=header), "Google Sheets worksheet")
 
 
 def load_from_sheets() -> tuple[dict[str, pd.DataFrame] | None, str]:
@@ -147,7 +179,7 @@ def best_sort_key(row: pd.Series) -> tuple[pd.Timestamp, str]:
 
 
 def prepare_source(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
-    out = normalize_headers(df)
+    out = dedupe_columns(normalize_headers(df), source_name.upper())
     if out.empty:
         out = pd.DataFrame()
     out = out.copy()
@@ -171,7 +203,10 @@ def build_latest_view(evaluations: pd.DataFrame, pending_reevaluations: pd.DataF
     generated_at_utc = generated_at_utc or now_utc()
     ev = prepare_source(evaluations, "evaluations")
     pending = prepare_source(pending_reevaluations, "pending_reevaluations")
+    ev = dedupe_columns(ev, "EVALUATIONS")
+    pending = dedupe_columns(pending, "PENDING_REEVALUATIONS")
     combined = pd.concat([ev, pending], ignore_index=True, sort=False)
+    combined = dedupe_columns(combined, "combined latest evaluations")
     if combined.empty:
         return pd.DataFrame()
 

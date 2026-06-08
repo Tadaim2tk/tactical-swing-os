@@ -117,3 +117,47 @@ def test_summary_counts_latest_rows():
     assert summary["win_tp1_count"] == 1
     assert summary["no_entry_count"] == 1
     assert summary["missed_opportunity_count"] == 1
+
+
+def test_dedupe_columns_merges_duplicate_signal_id_columns():
+    df = pd.DataFrame([["", "S001", "BTC"]], columns=["signal_id", "signal_id", "asset"])
+
+    out = lev.dedupe_columns(df, "TEST")
+
+    assert list(out.columns) == ["signal_id", "asset"]
+    assert out.iloc[0]["signal_id"] == "S001"
+
+
+def test_dedupe_columns_uses_leftmost_non_empty_value():
+    df = pd.DataFrame([["nan", "S001"], ["S002", "S002-alt"], [None, "S003"]], columns=["signal_id", "signal_id"])
+
+    out = lev.dedupe_columns(df, "TEST")
+
+    assert out["signal_id"].tolist() == ["S001", "S002", "S003"]
+
+
+def test_duplicate_columns_in_evaluations_do_not_break_latest_view():
+    evaluations = pd.DataFrame(
+        [["", "S001", "2026-06-07", "open_unresolved"]],
+        columns=["signal_id", "signal_id", "evaluation_date", "outcome"],
+    )
+    pending = pd.DataFrame([{"signal_id": "S002", "reevaluation_at_utc": "2026-06-08 00:00:00 UTC", "outcome": "win_tp1"}])
+
+    latest = lev.build_latest_view(evaluations, pending, generated_at_utc=pd.Timestamp("2026-06-08T00:00:00Z").to_pydatetime())
+
+    assert set(latest["signal_id"]) == {"S001", "S002"}
+
+
+def test_duplicate_columns_in_pending_reevaluations_do_not_break_latest_view():
+    evaluations = pd.DataFrame([{"signal_id": "S001", "evaluation_date": "2026-06-07", "outcome": "open_unresolved"}])
+    pending = pd.DataFrame(
+        [["", "S001", "2026-06-08 07:05:00 JST", "win_tp2"]],
+        columns=["signal_id", "signal_id", "reevaluation_at_jst", "outcome"],
+    )
+
+    latest = lev.build_latest_view(evaluations, pending, generated_at_utc=pd.Timestamp("2026-06-08T00:00:00Z").to_pydatetime())
+
+    assert len(latest) == 1
+    assert latest.iloc[0]["signal_id"] == "S001"
+    assert latest.iloc[0]["outcome"] == "win_tp2"
+    assert latest.iloc[0]["latest_source"] == "pending_reevaluations"
