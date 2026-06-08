@@ -1,0 +1,67 @@
+name: Tactical Swing OS weights patch proposal
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:05 UTC is 13:05 JST.
+    - cron: "5 4 * * 6"
+
+permissions:
+  contents: read
+
+jobs:
+  weights-patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build latest evaluations
+        run: |
+          python src/build_latest_evaluations.py || echo "warning: latest evaluations failed; continuing"
+
+      - name: Analyze reason codes
+        run: |
+          python src/analyze_reason_codes.py || echo "warning: reason code analysis failed; continuing"
+
+      - name: Propose rule updates
+        run: |
+          python src/propose_rule_updates.py || echo "warning: rule update proposals failed; continuing"
+
+      - name: Propose model state updates
+        run: python src/propose_model_state_updates.py
+
+      - name: Audit model state proposals
+        run: python src/audit_model_state_proposals.py
+
+      - name: Build weights patch proposal
+        run: python src/build_weights_patch.py
+
+      - name: Upload weights patch artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-weights-patch-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            reports/model_state/*.md
+            results/model_state_update_proposals.csv
+            results/model_state_update_proposals.json
+            results/model_state_update_summary.json
+            results/model_state_proposal_audit.csv
+            results/model_state_proposal_audit.json
+            results/weights_patch_proposal.csv
+            results/weights_patch_proposal.json
+            results/weights_patch_summary.json

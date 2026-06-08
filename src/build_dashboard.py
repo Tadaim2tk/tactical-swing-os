@@ -153,6 +153,17 @@ DISPLAY_LABELS = {
     "proposed_weight": "提案weight",
     "proposal_direction": "提案方向",
     "rationale": "理由",
+    "weights_patch_count": "patch候補数",
+    "weights_patch_excluded_count": "除外件数",
+    "weights_patch_increase_count": "increase件数",
+    "weights_patch_decrease_count": "decrease件数",
+    "weights_patch_requires_human_approval": "人間承認",
+    "weights_patch_applied": "patch適用",
+    "weights_patch_weights_json_updated": "weights.json更新",
+    "weight_path": "weight path",
+    "patch_action": "patch action",
+    "current_weight": "現在weight",
+    "proposed_value": "提案値",
 }
 VALUE_LABELS = {
     "not available": "未取得",
@@ -293,6 +304,9 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "model_state_update_summary_json": read_json(RESULTS_DIR / "model_state_update_summary.json"),
         "model_state_proposal_audit": read_csv(RESULTS_DIR / "model_state_proposal_audit.csv"),
         "model_state_proposal_audit_json": read_json(RESULTS_DIR / "model_state_proposal_audit.json"),
+        "weights_patch_proposal": read_csv(RESULTS_DIR / "weights_patch_proposal.csv"),
+        "weights_patch_proposal_json": read_json(RESULTS_DIR / "weights_patch_proposal.json"),
+        "weights_patch_summary_json": read_json(RESULTS_DIR / "weights_patch_summary.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
@@ -745,6 +759,61 @@ def model_state_audit_summary(audit_json, audit_csv: pd.DataFrame) -> dict:
     }
 
 
+def weights_patch_summary(patch_csv: pd.DataFrame, patch_json, summary_json) -> dict:
+    if isinstance(patch_json, dict) and patch_json:
+        summary = patch_json.get("summary", {}) or {}
+        safety = patch_json.get("safety", {}) or {}
+        rows = patch_json.get("patches", []) or []
+        return {
+            "available": True,
+            "weights_patch_count": int(numeric_or(summary.get("eligible_patch_count", len(rows)), 0)),
+            "weights_patch_excluded_count": int(numeric_or(summary.get("excluded_count", 0), 0)),
+            "weights_patch_increase_count": int(numeric_or(summary.get("increase_count", 0), 0)),
+            "weights_patch_decrease_count": int(numeric_or(summary.get("decrease_count", 0), 0)),
+            "weights_patch_requires_human_approval": "必須" if safety.get("requires_human_approval", True) else "不要",
+            "weights_patch_applied": str(safety.get("patch_applied", False)).lower(),
+            "weights_patch_weights_json_updated": str(safety.get("weights_json_updated", False)).lower(),
+            "patch_candidates": rows[:5],
+        }
+    if isinstance(summary_json, dict) and summary_json:
+        safety = summary_json.get("safety", {}) or {}
+        return {
+            "available": True,
+            "weights_patch_count": int(numeric_or(summary_json.get("eligible_patch_count", len(patch_csv)), 0)),
+            "weights_patch_excluded_count": int(numeric_or(summary_json.get("excluded_count", 0), 0)),
+            "weights_patch_increase_count": int(numeric_or(summary_json.get("increase_count", 0), 0)),
+            "weights_patch_decrease_count": int(numeric_or(summary_json.get("decrease_count", 0), 0)),
+            "weights_patch_requires_human_approval": "必須" if safety.get("requires_human_approval", True) else "不要",
+            "weights_patch_applied": str(safety.get("patch_applied", False)).lower(),
+            "weights_patch_weights_json_updated": str(safety.get("weights_json_updated", False)).lower(),
+            "patch_candidates": patch_csv.head(5).to_dict(orient="records"),
+        }
+    if not patch_csv.empty:
+        direction = patch_csv.get("proposal_direction", pd.Series("", index=patch_csv.index)).fillna("").astype(str)
+        return {
+            "available": True,
+            "weights_patch_count": int(len(patch_csv)),
+            "weights_patch_excluded_count": 0,
+            "weights_patch_increase_count": int((direction == "increase").sum()),
+            "weights_patch_decrease_count": int((direction == "decrease").sum()),
+            "weights_patch_requires_human_approval": "必須",
+            "weights_patch_applied": "false",
+            "weights_patch_weights_json_updated": "false",
+            "patch_candidates": patch_csv.head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "weights_patch_count": 0,
+        "weights_patch_excluded_count": 0,
+        "weights_patch_increase_count": 0,
+        "weights_patch_decrease_count": 0,
+        "weights_patch_requires_human_approval": "必須",
+        "weights_patch_applied": "false",
+        "weights_patch_weights_json_updated": "false",
+        "patch_candidates": [],
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {
@@ -895,6 +964,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["model_state_proposal_audit"],
     )
     model_state_summary.update(model_state_audit)
+    weights_patch = weights_patch_summary(
+        extras["weights_patch_proposal"],
+        extras["weights_patch_proposal_json"],
+        extras["weights_patch_summary_json"],
+    )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -916,6 +990,7 @@ def build_dashboard() -> tuple[dict, str]:
         "reason_code_analysis": len(reason_table),
         "rule_update_proposals": len(rule_updates),
         "model_state_update_proposals": len(model_state_updates),
+        "weights_patch_proposal": len(extras["weights_patch_proposal"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -960,6 +1035,7 @@ def build_dashboard() -> tuple[dict, str]:
         "top_reason_codes": reason_tops,
         "rule_update_summary": rule_update_summary,
         "model_state_update_summary": model_state_summary,
+        "weights_patch_summary": weights_patch,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -986,6 +1062,7 @@ def build_dashboard() -> tuple[dict, str]:
         rule_updates=rule_updates,
         model_state_updates=model_state_updates,
         model_state_summary=model_state_summary,
+        weights_patch=weights_patch,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
@@ -1021,6 +1098,7 @@ def render_html(
     rule_updates: pd.DataFrame,
     model_state_updates: pd.DataFrame,
     model_state_summary: dict,
+    weights_patch: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -1119,6 +1197,18 @@ def render_html(
         ]
     )
     model_state_strong = pd.DataFrame(model_state_summary.get("strong_candidates", []) or [])
+    weights_patch_stats = "".join(
+        [
+            stat_card("weights_patch_count", weights_patch.get("weights_patch_count", 0)),
+            stat_card("weights_patch_excluded_count", weights_patch.get("weights_patch_excluded_count", 0)),
+            stat_card("weights_patch_increase_count", weights_patch.get("weights_patch_increase_count", 0)),
+            stat_card("weights_patch_decrease_count", weights_patch.get("weights_patch_decrease_count", 0)),
+            stat_card("weights_patch_requires_human_approval", weights_patch.get("weights_patch_requires_human_approval", "必須")),
+            stat_card("weights_patch_applied", weights_patch.get("weights_patch_applied", "false")),
+            stat_card("weights_patch_weights_json_updated", weights_patch.get("weights_patch_weights_json_updated", "false")),
+        ]
+    )
+    weights_patch_candidates = pd.DataFrame(weights_patch.get("patch_candidates", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -1205,6 +1295,7 @@ def render_html(
     <section class="card"><h2>見送り理由分析</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "見送り理由データなし")}</section>
     <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
     <section class="card"><h2>Model State 更新提案</h2>{'<div class="empty">Model State更新提案未取得</div>' if not model_state_summary.get('available') else f'<div class="grid">{model_state_stats}</div>'}<h3>strong候補 上位5件</h3>{table_html(model_state_strong, ["category","target","sample_count","win_rate","avg_r","proposal_direction","proposal_strength","proposed_delta","proposed_weight","rationale"], "strong候補なし")}</section>
+    <section class="card"><h2>Weights Patch候補</h2>{'<div class="empty">Weights Patch候補未取得</div>' if not weights_patch.get('available') else f'<div class="grid">{weights_patch_stats}</div>'}<h3>patch候補 上位5件</h3>{table_html(weights_patch_candidates, ["weight_path","patch_action","current_weight","proposed_delta","proposed_value","proposal_direction","proposal_strength","rationale"], "patch候補なし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
