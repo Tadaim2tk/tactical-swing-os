@@ -26,6 +26,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Build latest evaluations for reason code analysis
+        run: |
+          python src/build_latest_evaluations.py || echo "warning: latest evaluations failed; continuing with fallback"
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
       - name: Analyze reason codes
         run: python src/analyze_reason_codes.py --period weekly
         env:

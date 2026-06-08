@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import evaluation_loader
 import score_narratives as narratives
 from time_utils import format_jst, format_utc, legacy_utc_iso, now_utc
 
@@ -59,6 +60,9 @@ AI_FEEDBACK_COLUMNS = [
     "feedback_summary",
     "proposed_next_action",
     "apply_automatically",
+    "evaluation_source",
+    "latest_evaluations_available",
+    "fallback_used",
 ]
 SAFETY_NOTES = [
     "実売買には使わない",
@@ -450,6 +454,7 @@ def build_feedback_rows(
     alignment: pd.DataFrame,
     news: dict | None = None,
     source_mix: str = "market_proxy_only",
+    evaluation_meta: dict | None = None,
 ) -> pd.DataFrame:
     news = news or {}
     latest_eval = latest_evaluation_lookup(evaluations)
@@ -505,6 +510,9 @@ def build_feedback_rows(
     rows["apply_automatically"] = False
     rows["news_confidence"] = numeric_from_mapping(news, "news_confidence", 0.0)
     rows["narrative_source_mix"] = source_mix
+    rows["evaluation_source"] = (evaluation_meta or {}).get("evaluation_source", "")
+    rows["latest_evaluations_available"] = (evaluation_meta or {}).get("latest_evaluations_available", False)
+    rows["fallback_used"] = (evaluation_meta or {}).get("fallback_used", False)
     for col in AI_FEEDBACK_COLUMNS:
         if col not in rows.columns:
             rows[col] = ""
@@ -656,6 +664,7 @@ def build_report(
     generated_at_utc: str | None = None,
     news: dict | None = None,
     source_mix: str = "market_proxy_only",
+    evaluation_meta: dict | None = None,
 ) -> str:
     generated_at_jst = generated_at_jst or generated_at
     generated_at_utc = generated_at_utc or ""
@@ -692,6 +701,7 @@ def build_report(
         "timezone": "Asia/Tokyo",
         "date": report_date,
         "data_source": data_source,
+        **(evaluation_meta or {}),
         "market_mode_summary": combined_market_mode_summary(scores, news),
         "news_narrative_available": bool(numeric_from_mapping(news, "news_confidence", 0.0) > 0),
         "news_mode_summary": news_mode_summary(news),
@@ -739,6 +749,9 @@ Actions実行時刻（UTC）: {generated_at_utc}
 - ニュース市場バイアス: {news.get("news_market_bias", "insufficient_data") if news else "insufficient_data"}
 - ニュース矛盾スコア: {numeric_from_mapping(news, "news_conflict_score", 0.0)}
 - ナラティブ入力: {source_mix}
+- 評価データソース: {(evaluation_meta or {}).get("evaluation_source", "不明")}
+- latest_evaluations_available: {(evaluation_meta or {}).get("latest_evaluations_available", False)}
+- fallback_used: {(evaluation_meta or {}).get("fallback_used", False)}
 - risk_on: {score_row.get("risk_on_score", "データなし")}
 - risk_off: {score_row.get("risk_off_score", "データなし")}
 - dollar: {score_row.get("dollar_strength_score", "データなし")}
@@ -810,6 +823,7 @@ def write_outputs(
     crosscheck: list[dict],
     news: dict | None = None,
     source_mix: str = "market_proxy_only",
+    evaluation_meta: dict | None = None,
 ) -> dict:
     news = news or {}
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -821,6 +835,7 @@ def write_outputs(
         "timezone": "Asia/Tokyo",
         "date": report_date,
         "data_source": data_source,
+        **(evaluation_meta or {}),
         "market_mode_summary": combined_market_mode_summary(scores, news),
         "news_narrative_available": bool(numeric_from_mapping(news, "news_confidence", 0.0) > 0),
         "news_mode_summary": news_mode_summary(news),
@@ -850,6 +865,7 @@ def write_outputs(
             generated_at_utc=generated_at_utc,
             news=news,
             source_mix=source_mix,
+            evaluation_meta=evaluation_meta,
         )
     except Exception as exc:  # noqa: BLE001 - preserve artifacts even if markdown rendering regresses.
         print(f"warning: ai feedback markdown fallback used: {exc}")
@@ -898,6 +914,9 @@ def build_ai_feedback() -> dict:
     generated_at_jst = format_jst(generated_dt_utc)
     generated_at_utc = format_utc(generated_dt_utc)
     data, extras, source = load_input_data()
+    preferred_evaluations, evaluation_meta = evaluation_loader.load_evaluations_prefer_latest()
+    if not preferred_evaluations.empty or evaluation_meta.get("evaluation_source") != "none":
+        data["evaluations"] = preferred_evaluations
     news = news_payload(extras)
     market_snapshot = data.get("market_snapshot", pd.DataFrame())
     signals = latest_signals(data.get("signals", pd.DataFrame()))
@@ -907,7 +926,7 @@ def build_ai_feedback() -> dict:
     scores = apply_news_overlay(proxy_scores, news)
     source_mix = narrative_source_mix(proxy_scores, news)
     alignment = apply_news_context_to_alignment(narratives.evaluate_signal_alignment(signals, scores), news)
-    feedback_rows = build_feedback_rows(generated_at, generated_at_jst, generated_at_utc, report_date, signals, evaluations, scores, alignment, news, source_mix)
+    feedback_rows = build_feedback_rows(generated_at, generated_at_jst, generated_at_utc, report_date, signals, evaluations, scores, alignment, news, source_mix, evaluation_meta)
     reflections = recent_evaluation_reflection(evaluations, alignment)
     hypotheses = improvement_hypotheses(scores, alignment, evaluations)
     rule_updates = extras.get("rule_update_proposals", pd.DataFrame())
@@ -926,6 +945,7 @@ def build_ai_feedback() -> dict:
         crosscheck,
         news=news,
         source_mix=source_mix,
+        evaluation_meta=evaluation_meta,
     )
 
 

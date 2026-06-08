@@ -26,6 +26,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Build latest evaluations for rule proposals
+        run: |
+          python src/build_latest_evaluations.py || echo "warning: latest evaluations failed; continuing with fallback"
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+      - name: Analyze reason codes for rule proposals
+        run: |
+          python src/analyze_reason_codes.py --period weekly || echo "warning: reason code analysis failed; rule proposals will use fallback"
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
       - name: Propose rule updates
         run: python src/propose_rule_updates.py
         env:

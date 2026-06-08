@@ -36,6 +36,7 @@ DISPLAY_LABELS = {
     "signals rows": "シグナル行数",
     "evaluations rows": "評価行数",
     "evaluation_view_source": "評価ビュー",
+    "evaluation_fallback_used": "評価fallback使用",
     "latest daily report": "最新日次レポート",
     "latest weekly review": "最新週次レビュー",
     "latest monthly calibration": "最新月次較正",
@@ -753,6 +754,7 @@ def build_dashboard() -> tuple[dict, str]:
     news_summary = news_narrative_summary(extras["news_narrative_scores"], extras["news_narrative_scores_json"])
     pending_summary = pending_reevaluation_summary(extras["pending_reevaluations"])
     evaluations, evaluation_view_source = choose_evaluations_for_dashboard(raw_evaluations, extras)
+    evaluation_fallback_used = evaluation_view_source != "latest_evaluations"
     latest_eval_summary = latest_evaluation_view_summary(extras["latest_evaluations"], extras["latest_evaluations_summary_json"])
     reason_table, no_trade_table = reason_code_data(signals, evaluations, extras["reason_code_analysis"], extras["reason_code_analysis_json"])
     rule_updates = extras["rule_update_proposals"]
@@ -811,6 +813,7 @@ def build_dashboard() -> tuple[dict, str]:
         "display_language": "ja",
         "data_source": source,
         "evaluation_view_source": evaluation_view_source,
+        "evaluation_fallback_used": evaluation_fallback_used,
         "row_counts": row_counts,
         "latest_dates": latest_dates,
         "daily_signal_summary": sig_summary,
@@ -848,6 +851,7 @@ def build_dashboard() -> tuple[dict, str]:
         pending_summary=pending_summary,
         latest_eval_summary=latest_eval_summary,
         evaluation_view_source=evaluation_view_source,
+        evaluation_fallback_used=evaluation_fallback_used,
         apply_false=apply_false,
         summary=summary,
     )
@@ -880,6 +884,7 @@ def render_html(
     pending_summary: dict,
     latest_eval_summary: dict,
     evaluation_view_source: str,
+    evaluation_fallback_used: bool,
     apply_false: bool,
     summary: dict,
 ) -> str:
@@ -897,6 +902,7 @@ def render_html(
             stat_card("signals rows", row_counts["signals"]),
             stat_card("evaluations rows", row_counts["evaluations"]),
             stat_card("evaluation_view_source", evaluation_view_source),
+            stat_card("evaluation_fallback_used", str(evaluation_fallback_used).lower()),
             stat_card("latest daily report", latest_dates["latest_daily_report_date"] or "未取得"),
             stat_card("latest weekly review", latest_dates["latest_weekly_review_date"] or "未取得"),
             stat_card("latest monthly calibration", latest_dates["latest_monthly_calibration_date"] or "未取得"),

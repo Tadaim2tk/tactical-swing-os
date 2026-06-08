@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 import build_latest_evaluations as lev
+import evaluation_loader
 
 
 def test_latest_row_selected_by_reevaluation_timestamp():
@@ -161,3 +162,33 @@ def test_duplicate_columns_in_pending_reevaluations_do_not_break_latest_view():
     assert latest.iloc[0]["signal_id"] == "S001"
     assert latest.iloc[0]["outcome"] == "win_tp2"
     assert latest.iloc[0]["latest_source"] == "pending_reevaluations"
+
+
+def test_evaluation_loader_prefers_latest_csv(monkeypatch, tmp_path):
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    pd.DataFrame([{"signal_id": "L1", "outcome": "win_tp1"}]).to_csv(results_dir / "latest_evaluations.csv", index=False)
+    pd.DataFrame([{"signal_id": "P1", "outcome": "open_unresolved"}]).to_csv(results_dir / "pending_reevaluations.csv", index=False)
+    monkeypatch.setattr(evaluation_loader, "RESULTS_DIR", results_dir)
+
+    df, meta = evaluation_loader.load_evaluations_prefer_latest(local_only=True)
+
+    assert df.iloc[0]["signal_id"] == "L1"
+    assert meta["evaluation_source"] == "latest_evaluations"
+    assert meta["latest_evaluations_available"] is True
+    assert meta["fallback_used"] is False
+
+
+def test_evaluation_loader_falls_back_when_latest_missing(monkeypatch, tmp_path):
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    pd.DataFrame([{"signal_id": "P1", "outcome": "open_unresolved"}]).to_csv(results_dir / "pending_reevaluations.csv", index=False)
+    pd.DataFrame([{"signal_id": "E1", "outcome": "win_tp1"}]).to_csv(results_dir / "evaluations.csv", index=False)
+    monkeypatch.setattr(evaluation_loader, "RESULTS_DIR", results_dir)
+
+    df, meta = evaluation_loader.load_evaluations_prefer_latest(local_only=True)
+
+    assert df.iloc[0]["signal_id"] == "P1"
+    assert meta["evaluation_source"] == "pending_reevaluations"
+    assert meta["latest_evaluations_available"] is False
+    assert meta["fallback_used"] is True

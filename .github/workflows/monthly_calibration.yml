@@ -26,6 +26,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Build latest evaluations for monthly calibration
+        run: |
+          python src/build_latest_evaluations.py || echo "warning: latest evaluations failed; continuing with fallback"
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
       - name: Build monthly calibration
         run: python src/build_monthly_calibration.py
         env:

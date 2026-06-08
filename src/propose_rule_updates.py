@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 import analyze_reason_codes as arc
+import evaluation_loader
 
 
 RESULTS_DIR = Path("results")
@@ -196,6 +197,9 @@ def load_no_trade_table(signals: pd.DataFrame, evaluations: pd.DataFrame, start:
 
 def load_inputs(start: pd.Timestamp, end: pd.Timestamp) -> dict[str, pd.DataFrame]:
     data = arc.load_input_data()
+    preferred_evaluations, evaluation_meta = evaluation_loader.load_evaluations_prefer_latest()
+    if not preferred_evaluations.empty or evaluation_meta.get("evaluation_source") != "none":
+        data["evaluations"] = preferred_evaluations
     signals = data.get("signals", pd.DataFrame())
     evaluations = data.get("evaluations", pd.DataFrame())
     reason_table = load_reason_table(signals, evaluations, start, end)
@@ -209,6 +213,7 @@ def load_inputs(start: pd.Timestamp, end: pd.Timestamp) -> dict[str, pd.DataFram
         "no_trade_table": no_trade_table,
         "weekly": weekly,
         "monthly": monthly,
+        "evaluation_meta": evaluation_meta,
     }
 
 
@@ -491,6 +496,7 @@ def build_proposals(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFram
     inputs = load_inputs(start, end)
     signals = inputs["signals"]
     evaluations = inputs["evaluations"]
+    evaluation_meta = inputs.get("evaluation_meta", evaluation_loader.metadata("none", 0, False, True))
     merged = arc.combine_signals_evaluations(signals, evaluations)
     rows: list[dict] = []
     reason_code_proposals(rows, inputs["reason_table"], generated, start, end)
@@ -522,6 +528,7 @@ def build_proposals(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFram
         "period_start": start.strftime("%Y-%m-%d"),
         "period_end": end.strftime("%Y-%m-%d"),
         "summary": summary,
+        **evaluation_meta,
         "proposals": proposals.to_dict(orient="records"),
         "high_priority_proposals": high_priority.to_dict(orient="records"),
         "data_insufficient_items": insufficient.to_dict(orient="records"),
@@ -543,6 +550,8 @@ def build_proposals(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFram
 {conclusion}
 
 対象期間: {start.strftime('%Y-%m-%d')} - {end.strftime('%Y-%m-%d')}
+
+評価データソース: {evaluation_meta["evaluation_source"]} / latest_evaluations_available: {evaluation_meta["latest_evaluations_available"]} / fallback_used: {evaluation_meta["fallback_used"]}
 
 ## 2. 高優先度の改善候補
 

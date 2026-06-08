@@ -69,9 +69,31 @@ Phase 12.2 ではGoogle Sheetsへ書き込みません。出力はartifactとDas
 
 ## 週次・月次・AI Feedback
 
-将来的には、週次レビュー、月次較正、AI Feedbackも `latest_evaluations` を標準入力にする予定です。
+Phase 12.3 以降、以下の分析系スクリプトは `latest_evaluations` を標準入力として優先利用します。
 
-Phase 12.2 ではDashboard統合を優先し、週次・月次側の既存挙動は大きく変えません。
+- AI Feedback
+- Weekly Review
+- Monthly Calibration
+- Reason Code Analysis
+- Rule Update Proposals
+
+各workflowでは、分析スクリプトの前に `build_latest_evaluations.py` を実行します。生成に失敗した場合でも、各分析は従来のfallbackで継続します。
+
+評価データの優先順位は以下です。
+
+1. `results/latest_evaluations.csv`
+2. `results/pending_reevaluations.csv`
+3. `results/evaluations.csv`
+4. Google Sheets `EVALUATIONS`
+
+`EVALUATIONS` と `PENDING_REEVALUATIONS` はappend-onlyの履歴保存です。`latest_evaluations` は、分析の一貫性を保つために `signal_id` ごとに最新行だけを選んだ派生ビューです。
+
+fallbackが使われた場合は、同じ `signal_id` の古いpending評価と新しい再評価結果が混ざる可能性があります。そのため、各出力には以下のmetadataを追加します。
+
+- `evaluation_source`
+- `evaluation_rows`
+- `latest_evaluations_available`
+- `fallback_used`
 
 ## 安全条件
 

@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pandas as pd
 
+import evaluation_loader
+
 
 RESULTS_DIR = Path("results")
 REPORTS_DIR = Path("reports/reason_codes")
@@ -395,6 +397,9 @@ def records(df: pd.DataFrame) -> list[dict]:
 
 def build_analysis(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, str]:
     input_data = load_input_data()
+    preferred_evaluations, evaluation_meta = evaluation_loader.load_evaluations_prefer_latest()
+    if not preferred_evaluations.empty or evaluation_meta.get("evaluation_source") != "none":
+        input_data["evaluations"] = preferred_evaluations
     signals = filter_period(input_data["signals"], start, end)
     evaluations = filter_period(input_data["evaluations"], start, end)
     merged = combine_signals_evaluations(signals, evaluations)
@@ -428,6 +433,7 @@ def build_analysis(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame
         "top_positive_reasons": records(top_positive),
         "top_negative_reasons": records(top_negative),
         "over_filtering_candidates": records(over_filtering),
+        **evaluation_meta,
         "notes": notes,
     }
     output_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -444,6 +450,8 @@ def build_analysis(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame
 {conclusion}
 
 対象期間: {start.strftime('%Y-%m-%d')} - {end.strftime('%Y-%m-%d')}
+
+評価データソース: {evaluation_meta["evaluation_source"]} / latest_evaluations_available: {evaluation_meta["latest_evaluations_available"]} / fallback_used: {evaluation_meta["fallback_used"]}
 
 ## 2. reason_codes 上位プラス要因
 
