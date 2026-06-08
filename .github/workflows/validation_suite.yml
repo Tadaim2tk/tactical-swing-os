@@ -38,6 +38,7 @@ jobs:
           python src/build_monthly_calibration.py
           python src/analyze_reason_codes.py
           python src/propose_rule_updates.py
+          python src/propose_model_state_updates.py
           python src/build_dashboard.py
 
       - name: Write validation summary
@@ -60,6 +61,7 @@ jobs:
           check_file "monthly calibration" "results/monthly_calibration.json"
           check_file "reason code analysis" "results/reason_code_analysis.json"
           check_file "rule update proposals" "results/rule_update_proposals.json"
+          check_file "model state update proposals" "results/model_state_update_proposals.json"
           check_file "dashboard" "reports/dashboard/index.html"
 
       - name: Upload validation artifacts
@@ -69,7 +71,11 @@ jobs:
           if-no-files-found: warn
           path: |
             reports/**/*.md
+            reports/model_state/*.md
             reports/dashboard/index.html
             reports/dashboard/dashboard_summary.json
             results/*.csv
             results/*.json
+            results/model_state_update_proposals.csv
+            results/model_state_update_proposals.json
+            results/model_state_update_summary.json

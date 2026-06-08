@@ -15,6 +15,7 @@
 - monthly calibration生成
 - reason code analysis生成
 - rule update proposals生成
+- model state update proposals生成
 - dashboard生成
 
 ## 実行方法
@@ -31,6 +32,7 @@ workflowは以下をartifactとして保存します。
 - `reports/**/*.md`
 - `reports/dashboard/index.html`
 - `reports/dashboard/dashboard_summary.json`
+- `reports/model_state/*.md`
 - `results/*.csv`
 - `results/*.json`
 

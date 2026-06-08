@@ -43,6 +43,7 @@ DISPLAY_LABELS = {
     "latest reason_code_analysis": "最新理由コード分析",
     "latest rule_update_proposals": "最新ルール改善候補",
     "latest ai feedback": "最新AIフィードバック",
+    "latest_model_state_update_proposals": "最新Model State更新提案",
     "latest_news_fetched_at": "最新ニュース取得日時",
     "news_fetch_status": "ニュース取得ステータス",
     "news_fetch_success_source_count": "取得成功ソース数",
@@ -132,6 +133,20 @@ DISPLAY_LABELS = {
     "conflicted": "衝突",
     "insufficient_data": "データ不足",
     "market_mode_summary": "市場モード",
+    "model_state_total_proposals": "総提案件数",
+    "model_state_increase_count": "increase件数",
+    "model_state_decrease_count": "decrease件数",
+    "model_state_hold_count": "hold件数",
+    "model_state_insufficient_data_count": "データ不足件数",
+    "model_state_apply_automatically": "自動適用",
+    "category": "カテゴリ",
+    "target": "対象",
+    "sample_count": "サンプル数",
+    "avg_r": "平均R",
+    "proposed_delta": "提案delta",
+    "proposed_weight": "提案weight",
+    "proposal_direction": "提案方向",
+    "rationale": "理由",
 }
 VALUE_LABELS = {
     "not available": "未取得",
@@ -151,6 +166,13 @@ VALUE_LABELS = {
     "LONG": "LONG（買い）",
     "SHORT": "SHORT（売り）",
     "NONE": "NONE（見送り）",
+    "increase": "increase（引き上げ候補）",
+    "decrease": "decrease（引き下げ候補）",
+    "hold": "hold（保留）",
+    "strong": "strong（強い候補）",
+    "moderate": "moderate（中程度）",
+    "weak": "weak（弱い候補）",
+    "none": "none（提案なし）",
 }
 
 
@@ -246,6 +268,7 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "monthly_calibration": read_csv(RESULTS_DIR / "monthly_calibration.csv"),
         "reason_code_analysis": read_csv(RESULTS_DIR / "reason_code_analysis.csv"),
         "rule_update_proposals": read_csv(RESULTS_DIR / "rule_update_proposals.csv"),
+        "model_state_update_proposals": read_csv(RESULTS_DIR / "model_state_update_proposals.csv"),
         "ai_feedback": read_csv(RESULTS_DIR / "ai_feedback.csv"),
         "news_narrative_scores": read_csv(RESULTS_DIR / "news_narrative_scores.csv"),
         "pending_reevaluations": read_csv(RESULTS_DIR / "pending_reevaluations.csv"),
@@ -254,6 +277,8 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "monthly_calibration_json": read_json(RESULTS_DIR / "monthly_calibration.json"),
         "reason_code_analysis_json": read_json(RESULTS_DIR / "reason_code_analysis.json"),
         "rule_update_proposals_json": read_json(RESULTS_DIR / "rule_update_proposals.json"),
+        "model_state_update_proposals_json": read_json(RESULTS_DIR / "model_state_update_proposals.json"),
+        "model_state_update_summary_json": read_json(RESULTS_DIR / "model_state_update_summary.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
@@ -369,9 +394,9 @@ def table_html(df: pd.DataFrame, columns: list[str], empty: str = "データな�
         out.append("<tr>")
         for col in view.columns:
             raw = row.get(col, "")
-            if col in {"rank", "side", "recommended_action", "proposal_strength", "reliability_label", "assessment"}:
+            if col in {"rank", "side", "recommended_action", "proposal_strength", "proposal_direction", "reliability_label", "assessment"}:
                 cell = badge(raw, col)
-            elif col in {"average_r", "total_r", "r_multiple", "win_rate", "best_r", "worst_r", "average_mfe_r"}:
+            elif col in {"average_r", "avg_r", "total_r", "r_multiple", "win_rate", "best_r", "worst_r", "average_mfe_r", "proposed_delta", "proposed_weight"}:
                 cell = f'<span class="{value_class(raw)}">{fmt_num(raw)}</span>'
             elif is_numeric_cell(raw):
                 cell = fmt_num(raw)
@@ -620,6 +645,60 @@ def news_narrative_summary(news_csv: pd.DataFrame, news_json) -> dict:
     }
 
 
+def model_state_update_summary(proposals: pd.DataFrame, proposals_json, summary_json) -> dict:
+    if isinstance(proposals_json, dict) and proposals_json:
+        summary = proposals_json.get("summary", {}) or {}
+        rows = proposals_json.get("proposals", []) or []
+        table = normalize_headers(pd.DataFrame(rows))
+        strong = table[table["proposal_strength"].astype(str) == "strong"] if not table.empty and "proposal_strength" in table.columns else pd.DataFrame()
+        return {
+            "available": True,
+            "model_state_total_proposals": int(numeric_or(summary.get("total_proposals", len(rows)), 0)),
+            "model_state_increase_count": int(numeric_or(summary.get("increase_count", 0), 0)),
+            "model_state_decrease_count": int(numeric_or(summary.get("decrease_count", 0), 0)),
+            "model_state_hold_count": int(numeric_or(summary.get("hold_count", 0), 0)),
+            "model_state_insufficient_data_count": int(numeric_or(summary.get("insufficient_data_count", 0), 0)),
+            "model_state_apply_automatically": str((proposals_json.get("safety", {}) or {}).get("apply_automatically", False)).lower(),
+            "strong_candidates": strong.head(5).to_dict(orient="records"),
+        }
+    if isinstance(summary_json, dict) and summary_json:
+        strong = proposals[proposals["proposal_strength"].astype(str) == "strong"] if not proposals.empty and "proposal_strength" in proposals.columns else pd.DataFrame()
+        return {
+            "available": True,
+            "model_state_total_proposals": int(numeric_or(summary_json.get("total_proposals", len(proposals)), 0)),
+            "model_state_increase_count": int(numeric_or(summary_json.get("increase_count", 0), 0)),
+            "model_state_decrease_count": int(numeric_or(summary_json.get("decrease_count", 0), 0)),
+            "model_state_hold_count": int(numeric_or(summary_json.get("hold_count", 0), 0)),
+            "model_state_insufficient_data_count": int(numeric_or(summary_json.get("insufficient_data_count", 0), 0)),
+            "model_state_apply_automatically": str((summary_json.get("safety", {}) or {}).get("apply_automatically", False)).lower(),
+            "strong_candidates": strong.head(5).to_dict(orient="records"),
+        }
+    if not proposals.empty:
+        strong = proposals[proposals["proposal_strength"].astype(str) == "strong"] if "proposal_strength" in proposals.columns else pd.DataFrame()
+        direction = proposals.get("proposal_direction", pd.Series("", index=proposals.index)).fillna("").astype(str)
+        confidence = proposals.get("confidence_level", pd.Series("", index=proposals.index)).fillna("").astype(str)
+        return {
+            "available": True,
+            "model_state_total_proposals": int(len(proposals)),
+            "model_state_increase_count": int((direction == "increase").sum()),
+            "model_state_decrease_count": int((direction == "decrease").sum()),
+            "model_state_hold_count": int((direction == "hold").sum()),
+            "model_state_insufficient_data_count": int((confidence == "insufficient_data").sum()),
+            "model_state_apply_automatically": "false",
+            "strong_candidates": strong.head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "model_state_total_proposals": 0,
+        "model_state_increase_count": 0,
+        "model_state_decrease_count": 0,
+        "model_state_hold_count": 0,
+        "model_state_insufficient_data_count": 0,
+        "model_state_apply_automatically": "false",
+        "strong_candidates": [],
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {
@@ -758,7 +837,13 @@ def build_dashboard() -> tuple[dict, str]:
     latest_eval_summary = latest_evaluation_view_summary(extras["latest_evaluations"], extras["latest_evaluations_summary_json"])
     reason_table, no_trade_table = reason_code_data(signals, evaluations, extras["reason_code_analysis"], extras["reason_code_analysis_json"])
     rule_updates = extras["rule_update_proposals"]
+    model_state_updates = extras["model_state_update_proposals"]
     ai_summary = ai_feedback_summary(ai_feedback, extras["ai_feedback_json"])
+    model_state_summary = model_state_update_summary(
+        model_state_updates,
+        extras["model_state_update_proposals_json"],
+        extras["model_state_update_summary_json"],
+    )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -779,6 +864,7 @@ def build_dashboard() -> tuple[dict, str]:
         "monthly_calibration": len(monthly),
         "reason_code_analysis": len(reason_table),
         "rule_update_proposals": len(rule_updates),
+        "model_state_update_proposals": len(model_state_updates),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -794,6 +880,7 @@ def build_dashboard() -> tuple[dict, str]:
         "latest_monthly_calibration_date": latest_file_date("reports/monthly/*_monthly_calibration.md"),
         "latest_reason_code_analysis_date": latest_file_date("reports/reason_codes/*_reason_code_analysis.md"),
         "latest_rule_update_proposals_date": latest_file_date("reports/rule_updates/*_rule_update_proposals.md"),
+        "latest_model_state_update_proposals_date": latest_file_date("reports/model_state/*_model_state_update_proposals.md"),
         "latest_ai_feedback_date": latest_file_date("reports/ai_feedback/*_ai_feedback.md") or ai_summary["latest_date"],
     }
     apply_false = True
@@ -821,6 +908,7 @@ def build_dashboard() -> tuple[dict, str]:
         "asset_performance": asset_table.to_dict(orient="records"),
         "top_reason_codes": reason_tops,
         "rule_update_summary": rule_update_summary,
+        "model_state_update_summary": model_state_summary,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -845,6 +933,8 @@ def build_dashboard() -> tuple[dict, str]:
         reason_table=reason_table,
         no_trade_table=no_trade_table,
         rule_updates=rule_updates,
+        model_state_updates=model_state_updates,
+        model_state_summary=model_state_summary,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
@@ -878,6 +968,8 @@ def render_html(
     reason_table: pd.DataFrame,
     no_trade_table: pd.DataFrame,
     rule_updates: pd.DataFrame,
+    model_state_updates: pd.DataFrame,
+    model_state_summary: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -908,6 +1000,7 @@ def render_html(
             stat_card("latest monthly calibration", latest_dates["latest_monthly_calibration_date"] or "未取得"),
             stat_card("latest reason_code_analysis", latest_dates["latest_reason_code_analysis_date"] or "未取得"),
             stat_card("latest rule_update_proposals", latest_dates["latest_rule_update_proposals_date"] or "未取得"),
+            stat_card("latest_model_state_update_proposals", latest_dates["latest_model_state_update_proposals_date"] or "未取得"),
             stat_card("latest ai feedback", latest_dates["latest_ai_feedback_date"] or "未取得"),
         ]
     )
@@ -958,6 +1051,17 @@ def render_html(
     )
     if not news_driver_list:
         news_driver_list = "<li>ニュースナラティブ未取得</li>"
+    model_state_stats = "".join(
+        [
+            stat_card("model_state_total_proposals", model_state_summary.get("model_state_total_proposals", 0)),
+            stat_card("model_state_increase_count", model_state_summary.get("model_state_increase_count", 0)),
+            stat_card("model_state_decrease_count", model_state_summary.get("model_state_decrease_count", 0)),
+            stat_card("model_state_hold_count", model_state_summary.get("model_state_hold_count", 0)),
+            stat_card("model_state_insufficient_data_count", model_state_summary.get("model_state_insufficient_data_count", 0)),
+            stat_card("model_state_apply_automatically", model_state_summary.get("model_state_apply_automatically", "false")),
+        ]
+    )
+    model_state_strong = pd.DataFrame(model_state_summary.get("strong_candidates", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -1043,6 +1147,7 @@ def render_html(
     <section class="card"><h2>判断理由コード別成績</h2><h3>プラス寄与が大きい理由</h3>{table_html(top_positive, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>マイナス寄与が大きい理由</h3>{table_html(top_negative, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>データ不足</h3>{table_html(insufficient, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}</section>
     <section class="card"><h2>見送り理由分析</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "見送り理由データなし")}</section>
     <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
+    <section class="card"><h2>Model State 更新提案</h2>{'<div class="empty">Model State更新提案未取得</div>' if not model_state_summary.get('available') else f'<div class="grid">{model_state_stats}</div>'}<h3>strong候補 上位5件</h3>{table_html(model_state_strong, ["category","target","sample_count","win_rate","avg_r","proposal_direction","proposal_strength","proposed_delta","proposed_weight","rationale"], "strong候補なし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
