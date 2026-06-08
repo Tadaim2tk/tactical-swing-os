@@ -35,3 +35,6 @@ reports/model_state/*.md
 results/model_state_update_proposals.csv
 results/model_state_update_proposals.json
 results/model_state_update_summary.json
+results/model_state_proposal_audit.json
+results/model_state_proposal_audit.csv
+reports/model_state/*_model_state_proposal_audit.md

@@ -139,6 +139,12 @@ DISPLAY_LABELS = {
     "model_state_hold_count": "hold件数",
     "model_state_insufficient_data_count": "データ不足件数",
     "model_state_apply_automatically": "自動適用",
+    "model_state_audit_status": "安全監査",
+    "model_state_audit_warning_count": "警告件数",
+    "model_state_audit_blocked_count": "ブロック件数",
+    "model_state_audit_critical_count": "重大件数",
+    "model_state_requires_human_review": "人間確認",
+    "model_state_weights_json_updated": "weights.json更新",
     "category": "カテゴリ",
     "target": "対象",
     "sample_count": "サンプル数",
@@ -169,6 +175,12 @@ VALUE_LABELS = {
     "increase": "increase（引き上げ候補）",
     "decrease": "decrease（引き下げ候補）",
     "hold": "hold（保留）",
+    "passed": "passed（通過）",
+    "warning": "warning（警告）",
+    "blocked": "blocked（ブロック）",
+    "unavailable": "unavailable（未取得）",
+    "False": "false",
+    "True": "true",
     "strong": "strong（強い候補）",
     "moderate": "moderate（中程度）",
     "weak": "weak（弱い候補）",
@@ -279,6 +291,8 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "rule_update_proposals_json": read_json(RESULTS_DIR / "rule_update_proposals.json"),
         "model_state_update_proposals_json": read_json(RESULTS_DIR / "model_state_update_proposals.json"),
         "model_state_update_summary_json": read_json(RESULTS_DIR / "model_state_update_summary.json"),
+        "model_state_proposal_audit": read_csv(RESULTS_DIR / "model_state_proposal_audit.csv"),
+        "model_state_proposal_audit_json": read_json(RESULTS_DIR / "model_state_proposal_audit.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
@@ -646,6 +660,18 @@ def news_narrative_summary(news_csv: pd.DataFrame, news_json) -> dict:
 
 
 def model_state_update_summary(proposals: pd.DataFrame, proposals_json, summary_json) -> dict:
+    if isinstance(summary_json, dict) and summary_json:
+        strong = proposals[proposals["proposal_strength"].astype(str) == "strong"] if not proposals.empty and "proposal_strength" in proposals.columns else pd.DataFrame()
+        return {
+            "available": True,
+            "model_state_total_proposals": int(numeric_or(summary_json.get("total_proposals", len(proposals)), 0)),
+            "model_state_increase_count": int(numeric_or(summary_json.get("increase_count", 0), 0)),
+            "model_state_decrease_count": int(numeric_or(summary_json.get("decrease_count", 0), 0)),
+            "model_state_hold_count": int(numeric_or(summary_json.get("hold_count", 0), 0)),
+            "model_state_insufficient_data_count": int(numeric_or(summary_json.get("insufficient_data_count", 0), 0)),
+            "model_state_apply_automatically": str((summary_json.get("safety", {}) or {}).get("apply_automatically", False)).lower(),
+            "strong_candidates": strong.head(5).to_dict(orient="records"),
+        }
     if isinstance(proposals_json, dict) and proposals_json:
         summary = proposals_json.get("summary", {}) or {}
         rows = proposals_json.get("proposals", []) or []
@@ -659,18 +685,6 @@ def model_state_update_summary(proposals: pd.DataFrame, proposals_json, summary_
             "model_state_hold_count": int(numeric_or(summary.get("hold_count", 0), 0)),
             "model_state_insufficient_data_count": int(numeric_or(summary.get("insufficient_data_count", 0), 0)),
             "model_state_apply_automatically": str((proposals_json.get("safety", {}) or {}).get("apply_automatically", False)).lower(),
-            "strong_candidates": strong.head(5).to_dict(orient="records"),
-        }
-    if isinstance(summary_json, dict) and summary_json:
-        strong = proposals[proposals["proposal_strength"].astype(str) == "strong"] if not proposals.empty and "proposal_strength" in proposals.columns else pd.DataFrame()
-        return {
-            "available": True,
-            "model_state_total_proposals": int(numeric_or(summary_json.get("total_proposals", len(proposals)), 0)),
-            "model_state_increase_count": int(numeric_or(summary_json.get("increase_count", 0), 0)),
-            "model_state_decrease_count": int(numeric_or(summary_json.get("decrease_count", 0), 0)),
-            "model_state_hold_count": int(numeric_or(summary_json.get("hold_count", 0), 0)),
-            "model_state_insufficient_data_count": int(numeric_or(summary_json.get("insufficient_data_count", 0), 0)),
-            "model_state_apply_automatically": str((summary_json.get("safety", {}) or {}).get("apply_automatically", False)).lower(),
             "strong_candidates": strong.head(5).to_dict(orient="records"),
         }
     if not proposals.empty:
@@ -696,6 +710,38 @@ def model_state_update_summary(proposals: pd.DataFrame, proposals_json, summary_
         "model_state_insufficient_data_count": 0,
         "model_state_apply_automatically": "false",
         "strong_candidates": [],
+    }
+
+
+def model_state_audit_summary(audit_json, audit_csv: pd.DataFrame) -> dict:
+    if isinstance(audit_json, dict) and audit_json:
+        return {
+            "model_state_audit_status": audit_json.get("audit_status", "unavailable"),
+            "model_state_audit_warning_count": int(numeric_or(audit_json.get("warning_count", 0), 0)),
+            "model_state_audit_blocked_count": int(numeric_or(audit_json.get("blocked_count", 0), 0)),
+            "model_state_audit_critical_count": int(numeric_or(audit_json.get("critical_count", 0), 0)),
+            "model_state_requires_human_review": "必須" if audit_json.get("requires_human_review", True) else "不要",
+            "model_state_weights_json_updated": str(audit_json.get("weights_json_updated", False)).lower(),
+        }
+    if not audit_csv.empty:
+        result = audit_csv.get("audit_result", pd.Series("", index=audit_csv.index)).fillna("").astype(str)
+        severity = audit_csv.get("severity", pd.Series("", index=audit_csv.index)).fillna("").astype(str)
+        status = "blocked" if (result == "blocked").any() else "warning" if (result == "warning").any() else "passed"
+        return {
+            "model_state_audit_status": status,
+            "model_state_audit_warning_count": int((result == "warning").sum()),
+            "model_state_audit_blocked_count": int((result == "blocked").sum()),
+            "model_state_audit_critical_count": int((severity == "critical").sum()),
+            "model_state_requires_human_review": "必須",
+            "model_state_weights_json_updated": "false",
+        }
+    return {
+        "model_state_audit_status": "unavailable",
+        "model_state_audit_warning_count": 0,
+        "model_state_audit_blocked_count": 0,
+        "model_state_audit_critical_count": 0,
+        "model_state_requires_human_review": "必須",
+        "model_state_weights_json_updated": "false",
     }
 
 
@@ -844,6 +890,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["model_state_update_proposals_json"],
         extras["model_state_update_summary_json"],
     )
+    model_state_audit = model_state_audit_summary(
+        extras["model_state_proposal_audit_json"],
+        extras["model_state_proposal_audit"],
+    )
+    model_state_summary.update(model_state_audit)
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -1058,6 +1109,12 @@ def render_html(
             stat_card("model_state_decrease_count", model_state_summary.get("model_state_decrease_count", 0)),
             stat_card("model_state_hold_count", model_state_summary.get("model_state_hold_count", 0)),
             stat_card("model_state_insufficient_data_count", model_state_summary.get("model_state_insufficient_data_count", 0)),
+            stat_card("model_state_audit_status", model_state_summary.get("model_state_audit_status", "unavailable")),
+            stat_card("model_state_audit_blocked_count", model_state_summary.get("model_state_audit_blocked_count", 0)),
+            stat_card("model_state_audit_warning_count", model_state_summary.get("model_state_audit_warning_count", 0)),
+            stat_card("model_state_audit_critical_count", model_state_summary.get("model_state_audit_critical_count", 0)),
+            stat_card("model_state_requires_human_review", model_state_summary.get("model_state_requires_human_review", "必須")),
+            stat_card("model_state_weights_json_updated", model_state_summary.get("model_state_weights_json_updated", "false")),
             stat_card("model_state_apply_automatically", model_state_summary.get("model_state_apply_automatically", "false")),
         ]
     )
