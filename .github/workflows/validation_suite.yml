@@ -46,6 +46,7 @@ jobs:
           python src/build_weight_version_history.py
           python src/build_meta_learning.py
           python src/build_auto_calibration_candidates.py
+          python src/build_human_override_analytics.py
           python src/audit_datetime_consistency.py
           python src/build_dashboard.py
 
@@ -77,6 +78,7 @@ jobs:
           check_file "weight version history" "results/weight_version_history_summary.json"
           check_file "meta learning" "results/meta_learning_summary.json"
           check_file "auto calibration candidates" "results/auto_calibration_candidates_summary.json"
+          check_file "human override analytics" "results/human_override_analytics_summary.json"
           check_file "datetime audit" "results/datetime_audit_summary.json"
           check_file "dashboard" "reports/dashboard/index.html"
 
@@ -121,6 +123,10 @@ jobs:
             results/auto_calibration_candidates.json
             results/auto_calibration_candidates_summary.json
             reports/model_state/*_auto_calibration_candidates.md
+            results/human_override_analytics.csv
+            results/human_override_analytics.json
+            results/human_override_analytics_summary.json
+            reports/model_state/*_human_override_analytics.md
             results/datetime_audit.csv
             results/datetime_audit.json
             results/datetime_audit_summary.json
