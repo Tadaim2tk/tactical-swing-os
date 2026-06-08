@@ -194,6 +194,20 @@ DISPLAY_LABELS = {
     "adoption_source": "採用判断ソース",
     "human_decision_recorded": "人間判断記録",
     "tracking_reason": "追跡理由",
+    "weight_history_current_version": "現在Version",
+    "weight_history_version_count": "Version数",
+    "weight_history_tracked_count": "tracked件数",
+    "weight_history_held_count": "held件数",
+    "weight_history_candidate_count": "candidate件数",
+    "weight_history_approved_count": "approved件数",
+    "weight_history_rejected_count": "rejected件数",
+    "weight_history_blocked_count": "blocked件数",
+    "weight_history_weights_json_updated": "weights.json更新",
+    "weight_history_patch_applied": "patch適用",
+    "weight_history_requires_human_approval": "人間承認",
+    "version_id": "Version",
+    "description": "説明",
+    "notes": "備考",
 }
 VALUE_LABELS = {
     "not available": "未取得",
@@ -241,6 +255,8 @@ VALUE_LABELS = {
     "accepted": "accepted（採用済み）",
     "rejected": "rejected（却下）",
     "superseded": "superseded（置き換え済み）",
+    "tracked": "tracked（追跡対象）",
+    "approved": "approved（承認済み）",
     "derived_from_review": "レビュー由来",
     "manual": "手動判断",
 }
@@ -360,6 +376,9 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "proposal_adoption_tracking": read_csv(RESULTS_DIR / "proposal_adoption_tracking.csv"),
         "proposal_adoption_tracking_json": read_json(RESULTS_DIR / "proposal_adoption_tracking.json"),
         "proposal_adoption_tracking_summary_json": read_json(RESULTS_DIR / "proposal_adoption_tracking_summary.json"),
+        "weight_version_history": read_csv(RESULTS_DIR / "weight_version_history.csv"),
+        "weight_version_history_json": read_json(RESULTS_DIR / "weight_version_history.json"),
+        "weight_version_history_summary_json": read_json(RESULTS_DIR / "weight_version_history_summary.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
@@ -996,6 +1015,61 @@ def proposal_adoption_summary(adoption_csv: pd.DataFrame, adoption_json, summary
     }
 
 
+def weight_version_history_summary(history_csv: pd.DataFrame, history_json, summary_json) -> dict:
+    payload = history_json if isinstance(history_json, dict) and history_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = history_json.get("proposals", []) if isinstance(history_json, dict) else []
+        if not rows and not history_csv.empty:
+            rows = history_csv.to_dict(orient="records")
+        return {
+            "available": True,
+            "weight_history_current_version": payload.get("current_version", "v1"),
+            "weight_history_version_count": int(numeric_or(payload.get("version_count", 1), 1)),
+            "weight_history_tracked_count": int(numeric_or(payload.get("tracked_count", 0), 0)),
+            "weight_history_held_count": int(numeric_or(payload.get("held_count", 0), 0)),
+            "weight_history_candidate_count": int(numeric_or(payload.get("candidate_count", 0), 0)),
+            "weight_history_approved_count": int(numeric_or(payload.get("approved_count", 0), 0)),
+            "weight_history_rejected_count": int(numeric_or(payload.get("rejected_count", 0), 0)),
+            "weight_history_blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+            "weight_history_weights_json_updated": str(payload.get("weights_json_updated", False)).lower(),
+            "weight_history_patch_applied": str(payload.get("patch_applied", False)).lower(),
+            "weight_history_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "proposal_rows": rows[:5],
+        }
+    if not history_csv.empty and "adoption_status" in history_csv.columns:
+        status = history_csv["adoption_status"].fillna("").astype(str)
+        return {
+            "available": True,
+            "weight_history_current_version": "v1",
+            "weight_history_version_count": 1,
+            "weight_history_tracked_count": int((status == "tracked").sum()),
+            "weight_history_held_count": int((status == "held").sum()),
+            "weight_history_candidate_count": int((status == "candidate").sum()),
+            "weight_history_approved_count": int((status == "approved").sum()),
+            "weight_history_rejected_count": int((status == "rejected").sum()),
+            "weight_history_blocked_count": int((status == "blocked").sum()),
+            "weight_history_weights_json_updated": "false",
+            "weight_history_patch_applied": "false",
+            "weight_history_requires_human_approval": "必須",
+            "proposal_rows": history_csv.head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "weight_history_current_version": "v1",
+        "weight_history_version_count": 1,
+        "weight_history_tracked_count": 0,
+        "weight_history_held_count": 0,
+        "weight_history_candidate_count": 0,
+        "weight_history_approved_count": 0,
+        "weight_history_rejected_count": 0,
+        "weight_history_blocked_count": 0,
+        "weight_history_weights_json_updated": "false",
+        "weight_history_patch_applied": "false",
+        "weight_history_requires_human_approval": "必須",
+        "proposal_rows": [],
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {
@@ -1161,6 +1235,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["proposal_adoption_tracking_json"],
         extras["proposal_adoption_tracking_summary_json"],
     )
+    weight_history = weight_version_history_summary(
+        extras["weight_version_history"],
+        extras["weight_version_history_json"],
+        extras["weight_version_history_summary_json"],
+    )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -1185,6 +1264,7 @@ def build_dashboard() -> tuple[dict, str]:
         "weights_patch_proposal": len(extras["weights_patch_proposal"]),
         "weights_patch_review": len(extras["weights_patch_review"]),
         "proposal_adoption_tracking": len(extras["proposal_adoption_tracking"]),
+        "weight_version_history": len(extras["weight_version_history"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -1232,6 +1312,7 @@ def build_dashboard() -> tuple[dict, str]:
         "weights_patch_summary": weights_patch,
         "weights_patch_review_summary": weights_patch_review,
         "proposal_adoption_summary": proposal_adoption,
+        "weight_version_history_summary": weight_history,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -1261,6 +1342,7 @@ def build_dashboard() -> tuple[dict, str]:
         weights_patch=weights_patch,
         weights_patch_review=weights_patch_review,
         proposal_adoption=proposal_adoption,
+        weight_history=weight_history,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
@@ -1299,6 +1381,7 @@ def render_html(
     weights_patch: dict,
     weights_patch_review: dict,
     proposal_adoption: dict,
+    weight_history: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -1441,6 +1524,22 @@ def render_html(
     )
     proposal_adoption_pending = pd.DataFrame(proposal_adoption.get("pending_rows", []) or [])
     proposal_adoption_held = pd.DataFrame(proposal_adoption.get("held_rows", []) or [])
+    weight_history_stats = "".join(
+        [
+            stat_card("weight_history_current_version", weight_history.get("weight_history_current_version", "v1")),
+            stat_card("weight_history_version_count", weight_history.get("weight_history_version_count", 1)),
+            stat_card("weight_history_tracked_count", weight_history.get("weight_history_tracked_count", 0)),
+            stat_card("weight_history_held_count", weight_history.get("weight_history_held_count", 0)),
+            stat_card("weight_history_candidate_count", weight_history.get("weight_history_candidate_count", 0)),
+            stat_card("weight_history_approved_count", weight_history.get("weight_history_approved_count", 0)),
+            stat_card("weight_history_rejected_count", weight_history.get("weight_history_rejected_count", 0)),
+            stat_card("weight_history_blocked_count", weight_history.get("weight_history_blocked_count", 0)),
+            stat_card("weight_history_weights_json_updated", weight_history.get("weight_history_weights_json_updated", "false")),
+            stat_card("weight_history_patch_applied", weight_history.get("weight_history_patch_applied", "false")),
+            stat_card("weight_history_requires_human_approval", weight_history.get("weight_history_requires_human_approval", "必須")),
+        ]
+    )
+    weight_history_rows = pd.DataFrame(weight_history.get("proposal_rows", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -1530,6 +1629,7 @@ def render_html(
     <section class="card"><h2>Weights Patch候補</h2>{'<div class="empty">Weights Patch候補未取得</div>' if not weights_patch.get('available') else f'<div class="grid">{weights_patch_stats}</div>'}<h3>patch候補 上位5件</h3>{table_html(weights_patch_candidates, ["weight_path","patch_action","current_weight","proposed_delta","proposed_value","proposal_direction","proposal_strength","rationale"], "patch候補なし")}</section>
     <section class="card"><h2>Weights Patchレビュー</h2>{'<div class="empty">Weights Patchレビュー未取得</div>' if not weights_patch_review.get('available') else f'<div class="grid">{weights_patch_review_stats}</div>'}<h3>承認候補 上位5件</h3>{table_html(weights_patch_review_candidates, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","patch_risk_level","review_reason"], "承認候補なし")}<h3>保留候補 上位5件</h3>{table_html(weights_patch_review_holds, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","evidence_quality","missing_conditions","review_reason"], "保留候補なし")}</section>
     <section class="card"><h2>Proposal Adoption Tracking</h2>{'<div class="empty">Proposal Adoption Tracking未取得</div>' if not proposal_adoption.get('available') else f'<div class="grid">{proposal_adoption_stats}</div>'}<h3>承認判断待ち 上位5件</h3>{table_html(proposal_adoption_pending, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "承認判断待ちなし")}<h3>保留中 上位5件</h3>{table_html(proposal_adoption_held, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "保留中なし")}</section>
+    <section class="card"><h2>Weight Version History</h2>{'<div class="empty">Weight Version History未取得</div>' if not weight_history.get('available') else f'<div class="grid">{weight_history_stats}</div>'}<h3>Proposal一覧 上位5件</h3>{table_html(weight_history_rows, ["version_id","source","proposal_id","review_decision","adoption_status","description","weights_json_updated","patch_applied","requires_human_approval","notes"], "履歴Proposalなし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>

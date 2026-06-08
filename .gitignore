@@ -50,3 +50,7 @@ results/proposal_adoption_tracking.csv
 results/proposal_adoption_tracking.json
 results/proposal_adoption_tracking_summary.json
 reports/model_state/*_proposal_adoption_tracking.md
+results/weight_version_history.csv
+results/weight_version_history.json
+results/weight_version_history_summary.json
+reports/model_state/*_weight_version_history.md
