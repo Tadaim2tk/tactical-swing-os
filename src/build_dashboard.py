@@ -164,6 +164,21 @@ DISPLAY_LABELS = {
     "patch_action": "patch action",
     "current_weight": "現在weight",
     "proposed_value": "提案値",
+    "weights_patch_review_status": "review_status",
+    "weights_patch_review_candidate_count": "承認候補",
+    "weights_patch_review_hold_count": "保留候補",
+    "weights_patch_review_reject_count": "却下候補",
+    "weights_patch_review_blocked_count": "ブロック候補",
+    "weights_patch_review_recommended_next_action": "推奨次アクション",
+    "weights_patch_review_requires_human_approval": "人間承認",
+    "weights_patch_review_patch_applied": "patch適用",
+    "weights_patch_review_weights_json_updated": "weights.json更新",
+    "review_decision": "レビュー判定",
+    "recommended_human_action": "推奨人間アクション",
+    "review_reason": "レビュー理由",
+    "evidence_quality": "根拠品質",
+    "patch_risk_level": "patchリスク",
+    "missing_conditions": "不足条件",
 }
 VALUE_LABELS = {
     "not available": "未取得",
@@ -196,6 +211,15 @@ VALUE_LABELS = {
     "moderate": "moderate（中程度）",
     "weak": "weak（弱い候補）",
     "none": "none（提案なし）",
+    "candidate": "candidate（承認候補）",
+    "reject": "reject（却下）",
+    "low": "low（低）",
+    "medium": "medium（中）",
+    "high": "high（高）",
+    "approve_later": "approve_later（後で承認検討）",
+    "wait_for_more_data": "wait_for_more_data（データ蓄積待ち）",
+    "manual_review": "manual_review（人間確認）",
+    "no_action": "no_action（対応なし）",
 }
 
 
@@ -307,6 +331,9 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "weights_patch_proposal": read_csv(RESULTS_DIR / "weights_patch_proposal.csv"),
         "weights_patch_proposal_json": read_json(RESULTS_DIR / "weights_patch_proposal.json"),
         "weights_patch_summary_json": read_json(RESULTS_DIR / "weights_patch_summary.json"),
+        "weights_patch_review": read_csv(RESULTS_DIR / "weights_patch_review.csv"),
+        "weights_patch_review_json": read_json(RESULTS_DIR / "weights_patch_review.json"),
+        "weights_patch_review_summary_json": read_json(RESULTS_DIR / "weights_patch_review_summary.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
@@ -814,6 +841,76 @@ def weights_patch_summary(patch_csv: pd.DataFrame, patch_json, summary_json) -> 
     }
 
 
+def weights_patch_review_summary(review_csv: pd.DataFrame, review_json, summary_json) -> dict:
+    if isinstance(review_json, dict) and review_json:
+        rows = review_json.get("patch_review", []) or []
+        return {
+            "available": True,
+            "weights_patch_review_status": review_json.get("review_status", "unavailable"),
+            "weights_patch_review_candidate_count": int(numeric_or(review_json.get("candidate_count", 0), 0)),
+            "weights_patch_review_hold_count": int(numeric_or(review_json.get("hold_count", 0), 0)),
+            "weights_patch_review_reject_count": int(numeric_or(review_json.get("reject_count", 0), 0)),
+            "weights_patch_review_blocked_count": int(numeric_or(review_json.get("blocked_count", 0), 0)),
+            "weights_patch_review_recommended_next_action": review_json.get("recommended_next_action", "no_action"),
+            "weights_patch_review_requires_human_approval": "必須" if review_json.get("requires_human_approval", True) else "不要",
+            "weights_patch_review_patch_applied": str(review_json.get("patch_applied", False)).lower(),
+            "weights_patch_review_weights_json_updated": str(review_json.get("weights_json_updated", False)).lower(),
+            "candidate_rows": [row for row in rows if str(row.get("review_decision", "")) == "candidate"][:5],
+            "hold_rows": [row for row in rows if str(row.get("review_decision", "")) == "hold"][:5],
+        }
+    if isinstance(summary_json, dict) and summary_json:
+        candidates = review_csv[review_csv["review_decision"].astype(str) == "candidate"].head(5) if not review_csv.empty and "review_decision" in review_csv.columns else pd.DataFrame()
+        holds = review_csv[review_csv["review_decision"].astype(str) == "hold"].head(5) if not review_csv.empty and "review_decision" in review_csv.columns else pd.DataFrame()
+        return {
+            "available": True,
+            "weights_patch_review_status": summary_json.get("review_status", "unavailable"),
+            "weights_patch_review_candidate_count": int(numeric_or(summary_json.get("candidate_count", 0), 0)),
+            "weights_patch_review_hold_count": int(numeric_or(summary_json.get("hold_count", 0), 0)),
+            "weights_patch_review_reject_count": int(numeric_or(summary_json.get("reject_count", 0), 0)),
+            "weights_patch_review_blocked_count": int(numeric_or(summary_json.get("blocked_count", 0), 0)),
+            "weights_patch_review_recommended_next_action": summary_json.get("recommended_next_action", "no_action"),
+            "weights_patch_review_requires_human_approval": "必須" if summary_json.get("requires_human_approval", True) else "不要",
+            "weights_patch_review_patch_applied": str(summary_json.get("patch_applied", False)).lower(),
+            "weights_patch_review_weights_json_updated": str(summary_json.get("weights_json_updated", False)).lower(),
+            "candidate_rows": candidates.to_dict(orient="records"),
+            "hold_rows": holds.to_dict(orient="records"),
+        }
+    if not review_csv.empty and "review_decision" in review_csv.columns:
+        decision = review_csv["review_decision"].fillna("").astype(str)
+        risk = review_csv.get("patch_risk_level", pd.Series("", index=review_csv.index)).fillna("").astype(str)
+        return {
+            "available": True,
+            "weights_patch_review_status": "blocked" if (decision == "blocked").any() else "warning" if decision.isin(["hold", "reject"]).any() else "passed",
+            "weights_patch_review_candidate_count": int((decision == "candidate").sum()),
+            "weights_patch_review_hold_count": int((decision == "hold").sum()),
+            "weights_patch_review_reject_count": int((decision == "reject").sum()),
+            "weights_patch_review_blocked_count": int((decision == "blocked").sum()),
+            "weights_patch_review_recommended_next_action": "manual_review" if (decision == "candidate").any() else "wait_for_more_data" if (decision == "hold").any() else "no_action",
+            "weights_patch_review_requires_human_approval": "必須",
+            "weights_patch_review_patch_applied": "false",
+            "weights_patch_review_weights_json_updated": "false",
+            "weights_patch_review_low_risk_count": int((risk == "low").sum()),
+            "weights_patch_review_medium_risk_count": int((risk == "medium").sum()),
+            "weights_patch_review_high_risk_count": int((risk == "high").sum()),
+            "candidate_rows": review_csv[decision == "candidate"].head(5).to_dict(orient="records"),
+            "hold_rows": review_csv[decision == "hold"].head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "weights_patch_review_status": "unavailable",
+        "weights_patch_review_candidate_count": 0,
+        "weights_patch_review_hold_count": 0,
+        "weights_patch_review_reject_count": 0,
+        "weights_patch_review_blocked_count": 0,
+        "weights_patch_review_recommended_next_action": "no_action",
+        "weights_patch_review_requires_human_approval": "必須",
+        "weights_patch_review_patch_applied": "false",
+        "weights_patch_review_weights_json_updated": "false",
+        "candidate_rows": [],
+        "hold_rows": [],
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {
@@ -969,6 +1066,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["weights_patch_proposal_json"],
         extras["weights_patch_summary_json"],
     )
+    weights_patch_review = weights_patch_review_summary(
+        extras["weights_patch_review"],
+        extras["weights_patch_review_json"],
+        extras["weights_patch_review_summary_json"],
+    )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -991,6 +1093,7 @@ def build_dashboard() -> tuple[dict, str]:
         "rule_update_proposals": len(rule_updates),
         "model_state_update_proposals": len(model_state_updates),
         "weights_patch_proposal": len(extras["weights_patch_proposal"]),
+        "weights_patch_review": len(extras["weights_patch_review"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -1036,6 +1139,7 @@ def build_dashboard() -> tuple[dict, str]:
         "rule_update_summary": rule_update_summary,
         "model_state_update_summary": model_state_summary,
         "weights_patch_summary": weights_patch,
+        "weights_patch_review_summary": weights_patch_review,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -1063,6 +1167,7 @@ def build_dashboard() -> tuple[dict, str]:
         model_state_updates=model_state_updates,
         model_state_summary=model_state_summary,
         weights_patch=weights_patch,
+        weights_patch_review=weights_patch_review,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
@@ -1099,6 +1204,7 @@ def render_html(
     model_state_updates: pd.DataFrame,
     model_state_summary: dict,
     weights_patch: dict,
+    weights_patch_review: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -1209,6 +1315,21 @@ def render_html(
         ]
     )
     weights_patch_candidates = pd.DataFrame(weights_patch.get("patch_candidates", []) or [])
+    weights_patch_review_stats = "".join(
+        [
+            stat_card("weights_patch_review_status", weights_patch_review.get("weights_patch_review_status", "unavailable")),
+            stat_card("weights_patch_review_candidate_count", weights_patch_review.get("weights_patch_review_candidate_count", 0)),
+            stat_card("weights_patch_review_hold_count", weights_patch_review.get("weights_patch_review_hold_count", 0)),
+            stat_card("weights_patch_review_reject_count", weights_patch_review.get("weights_patch_review_reject_count", 0)),
+            stat_card("weights_patch_review_blocked_count", weights_patch_review.get("weights_patch_review_blocked_count", 0)),
+            stat_card("weights_patch_review_recommended_next_action", weights_patch_review.get("weights_patch_review_recommended_next_action", "no_action")),
+            stat_card("weights_patch_review_requires_human_approval", weights_patch_review.get("weights_patch_review_requires_human_approval", "必須")),
+            stat_card("weights_patch_review_patch_applied", weights_patch_review.get("weights_patch_review_patch_applied", "false")),
+            stat_card("weights_patch_review_weights_json_updated", weights_patch_review.get("weights_patch_review_weights_json_updated", "false")),
+        ]
+    )
+    weights_patch_review_candidates = pd.DataFrame(weights_patch_review.get("candidate_rows", []) or [])
+    weights_patch_review_holds = pd.DataFrame(weights_patch_review.get("hold_rows", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -1296,6 +1417,7 @@ def render_html(
     <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
     <section class="card"><h2>Model State 更新提案</h2>{'<div class="empty">Model State更新提案未取得</div>' if not model_state_summary.get('available') else f'<div class="grid">{model_state_stats}</div>'}<h3>strong候補 上位5件</h3>{table_html(model_state_strong, ["category","target","sample_count","win_rate","avg_r","proposal_direction","proposal_strength","proposed_delta","proposed_weight","rationale"], "strong候補なし")}</section>
     <section class="card"><h2>Weights Patch候補</h2>{'<div class="empty">Weights Patch候補未取得</div>' if not weights_patch.get('available') else f'<div class="grid">{weights_patch_stats}</div>'}<h3>patch候補 上位5件</h3>{table_html(weights_patch_candidates, ["weight_path","patch_action","current_weight","proposed_delta","proposed_value","proposal_direction","proposal_strength","rationale"], "patch候補なし")}</section>
+    <section class="card"><h2>Weights Patchレビュー</h2>{'<div class="empty">Weights Patchレビュー未取得</div>' if not weights_patch_review.get('available') else f'<div class="grid">{weights_patch_review_stats}</div>'}<h3>承認候補 上位5件</h3>{table_html(weights_patch_review_candidates, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","patch_risk_level","review_reason"], "承認候補なし")}<h3>保留候補 上位5件</h3>{table_html(weights_patch_review_holds, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","evidence_quality","missing_conditions","review_reason"], "保留候補なし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
