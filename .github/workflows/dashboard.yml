@@ -102,6 +102,10 @@ jobs:
         run: |
           python src/build_weight_version_history.py || echo "warning: weight version history failed; continuing dashboard"
 
+      - name: Build meta learning for dashboard
+        run: |
+          python src/build_meta_learning.py || echo "warning: meta learning failed; continuing dashboard"
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -150,6 +154,9 @@ jobs:
             results/weight_version_history.csv
             results/weight_version_history.json
             results/weight_version_history_summary.json
+            results/meta_learning.csv
+            results/meta_learning.json
+            results/meta_learning_summary.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

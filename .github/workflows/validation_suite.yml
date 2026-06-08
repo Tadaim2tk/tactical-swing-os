@@ -44,6 +44,7 @@ jobs:
           python src/review_weights_patch.py
           python src/track_proposal_adoption.py
           python src/build_weight_version_history.py
+          python src/build_meta_learning.py
           python src/build_dashboard.py
 
       - name: Write validation summary
@@ -72,6 +73,7 @@ jobs:
           check_file "weights patch review" "results/weights_patch_review_summary.json"
           check_file "proposal adoption tracking" "results/proposal_adoption_tracking_summary.json"
           check_file "weight version history" "results/weight_version_history_summary.json"
+          check_file "meta learning" "results/meta_learning_summary.json"
           check_file "dashboard" "reports/dashboard/index.html"
 
       - name: Upload validation artifacts
@@ -107,3 +109,7 @@ jobs:
             results/weight_version_history.json
             results/weight_version_history_summary.json
             reports/model_state/*_weight_version_history.md
+            results/meta_learning.csv
+            results/meta_learning.json
+            results/meta_learning_summary.json
+            reports/model_state/*_meta_learning.md
