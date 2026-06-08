@@ -86,6 +86,10 @@ jobs:
         run: |
           python src/audit_model_state_proposals.py || echo "warning: model state audit failed; continuing dashboard"
 
+      - name: Build weights patch proposal for dashboard
+        run: |
+          python src/build_weights_patch.py || echo "warning: weights patch proposal failed; continuing dashboard"
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -122,6 +126,9 @@ jobs:
             results/model_state_update_summary.json
             results/model_state_proposal_audit.csv
             results/model_state_proposal_audit.json
+            results/weights_patch_proposal.csv
+            results/weights_patch_proposal.json
+            results/weights_patch_summary.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

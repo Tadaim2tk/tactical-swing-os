@@ -38,3 +38,7 @@ results/model_state_update_summary.json
 results/model_state_proposal_audit.json
 results/model_state_proposal_audit.csv
 reports/model_state/*_model_state_proposal_audit.md
+results/weights_patch_proposal.csv
+results/weights_patch_proposal.json
+results/weights_patch_summary.json
+reports/model_state/*_weights_patch_proposal.md
