@@ -58,3 +58,7 @@ results/meta_learning.csv
 results/meta_learning.json
 results/meta_learning_summary.json
 reports/model_state/*_meta_learning.md
+results/datetime_audit.csv
+results/datetime_audit.json
+results/datetime_audit_summary.json
+reports/system/*_datetime_audit.md

@@ -174,7 +174,10 @@ def filter_period(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> p
         return df.copy()
     out = df.copy()
     out["_calibration_date"] = pd.to_datetime(out[date_col], errors="coerce", utc=True).dt.tz_localize(None)
-    mask = (out["_calibration_date"].dt.date >= start.date()) & (out["_calibration_date"].dt.date <= end.date())
+    start_ts = pd.Timestamp(start).tz_localize(None).normalize()
+    end_ts = pd.Timestamp(end).tz_localize(None).normalize()
+    calibration_date = out["_calibration_date"].dt.normalize()
+    mask = (calibration_date >= start_ts) & (calibration_date <= end_ts)
     return out[mask].drop(columns=["_calibration_date"])
 
 

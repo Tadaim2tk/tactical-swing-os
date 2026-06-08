@@ -225,6 +225,12 @@ DISPLAY_LABELS = {
     "impact_direction": "impact方向",
     "learning_hypothesis": "学習仮説",
     "evidence_summary": "根拠要約",
+    "datetime_audit_status": "datetime audit status",
+    "datetime_issues_found": "issues found",
+    "datetime_timezone_mismatch": "timezone mismatch",
+    "datetime_naive_datetime": "naive datetime count",
+    "datetime_timestamp_mismatch": "timestamp mismatch",
+    "datetime_recommended_action": "recommended action",
 }
 VALUE_LABELS = {
     "not available": "未取得",
@@ -405,6 +411,9 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "meta_learning": read_csv(RESULTS_DIR / "meta_learning.csv"),
         "meta_learning_json": read_json(RESULTS_DIR / "meta_learning.json"),
         "meta_learning_summary_json": read_json(RESULTS_DIR / "meta_learning_summary.json"),
+        "datetime_audit": read_csv(RESULTS_DIR / "datetime_audit.csv"),
+        "datetime_audit_json": read_json(RESULTS_DIR / "datetime_audit.json"),
+        "datetime_audit_summary_json": read_json(RESULTS_DIR / "datetime_audit_summary.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
@@ -1154,6 +1163,41 @@ def meta_learning_summary(meta_csv: pd.DataFrame, meta_json, summary_json) -> di
     }
 
 
+def datetime_audit_summary(audit_json, summary_json, audit_csv: pd.DataFrame) -> dict:
+    payload = audit_json if isinstance(audit_json, dict) and audit_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        return {
+            "available": True,
+            "datetime_audit_status": payload.get("audit_status", "unavailable"),
+            "datetime_issues_found": int(numeric_or(payload.get("issues_found", len(audit_csv)), 0)),
+            "datetime_timezone_mismatch": int(numeric_or(payload.get("timezone_mismatch", 0), 0)),
+            "datetime_naive_datetime": int(numeric_or(payload.get("naive_datetime", 0), 0)),
+            "datetime_timestamp_mismatch": int(numeric_or(payload.get("timestamp_mismatch", 0), 0)),
+            "datetime_recommended_action": payload.get("recommended_action", "monitor"),
+        }
+    if not audit_csv.empty:
+        issue_type = audit_csv.get("issue_type", pd.Series("", index=audit_csv.index)).fillna("").astype(str)
+        severity = audit_csv.get("severity", pd.Series("", index=audit_csv.index)).fillna("").astype(str)
+        return {
+            "available": True,
+            "datetime_audit_status": "warning" if (severity == "warning").any() else "passed",
+            "datetime_issues_found": int(len(audit_csv)),
+            "datetime_timezone_mismatch": int((issue_type == "timezone_mismatch").sum()),
+            "datetime_naive_datetime": int((issue_type == "naive_datetime").sum()),
+            "datetime_timestamp_mismatch": int((issue_type == "timestamp_mismatch").sum()),
+            "datetime_recommended_action": "normalize_to_timestamp" if (issue_type == "timestamp_mismatch").any() else "monitor",
+        }
+    return {
+        "available": False,
+        "datetime_audit_status": "unavailable",
+        "datetime_issues_found": 0,
+        "datetime_timezone_mismatch": 0,
+        "datetime_naive_datetime": 0,
+        "datetime_timestamp_mismatch": 0,
+        "datetime_recommended_action": "monitor",
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {
@@ -1329,6 +1373,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["meta_learning_json"],
         extras["meta_learning_summary_json"],
     )
+    datetime_health = datetime_audit_summary(
+        extras["datetime_audit_json"],
+        extras["datetime_audit_summary_json"],
+        extras["datetime_audit"],
+    )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -1355,6 +1404,7 @@ def build_dashboard() -> tuple[dict, str]:
         "proposal_adoption_tracking": len(extras["proposal_adoption_tracking"]),
         "weight_version_history": len(extras["weight_version_history"]),
         "meta_learning": len(extras["meta_learning"]),
+        "datetime_audit": len(extras["datetime_audit"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -1404,6 +1454,7 @@ def build_dashboard() -> tuple[dict, str]:
         "proposal_adoption_summary": proposal_adoption,
         "weight_version_history_summary": weight_history,
         "meta_learning_summary": meta_learning,
+        "datetime_audit_summary": datetime_health,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -1435,6 +1486,7 @@ def build_dashboard() -> tuple[dict, str]:
         proposal_adoption=proposal_adoption,
         weight_history=weight_history,
         meta_learning=meta_learning,
+        datetime_health=datetime_health,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
@@ -1475,6 +1527,7 @@ def render_html(
     proposal_adoption: dict,
     weight_history: dict,
     meta_learning: dict,
+    datetime_health: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -1507,6 +1560,16 @@ def render_html(
             stat_card("latest rule_update_proposals", latest_dates["latest_rule_update_proposals_date"] or "未取得"),
             stat_card("latest_model_state_update_proposals", latest_dates["latest_model_state_update_proposals_date"] or "未取得"),
             stat_card("latest ai feedback", latest_dates["latest_ai_feedback_date"] or "未取得"),
+        ]
+    )
+    datetime_stats = "".join(
+        [
+            stat_card("datetime_audit_status", datetime_health.get("datetime_audit_status", "unavailable")),
+            stat_card("datetime_issues_found", datetime_health.get("datetime_issues_found", 0)),
+            stat_card("datetime_timezone_mismatch", datetime_health.get("datetime_timezone_mismatch", 0)),
+            stat_card("datetime_naive_datetime", datetime_health.get("datetime_naive_datetime", 0)),
+            stat_card("datetime_timestamp_mismatch", datetime_health.get("datetime_timestamp_mismatch", 0)),
+            stat_card("datetime_recommended_action", datetime_health.get("datetime_recommended_action", "monitor")),
         ]
     )
     eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
@@ -1727,8 +1790,9 @@ def render_html(
     </div>
     <p class="lead">{html.escape(DASHBOARD_DESCRIPTION)}</p>
   </header>
-  <main>
+    <main>
     <section class="card"><h2>システム状態</h2><div class="grid">{system_stats}</div></section>
+    <section class="card"><h2>System Health</h2>{'<div class="empty">Datetime Audit未取得</div>' if not datetime_health.get('available') else f'<div class="grid">{datetime_stats}</div>'}</section>
     <section class="card"><h2>本日のシグナル概要</h2><div class="grid">{signal_stats}</div>{table_html(signals, ["asset","side","rank","type","recommended_action","signal_strength","setup_quality_score","entry_quality_score","direction_confidence","reason_codes","no_trade_reason"])}</section>
     <section class="card"><h2>評価概要</h2><div class="grid">{eval_stats}</div></section>
     <section class="card"><h2>資産別成績</h2>{table_html(asset_table, ["asset","signals","evaluations","win_rate","total_r","average_r","missed_opportunity_count"])}</section>

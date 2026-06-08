@@ -106,6 +106,10 @@ jobs:
         run: |
           python src/build_meta_learning.py || echo "warning: meta learning failed; continuing dashboard"
 
+      - name: Audit datetime consistency for dashboard
+        run: |
+          python src/audit_datetime_consistency.py || echo "warning: datetime audit failed; continuing dashboard"
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -157,6 +161,10 @@ jobs:
             results/meta_learning.csv
             results/meta_learning.json
             results/meta_learning_summary.json
+            results/datetime_audit.csv
+            results/datetime_audit.json
+            results/datetime_audit_summary.json
+            reports/system/*_datetime_audit.md
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
