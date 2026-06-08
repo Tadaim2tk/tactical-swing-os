@@ -98,6 +98,10 @@ jobs:
         run: |
           python src/track_proposal_adoption.py || echo "warning: proposal adoption tracking failed; continuing dashboard"
 
+      - name: Build weight version history for dashboard
+        run: |
+          python src/build_weight_version_history.py || echo "warning: weight version history failed; continuing dashboard"
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -143,6 +147,9 @@ jobs:
             results/proposal_adoption_tracking.csv
             results/proposal_adoption_tracking.json
             results/proposal_adoption_tracking_summary.json
+            results/weight_version_history.csv
+            results/weight_version_history.json
+            results/weight_version_history_summary.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
