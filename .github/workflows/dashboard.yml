@@ -90,6 +90,10 @@ jobs:
         run: |
           python src/build_weights_patch.py || echo "warning: weights patch proposal failed; continuing dashboard"
 
+      - name: Review weights patch proposal for dashboard
+        run: |
+          python src/review_weights_patch.py || echo "warning: weights patch review failed; continuing dashboard"
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -129,6 +133,9 @@ jobs:
             results/weights_patch_proposal.csv
             results/weights_patch_proposal.json
             results/weights_patch_summary.json
+            results/weights_patch_review.csv
+            results/weights_patch_review.json
+            results/weights_patch_review_summary.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

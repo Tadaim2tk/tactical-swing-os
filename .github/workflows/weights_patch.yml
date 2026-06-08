@@ -50,6 +50,9 @@ jobs:
       - name: Build weights patch proposal
         run: python src/build_weights_patch.py
 
+      - name: Review weights patch proposal
+        run: python src/review_weights_patch.py
+
       - name: Upload weights patch artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -65,3 +68,7 @@ jobs:
             results/weights_patch_proposal.csv
             results/weights_patch_proposal.json
             results/weights_patch_summary.json
+            results/weights_patch_review.csv
+            results/weights_patch_review.json
+            results/weights_patch_review_summary.json
+            reports/model_state/*_weights_patch_review.md
