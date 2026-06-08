@@ -35,6 +35,7 @@ DISPLAY_LABELS = {
     "market_snapshot rows": "市場データ行数",
     "signals rows": "シグナル行数",
     "evaluations rows": "評価行数",
+    "evaluation_view_source": "評価ビュー",
     "latest daily report": "最新日次レポート",
     "latest weekly review": "最新週次レビュー",
     "latest monthly calibration": "最新月次較正",
@@ -56,6 +57,15 @@ DISPLAY_LABELS = {
     "pending_reevaluation_open_count": "open継続件数",
     "pending_reevaluation_no_entry_count": "no_entry継続件数",
     "pending_reevaluation_missed_count": "取り逃し候補数",
+    "latest_evaluation_unique_signal_count": "unique signal数",
+    "latest_evaluation_rows": "latest rows",
+    "latest_from_pending_reevaluations": "pending_reevaluation由来数",
+    "latest_from_evaluations": "evaluations由来数",
+    "latest_evaluation_closed_count": "closed数",
+    "latest_evaluation_pending_count": "pending数",
+    "latest_evaluation_open_count": "open数",
+    "latest_evaluation_no_entry_count": "no_entry数",
+    "latest_evaluation_missed_count": "missed_opportunity数",
     "previous_outcome": "前回outcome",
     "outcome": "今回outcome",
     "r_multiple": "R倍数",
@@ -238,12 +248,14 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "ai_feedback": read_csv(RESULTS_DIR / "ai_feedback.csv"),
         "news_narrative_scores": read_csv(RESULTS_DIR / "news_narrative_scores.csv"),
         "pending_reevaluations": read_csv(RESULTS_DIR / "pending_reevaluations.csv"),
+        "latest_evaluations": read_csv(RESULTS_DIR / "latest_evaluations.csv"),
         "weekly_review_json": read_json(RESULTS_DIR / "weekly_review.json"),
         "monthly_calibration_json": read_json(RESULTS_DIR / "monthly_calibration.json"),
         "reason_code_analysis_json": read_json(RESULTS_DIR / "reason_code_analysis.json"),
         "rule_update_proposals_json": read_json(RESULTS_DIR / "rule_update_proposals.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
+        "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
     }
     return data, extras, source
 
@@ -635,6 +647,61 @@ def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     }
 
 
+def choose_evaluations_for_dashboard(data_evaluations: pd.DataFrame, extras: dict[str, object]) -> tuple[pd.DataFrame, str]:
+    latest = extras.get("latest_evaluations", pd.DataFrame())
+    pending = extras.get("pending_reevaluations", pd.DataFrame())
+    if isinstance(latest, pd.DataFrame) and not latest.empty:
+        return latest, "latest_evaluations"
+    if isinstance(pending, pd.DataFrame) and not pending.empty:
+        return pending, "pending_reevaluations"
+    return data_evaluations, "evaluations"
+
+
+def latest_evaluation_view_summary(latest: pd.DataFrame, summary_json) -> dict:
+    if isinstance(summary_json, dict) and summary_json:
+        return {
+            "available": True,
+            "latest_evaluation_unique_signal_count": int(numeric_or(summary_json.get("unique_signal_count", 0), 0)),
+            "latest_evaluation_rows": int(numeric_or(summary_json.get("latest_rows", 0), 0)),
+            "latest_from_pending_reevaluations": int(numeric_or(summary_json.get("latest_from_pending_reevaluations", 0), 0)),
+            "latest_from_evaluations": int(numeric_or(summary_json.get("latest_from_evaluations", 0), 0)),
+            "latest_evaluation_closed_count": int(numeric_or(summary_json.get("closed_count", 0), 0)),
+            "latest_evaluation_pending_count": int(numeric_or(summary_json.get("pending_count", 0), 0)),
+            "latest_evaluation_open_count": int(numeric_or(summary_json.get("open_count", 0), 0)),
+            "latest_evaluation_no_entry_count": int(numeric_or(summary_json.get("no_entry_count", 0), 0)),
+            "latest_evaluation_missed_count": int(numeric_or(summary_json.get("missed_opportunity_count", 0), 0)),
+        }
+    if latest.empty:
+        return {
+            "available": False,
+            "latest_evaluation_unique_signal_count": 0,
+            "latest_evaluation_rows": 0,
+            "latest_from_pending_reevaluations": 0,
+            "latest_from_evaluations": 0,
+            "latest_evaluation_closed_count": 0,
+            "latest_evaluation_pending_count": 0,
+            "latest_evaluation_open_count": 0,
+            "latest_evaluation_no_entry_count": 0,
+            "latest_evaluation_missed_count": 0,
+        }
+    status = latest.get("evaluation_status", latest.get("status", pd.Series("", index=latest.index))).fillna("").astype(str).str.lower()
+    outcome = latest.get("outcome", pd.Series("", index=latest.index)).fillna("").astype(str).str.lower()
+    latest_source = latest.get("latest_source", pd.Series("", index=latest.index)).fillna("").astype(str)
+    missed = latest.get("missed_opportunity", pd.Series("", index=latest.index)).fillna("").astype(str).str.lower().isin(["true", "1", "yes"])
+    return {
+        "available": True,
+        "latest_evaluation_unique_signal_count": int(latest["signal_id"].nunique()) if "signal_id" in latest.columns else len(latest),
+        "latest_evaluation_rows": int(len(latest)),
+        "latest_from_pending_reevaluations": int((latest_source == "pending_reevaluations").sum()),
+        "latest_from_evaluations": int((latest_source == "evaluations").sum()),
+        "latest_evaluation_closed_count": int((status == "closed").sum()),
+        "latest_evaluation_pending_count": int((status == "pending").sum()),
+        "latest_evaluation_open_count": int(((status == "open") | (outcome == "open_unresolved")).sum()),
+        "latest_evaluation_no_entry_count": int((outcome == "no_entry").sum()),
+        "latest_evaluation_missed_count": int(missed.sum()),
+    }
+
+
 def top_reason_codes(reason_table: pd.DataFrame) -> dict:
     if reason_table.empty:
         return {"positive": [], "negative": [], "insufficient": []}
@@ -679,12 +746,14 @@ def build_dashboard() -> tuple[dict, str]:
     data, extras, source = load_data()
     snapshot = data["market_snapshot"]
     signals = data["signals"]
-    evaluations = data["evaluations"]
+    raw_evaluations = data["evaluations"]
     weekly = extras["weekly_review"]
     monthly = extras["monthly_calibration"]
     ai_feedback = extras["ai_feedback"]
     news_summary = news_narrative_summary(extras["news_narrative_scores"], extras["news_narrative_scores_json"])
     pending_summary = pending_reevaluation_summary(extras["pending_reevaluations"])
+    evaluations, evaluation_view_source = choose_evaluations_for_dashboard(raw_evaluations, extras)
+    latest_eval_summary = latest_evaluation_view_summary(extras["latest_evaluations"], extras["latest_evaluations_summary_json"])
     reason_table, no_trade_table = reason_code_data(signals, evaluations, extras["reason_code_analysis"], extras["reason_code_analysis_json"])
     rule_updates = extras["rule_update_proposals"]
     ai_summary = ai_feedback_summary(ai_feedback, extras["ai_feedback_json"])
@@ -702,6 +771,8 @@ def build_dashboard() -> tuple[dict, str]:
         "market_snapshot": len(snapshot),
         "signals": len(signals),
         "evaluations": len(evaluations),
+        "raw_evaluations": len(raw_evaluations),
+        "latest_evaluations": len(extras["latest_evaluations"]),
         "weekly_review": len(weekly),
         "monthly_calibration": len(monthly),
         "reason_code_analysis": len(reason_table),
@@ -739,6 +810,7 @@ def build_dashboard() -> tuple[dict, str]:
         "data_reference_date": data_reference_date,
         "display_language": "ja",
         "data_source": source,
+        "evaluation_view_source": evaluation_view_source,
         "row_counts": row_counts,
         "latest_dates": latest_dates,
         "daily_signal_summary": sig_summary,
@@ -749,6 +821,7 @@ def build_dashboard() -> tuple[dict, str]:
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
+        "latest_evaluation_view_summary": latest_eval_summary,
         "safety_notes": SAFETY_NOTES,
     })
 
@@ -773,6 +846,8 @@ def build_dashboard() -> tuple[dict, str]:
         ai_summary=ai_summary,
         news_summary=news_summary,
         pending_summary=pending_summary,
+        latest_eval_summary=latest_eval_summary,
+        evaluation_view_source=evaluation_view_source,
         apply_false=apply_false,
         summary=summary,
     )
@@ -803,6 +878,8 @@ def render_html(
     ai_summary: dict,
     news_summary: dict,
     pending_summary: dict,
+    latest_eval_summary: dict,
+    evaluation_view_source: str,
     apply_false: bool,
     summary: dict,
 ) -> str:
@@ -819,6 +896,7 @@ def render_html(
             stat_card("market_snapshot rows", row_counts["market_snapshot"]),
             stat_card("signals rows", row_counts["signals"]),
             stat_card("evaluations rows", row_counts["evaluations"]),
+            stat_card("evaluation_view_source", evaluation_view_source),
             stat_card("latest daily report", latest_dates["latest_daily_report_date"] or "未取得"),
             stat_card("latest weekly review", latest_dates["latest_weekly_review_date"] or "未取得"),
             stat_card("latest monthly calibration", latest_dates["latest_monthly_calibration_date"] or "未取得"),
@@ -884,6 +962,19 @@ def render_html(
         ]
     )
     pending_closed = pd.DataFrame(pending_summary.get("recent_closed", []) or [])
+    latest_eval_stats = "".join(
+        [
+            stat_card("latest_evaluation_unique_signal_count", latest_eval_summary.get("latest_evaluation_unique_signal_count", 0)),
+            stat_card("latest_evaluation_rows", latest_eval_summary.get("latest_evaluation_rows", 0)),
+            stat_card("latest_from_pending_reevaluations", latest_eval_summary.get("latest_from_pending_reevaluations", 0)),
+            stat_card("latest_from_evaluations", latest_eval_summary.get("latest_from_evaluations", 0)),
+            stat_card("latest_evaluation_closed_count", latest_eval_summary.get("latest_evaluation_closed_count", 0)),
+            stat_card("latest_evaluation_pending_count", latest_eval_summary.get("latest_evaluation_pending_count", 0)),
+            stat_card("latest_evaluation_open_count", latest_eval_summary.get("latest_evaluation_open_count", 0)),
+            stat_card("latest_evaluation_no_entry_count", latest_eval_summary.get("latest_evaluation_no_entry_count", 0)),
+            stat_card("latest_evaluation_missed_count", latest_eval_summary.get("latest_evaluation_missed_count", 0)),
+        ]
+    )
     safe = "".join(f"<li>{html.escape(note)}</li>" for note in SAFETY_NOTES)
     return f"""<!doctype html>
 <html lang="ja">
@@ -949,6 +1040,7 @@ def render_html(
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
+    <section class="card"><h2>最新評価ビュー 要約</h2>{'<div class="empty">最新評価ビュー未取得</div>' if not latest_eval_summary.get('available') else f'<div class="grid">{latest_eval_stats}</div>'}</section>
     <section class="card"><h2>週次・月次モード</h2><div class="grid">{mode_stats}</div></section>
     <section class="card"><h2>安全上の注意</h2><p class="notice">{html.escape(DASHBOARD_DESCRIPTION)}</p><ul>{safe}</ul></section>
   </main>

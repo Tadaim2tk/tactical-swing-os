@@ -27,3 +27,7 @@ reports/reevaluation/*.md
 results/pending_reevaluations.csv
 results/pending_reevaluations.json
 results/pending_reevaluation_summary.json
+reports/evaluations/*.md
+results/latest_evaluations.csv
+results/latest_evaluations.json
+results/latest_evaluations_summary.json
