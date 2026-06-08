@@ -436,7 +436,7 @@ def build_review() -> tuple[pd.DataFrame, dict[str, Any], str]:
     proposals = load_model_state_proposals()
     audit_payload = load_audit_payload()
     audit_status = str(audit_payload.get("audit_status", "unavailable") if audit_payload else "unavailable")
-    source_available = not patches.empty
+    source_available = bool(patch_payload) or not patches.empty or bool(audit_payload)
     review = review_patches(patches, proposals, audit_status)
     summary = build_summary(review, audit_status, source_available, generated_at_jst, generated_at_utc)
     payload = {

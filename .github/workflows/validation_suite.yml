@@ -42,6 +42,7 @@ jobs:
           python src/audit_model_state_proposals.py
           python src/build_weights_patch.py
           python src/review_weights_patch.py
+          python src/track_proposal_adoption.py
           python src/build_dashboard.py
 
       - name: Write validation summary
@@ -68,6 +69,7 @@ jobs:
           check_file "model state proposal audit" "results/model_state_proposal_audit.json"
           check_file "weights patch proposal" "results/weights_patch_proposal.json"
           check_file "weights patch review" "results/weights_patch_review_summary.json"
+          check_file "proposal adoption tracking" "results/proposal_adoption_tracking_summary.json"
           check_file "dashboard" "reports/dashboard/index.html"
 
       - name: Upload validation artifacts
@@ -95,3 +97,7 @@ jobs:
             results/weights_patch_review.json
             results/weights_patch_review_summary.json
             reports/model_state/*_weights_patch_review.md
+            results/proposal_adoption_tracking.csv
+            results/proposal_adoption_tracking.json
+            results/proposal_adoption_tracking_summary.json
+            reports/model_state/*_proposal_adoption_tracking.md

@@ -98,3 +98,15 @@ def test_unavailable_summary_when_inputs_missing():
     )
     assert summary["review_status"] == "unavailable"
     assert summary["recommended_next_action"] == "no_action"
+
+
+def test_empty_patch_rows_with_blocked_audit_status_are_blocked_not_unavailable():
+    summary = review.build_summary(
+        pd.DataFrame(columns=review.REVIEW_COLUMNS),
+        "blocked",
+        True,
+        "2026-06-08 12:00:00 JST",
+        "2026-06-08 03:00:00 UTC",
+    )
+    assert summary["review_status"] == "blocked"
+    assert summary["recommended_next_action"] == "no_action"

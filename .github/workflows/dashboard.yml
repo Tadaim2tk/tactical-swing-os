@@ -94,6 +94,10 @@ jobs:
         run: |
           python src/review_weights_patch.py || echo "warning: weights patch review failed; continuing dashboard"
 
+      - name: Track proposal adoption for dashboard
+        run: |
+          python src/track_proposal_adoption.py || echo "warning: proposal adoption tracking failed; continuing dashboard"
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -136,6 +140,9 @@ jobs:
             results/weights_patch_review.csv
             results/weights_patch_review.json
             results/weights_patch_review_summary.json
+            results/proposal_adoption_tracking.csv
+            results/proposal_adoption_tracking.json
+            results/proposal_adoption_tracking_summary.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
