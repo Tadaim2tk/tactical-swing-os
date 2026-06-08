@@ -1,0 +1,75 @@
+name: Tactical Swing OS validation suite
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validation-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run validation pipeline
+        run: |
+          python src/fetch_market.py
+          python src/fetch_news.py --hours 24 --max-items 30 --timeout-seconds 5 --global-timeout-seconds 45 || echo "warning: news fetch failed; continuing validation"
+          python src/classify_news_narratives.py || echo "warning: news classification failed; continuing validation"
+          python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10
+          python src/build_latest_evaluations.py
+          python src/build_ai_feedback.py
+          python src/build_weekly_review.py
+          python src/build_monthly_calibration.py
+          python src/analyze_reason_codes.py
+          python src/propose_rule_updates.py
+          python src/build_dashboard.py
+
+      - name: Write validation summary
+        run: |
+          echo "## Tactical Swing OS Validation Summary" >> "$GITHUB_STEP_SUMMARY"
+
+          check_file() {
+            label="$1"
+            path="$2"
+            if [ -f "$path" ]; then
+              echo "- ${label}: generated" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- ${label}: warning missing ${path}" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+
+          check_file "latest evaluations" "results/latest_evaluations.csv"
+          check_file "AI feedback" "results/ai_feedback.json"
+          check_file "weekly review" "results/weekly_review.json"
+          check_file "monthly calibration" "results/monthly_calibration.json"
+          check_file "reason code analysis" "results/reason_code_analysis.json"
+          check_file "rule update proposals" "results/rule_update_proposals.json"
+          check_file "dashboard" "reports/dashboard/index.html"
+
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-validation-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            reports/**/*.md
+            reports/dashboard/index.html
+            reports/dashboard/dashboard_summary.json
+            results/*.csv
+            results/*.json
