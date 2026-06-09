@@ -114,6 +114,10 @@ jobs:
         run: |
           python src/build_human_override_analytics.py || echo "warning: human override analytics failed; continuing dashboard"
 
+      - name: Build portfolio layer for dashboard
+        run: |
+          python src/build_portfolio_layer.py || echo "warning: portfolio layer failed; continuing dashboard"
+
       - name: Audit datetime consistency for dashboard
         run: |
           python src/audit_datetime_consistency.py || echo "warning: datetime audit failed; continuing dashboard"
@@ -177,6 +181,10 @@ jobs:
             results/human_override_analytics.json
             results/human_override_analytics_summary.json
             reports/model_state/*_human_override_analytics.md
+            reports/portfolio/*.md
+            results/portfolio_layer.csv
+            results/portfolio_layer.json
+            results/portfolio_layer_summary.json
             results/datetime_audit.csv
             results/datetime_audit.json
             results/datetime_audit_summary.json
