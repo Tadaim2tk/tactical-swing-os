@@ -1,0 +1,63 @@
+{
+  "version": "tactical-swing-os-v2.1",
+  "last_updated": "2026-06-09",
+  "learning_target": "signal_decision_quality_not_user_execution",
+  "core_policy": {
+    "evaluate_prediction_and_execution_separately": true,
+    "no_trade_is_valid_signal": true,
+    "a_momentum_must_be_evaluated_daily": true,
+    "pullback_miss_must_be_logged": true,
+    "stale_data_weight_multiplier": 0.5
+  },
+  "global_weights": {
+    "EMS": 1.0,
+    "FFS": 1.0,
+    "CDS": 1.0,
+    "IAS": 1.0,
+    "CBS": 1.0,
+    "MES": 1.0
+  },
+  "asset_bias_adjustments": {
+    "WTI": {
+      "momentum_weight": 1.0,
+      "pullback_weight": 1.0,
+      "event_volatility_sl_multiplier": 1.15,
+      "max_default_risk_pct": 0.75
+    },
+    "BTC": {
+      "momentum_weight": 1.0,
+      "pullback_weight": 1.0,
+      "fomo_chase_penalty": 1.10,
+      "max_default_risk_pct": 0.75
+    },
+    "GOLD": {
+      "dxy_us10y_long_penalty": 1.20,
+      "geopolitical_override_threshold": 80
+    },
+    "NASDAQ": {
+      "breadth_penalty": 1.10,
+      "momentum_override_threshold": 78
+    },
+    "USDJPY": {
+      "intervention_risk_penalty": 1.20
+    }
+  },
+  "sl_adjustments": {
+    "WTI": {"standard_sl_multiplier": 1.15},
+    "BTC": {"standard_sl_multiplier": 1.05},
+    "NASDAQ": {"standard_sl_multiplier": 1.0}
+  },
+  "promotion_rules": {
+    "A_rank_min_score": 72,
+    "B_rank_min_score": 60,
+    "max_A_signals_per_day": 2,
+    "requires_FFS_CBS_alignment_for_A": true,
+    "no_trade_score_threshold": 70
+  },
+  "recent_error_patterns": [],
+  "next_required_actions": [
+    "append_daily_tso_log",
+    "verify_prior_signals",
+    "update_model_state"
+  ]
+}
