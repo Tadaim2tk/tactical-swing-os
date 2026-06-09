@@ -1,0 +1,1 @@
+signal_id,verification_date,asset,side,rank,type,entry_low,entry_high,actual_best_entry,entry_efficiency,sl,tp1,tp2,actual_mae,actual_mfe,sl_efficiency,tp1_efficiency,tp2_efficiency,mfe_capture_rate,mae_tolerance_score,time_to_profit,execution_grade,execution_error_type,execution_update_note
