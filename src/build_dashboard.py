@@ -254,6 +254,24 @@ DISPLAY_LABELS = {
     "human_override_unknown_count": "unknown outcome",
     "human_override_recommended_next_action": "recommended next action",
     "human_override_requires_human_approval": "人間承認",
+    "portfolio_status": "portfolio status",
+    "portfolio_candidate_assets": "candidate assets",
+    "portfolio_defensive_assets": "defensive assets",
+    "portfolio_offensive_assets": "offensive assets",
+    "portfolio_cash_candidate": "cash candidate",
+    "portfolio_average_confidence": "average confidence",
+    "portfolio_concentration": "portfolio concentration",
+    "portfolio_risk_concentration": "risk concentration",
+    "portfolio_recommended_exposure": "recommended exposure",
+    "portfolio_recommended_next_action": "recommended next action",
+    "portfolio_requires_human_approval": "人間承認",
+    "allocation_score": "配分スコア",
+    "portfolio_weight_candidate": "配分候補",
+    "confidence": "信頼度",
+    "risk_class": "リスク分類",
+    "risk_role": "リスク役割",
+    "recommended_exposure": "推奨エクスポージャー",
+    "cash_ratio_candidate": "キャッシュ候補",
     "override_type": "override type",
     "override_reason": "override reason",
     "impact_status": "impact status",
@@ -454,6 +472,9 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "human_override_analytics": read_csv(RESULTS_DIR / "human_override_analytics.csv"),
         "human_override_analytics_json": read_json(RESULTS_DIR / "human_override_analytics.json"),
         "human_override_analytics_summary_json": read_json(RESULTS_DIR / "human_override_analytics_summary.json"),
+        "portfolio_layer": read_csv(RESULTS_DIR / "portfolio_layer.csv"),
+        "portfolio_layer_json": read_json(RESULTS_DIR / "portfolio_layer.json"),
+        "portfolio_layer_summary_json": read_json(RESULTS_DIR / "portfolio_layer_summary.json"),
         "datetime_audit": read_csv(RESULTS_DIR / "datetime_audit.csv"),
         "datetime_audit_json": read_json(RESULTS_DIR / "datetime_audit.json"),
         "datetime_audit_summary_json": read_json(RESULTS_DIR / "datetime_audit_summary.json"),
@@ -1338,6 +1359,67 @@ def human_override_summary(override_csv: pd.DataFrame, override_json, summary_js
     }
 
 
+def portfolio_layer_summary(portfolio_csv: pd.DataFrame, portfolio_json, summary_json) -> dict:
+    payload = summary_json if isinstance(summary_json, dict) and summary_json else portfolio_json if isinstance(portfolio_json, dict) else {}
+    rows = portfolio_json.get("portfolio_candidates", []) if isinstance(portfolio_json, dict) else []
+    if payload:
+        if not rows and not portfolio_csv.empty:
+            rows = portfolio_csv.to_dict(orient="records")
+        top_rows = sorted(rows, key=lambda row: numeric_or(row.get("portfolio_weight_candidate", 0), 0), reverse=True)[:5]
+        return {
+            "available": True,
+            "portfolio_status": payload.get("portfolio_status", "active"),
+            "portfolio_candidate_assets": int(numeric_or(payload.get("candidate_assets", len(top_rows)), 0)),
+            "portfolio_defensive_assets": int(numeric_or(payload.get("defensive_assets", 0), 0)),
+            "portfolio_offensive_assets": int(numeric_or(payload.get("offensive_assets", 0), 0)),
+            "portfolio_cash_candidate": numeric_or(payload.get("cash_candidate", payload.get("cash_ratio_candidate", 0)), 0),
+            "portfolio_average_confidence": numeric_or(payload.get("average_confidence", 0), 0),
+            "portfolio_concentration": numeric_or(payload.get("portfolio_concentration", 0), 0),
+            "portfolio_risk_concentration": numeric_or(payload.get("risk_concentration", 0), 0),
+            "portfolio_recommended_exposure": numeric_or(payload.get("recommended_exposure", 0), 0),
+            "portfolio_recommended_next_action": payload.get("recommended_next_action", "human_review_allocations"),
+            "portfolio_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "top_rows": top_rows,
+        }
+    if not portfolio_csv.empty:
+        weights = pd.to_numeric(portfolio_csv.get("portfolio_weight_candidate", pd.Series(dtype=float)), errors="coerce").fillna(0)
+        confidence = pd.to_numeric(portfolio_csv.get("confidence", pd.Series(dtype=float)), errors="coerce").fillna(0)
+        risk_class = portfolio_csv.get("risk_class", pd.Series(dtype=str)).fillna("").astype(str)
+        risk_role = portfolio_csv.get("risk_role", pd.Series(dtype=str)).fillna("").astype(str)
+        candidate_mask = weights > 0
+        top = portfolio_csv.sort_values("portfolio_weight_candidate", ascending=False).head(5) if "portfolio_weight_candidate" in portfolio_csv.columns else portfolio_csv.head(5)
+        return {
+            "available": True,
+            "portfolio_status": "active",
+            "portfolio_candidate_assets": int(candidate_mask.sum()),
+            "portfolio_defensive_assets": int(((risk_role == "defensive") & candidate_mask).sum()),
+            "portfolio_offensive_assets": int(((risk_role == "offensive") & candidate_mask).sum()),
+            "portfolio_cash_candidate": max(0.0, 1.0 - float(weights.sum())),
+            "portfolio_average_confidence": float(confidence.mean()) if not confidence.empty else 0,
+            "portfolio_concentration": float(weights.max()) if not weights.empty else 0,
+            "portfolio_risk_concentration": float(weights[risk_class == "high"].sum()) if not weights.empty else 0,
+            "portfolio_recommended_exposure": float(weights.sum()),
+            "portfolio_recommended_next_action": "human_review_allocations",
+            "portfolio_requires_human_approval": "必須",
+            "top_rows": top.to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "portfolio_status": "unavailable",
+        "portfolio_candidate_assets": 0,
+        "portfolio_defensive_assets": 0,
+        "portfolio_offensive_assets": 0,
+        "portfolio_cash_candidate": 0,
+        "portfolio_average_confidence": 0,
+        "portfolio_concentration": 0,
+        "portfolio_risk_concentration": 0,
+        "portfolio_recommended_exposure": 0,
+        "portfolio_recommended_next_action": "generate_upstream_analysis",
+        "portfolio_requires_human_approval": "必須",
+        "top_rows": [],
+    }
+
+
 def datetime_audit_summary(audit_json, summary_json, audit_csv: pd.DataFrame) -> dict:
     payload = audit_json if isinstance(audit_json, dict) and audit_json else summary_json if isinstance(summary_json, dict) else {}
     if payload:
@@ -1558,6 +1640,11 @@ def build_dashboard() -> tuple[dict, str]:
         extras["human_override_analytics_json"],
         extras["human_override_analytics_summary_json"],
     )
+    portfolio_layer = portfolio_layer_summary(
+        extras["portfolio_layer"],
+        extras["portfolio_layer_json"],
+        extras["portfolio_layer_summary_json"],
+    )
     datetime_health = datetime_audit_summary(
         extras["datetime_audit_json"],
         extras["datetime_audit_summary_json"],
@@ -1591,6 +1678,7 @@ def build_dashboard() -> tuple[dict, str]:
         "meta_learning": len(extras["meta_learning"]),
         "auto_calibration_candidates": len(extras["auto_calibration_candidates"]),
         "human_override_analytics": len(extras["human_override_analytics"]),
+        "portfolio_layer": len(extras["portfolio_layer"]),
         "datetime_audit": len(extras["datetime_audit"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
@@ -1643,6 +1731,7 @@ def build_dashboard() -> tuple[dict, str]:
         "meta_learning_summary": meta_learning,
         "auto_calibration_summary": auto_calibration,
         "human_override_summary": human_override,
+        "portfolio_layer_summary": portfolio_layer,
         "datetime_audit_summary": datetime_health,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
@@ -1677,6 +1766,7 @@ def build_dashboard() -> tuple[dict, str]:
         meta_learning=meta_learning,
         auto_calibration=auto_calibration,
         human_override=human_override,
+        portfolio_layer=portfolio_layer,
         datetime_health=datetime_health,
         mode=mode,
         ai_summary=ai_summary,
@@ -1720,6 +1810,7 @@ def render_html(
     meta_learning: dict,
     auto_calibration: dict,
     human_override: dict,
+    portfolio_layer: dict,
     datetime_health: dict,
     mode: dict,
     ai_summary: dict,
@@ -1938,6 +2029,22 @@ def render_html(
         ]
     )
     human_override_top = pd.DataFrame(human_override.get("top_rows", []) or [])
+    portfolio_stats = "".join(
+        [
+            stat_card("portfolio_status", portfolio_layer.get("portfolio_status", "unavailable")),
+            stat_card("portfolio_candidate_assets", portfolio_layer.get("portfolio_candidate_assets", 0)),
+            stat_card("portfolio_defensive_assets", portfolio_layer.get("portfolio_defensive_assets", 0)),
+            stat_card("portfolio_offensive_assets", portfolio_layer.get("portfolio_offensive_assets", 0)),
+            stat_card("portfolio_cash_candidate", fmt_num(portfolio_layer.get("portfolio_cash_candidate", 0))),
+            stat_card("portfolio_average_confidence", fmt_num(portfolio_layer.get("portfolio_average_confidence", 0))),
+            stat_card("portfolio_concentration", fmt_num(portfolio_layer.get("portfolio_concentration", 0))),
+            stat_card("portfolio_risk_concentration", fmt_num(portfolio_layer.get("portfolio_risk_concentration", 0))),
+            stat_card("portfolio_recommended_exposure", fmt_num(portfolio_layer.get("portfolio_recommended_exposure", 0))),
+            stat_card("portfolio_recommended_next_action", portfolio_layer.get("portfolio_recommended_next_action", "generate_upstream_analysis")),
+            stat_card("portfolio_requires_human_approval", portfolio_layer.get("portfolio_requires_human_approval", "必須")),
+        ]
+    )
+    portfolio_top = pd.DataFrame(portfolio_layer.get("top_rows", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -2032,6 +2139,7 @@ def render_html(
     <section class="card"><h2>Meta Learning</h2>{'<div class="empty">Meta Learning未取得</div>' if not meta_learning.get('available') else f'<div class="grid">{meta_learning_stats}</div>'}<h3>成功パターン候補 上位5件</h3>{table_html(meta_learning_success, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "成功パターン候補なし")}<h3>失敗パターン候補 上位5件</h3>{table_html(meta_learning_failure, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "失敗パターン候補なし")}</section>
     <section class="card"><h2>Auto Calibration Candidates</h2>{'<div class="empty">Auto Calibration Candidates未取得</div>' if not auto_calibration.get('available') else f'<div class="grid">{auto_calibration_stats}</div>'}<h3>top confidence candidates</h3>{table_html(auto_calibration_top, ["candidate_id","asset","category","target","factor","classification","current_value","suggested_delta","suggested_value","confidence","sample_size","source","rationale"], "候補なし")}</section>
     <section class="card"><h2>Human Override Analytics</h2>{'<div class="empty">Human Override Analytics未取得</div>' if not human_override.get('available') else f'<div class="grid">{human_override_stats}</div>'}<h3>override impact 上位5件</h3>{table_html(human_override_top, ["proposal_id","review_decision","adoption_status","override_type","override_reason","impact_status","impact_score","source","recommended_next_action"], "override分析なし")}</section>
+    <section class="card"><h2>Portfolio Layer</h2>{'<div class="empty">Portfolio Layer未取得</div>' if not portfolio_layer.get('available') else f'<div class="grid">{portfolio_stats}</div>'}<h3>top allocation candidates</h3>{table_html(portfolio_top, ["asset","allocation_score","portfolio_weight_candidate","confidence","risk_class","risk_role","recommended_exposure","cash_ratio_candidate","latest_rank","latest_side","rationale"], "配分候補なし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
