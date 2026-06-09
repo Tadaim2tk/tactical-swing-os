@@ -66,6 +66,10 @@ results/human_override_analytics.csv
 results/human_override_analytics.json
 results/human_override_analytics_summary.json
 reports/model_state/*_human_override_analytics.md
+results/portfolio_layer.csv
+results/portfolio_layer.json
+results/portfolio_layer_summary.json
+reports/portfolio/*_portfolio_layer.md
 results/datetime_audit.csv
 results/datetime_audit.json
 results/datetime_audit_summary.json

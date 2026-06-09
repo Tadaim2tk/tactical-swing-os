@@ -1,0 +1,72 @@
+name: Tactical Swing OS portfolio layer
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 05:15 UTC is 14:15 JST.
+    - cron: "15 5 * * 6"
+
+permissions:
+  contents: read
+
+jobs:
+  portfolio-layer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build latest evaluations
+        run: |
+          python src/build_latest_evaluations.py || echo "warning: latest evaluations failed; continuing portfolio layer"
+
+      - name: Build meta learning
+        run: |
+          python src/build_meta_learning.py || echo "warning: meta learning failed; continuing portfolio layer"
+
+      - name: Build auto calibration candidates
+        run: |
+          python src/build_auto_calibration_candidates.py || echo "warning: auto calibration candidates failed; continuing portfolio layer"
+
+      - name: Build human override analytics
+        run: |
+          python src/build_human_override_analytics.py || echo "warning: human override analytics failed; continuing portfolio layer"
+
+      - name: Build portfolio layer
+        run: python src/build_portfolio_layer.py
+
+      - name: Upload portfolio layer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-portfolio-layer-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            reports/portfolio/*.md
+            results/portfolio_layer.csv
+            results/portfolio_layer.json
+            results/portfolio_layer_summary.json
+            results/latest_evaluations.csv
+            results/latest_evaluations.json
+            results/latest_evaluations_summary.json
+            results/meta_learning.csv
+            results/meta_learning.json
+            results/meta_learning_summary.json
+            results/auto_calibration_candidates.csv
+            results/auto_calibration_candidates.json
+            results/auto_calibration_candidates_summary.json
+            results/human_override_analytics.csv
+            results/human_override_analytics.json
+            results/human_override_analytics_summary.json
