@@ -1,0 +1,1 @@
+signal_id,verification_date,asset,side,rank,type,was_triggered,entry_price,exit_status,hit_sl,hit_tp1,hit_tp2,max_high_after_signal,min_low_after_signal,mfe,mae,r_result,direction_score,entry_score,sl_score,exit_score,error_type,model_update_note
