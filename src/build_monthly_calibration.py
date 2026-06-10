@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -11,18 +10,25 @@ import pandas as pd
 
 import evaluation_loader
 import stat_guards
+from calibration_io import (  # noqa: F401 - 後方互換のため再エクスポート
+    RESULTS_DIR,
+    SCOPES,
+    SHEET_MAPPINGS,
+    get_sheets_client,
+    load_from_local_csv,
+    load_from_sheets,
+    load_input_data,
+    normalize_column_name,
+    normalize_headers,
+    read_csv,
+    worksheet_to_dataframe,
+)
+from calibration_report import markdown_table, render_monthly_report  # noqa: F401
 
 
-RESULTS_DIR = Path("results")
 REPORTS_DIR = Path("reports/monthly")
 WEIGHTS_PATH = Path("models/weights.json")
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 DATE_COLUMNS = ["date", "signal_date", "evaluation_date", "hit_date", "run_ts"]
-SHEET_MAPPINGS = {
-    "market_snapshot": ("MARKET_SNAPSHOT", RESULTS_DIR / "market_snapshot.csv"),
-    "signals": ("SIGNALS", RESULTS_DIR / "signals.csv"),
-    "evaluations": ("EVALUATIONS", RESULTS_DIR / "evaluations.csv"),
-}
 LOG_COLUMNS = [
     "month_start",
     "month_end",
@@ -67,99 +73,6 @@ def default_period() -> tuple[pd.Timestamp, pd.Timestamp]:
     return start, end
 
 
-def normalize_column_name(column: str) -> str:
-    normalized = str(column).strip().lower().replace("-", "_")
-    normalized = "_".join(normalized.split())
-    while "__" in normalized:
-        normalized = normalized.replace("__", "_")
-    return normalized
-
-
-def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    out = df.copy()
-    out.columns = [normalize_column_name(col) for col in out.columns]
-    return out
-
-
-def read_csv(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        return pd.DataFrame()
-    try:
-        return normalize_headers(pd.read_csv(path))
-    except pd.errors.EmptyDataError:
-        return pd.DataFrame()
-
-
-def get_sheets_client():
-    service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    sheet_id = os.getenv("GOOGLE_SHEET_ID")
-    if not service_account_json or not sheet_id:
-        print("Google Sheets env not set; using local CSV fallback")
-        return None
-
-    import gspread
-    from google.oauth2.service_account import Credentials
-
-    account_info = json.loads(service_account_json)
-    credentials = Credentials.from_service_account_info(account_info, scopes=SCOPES)
-    return gspread.authorize(credentials)
-
-
-def worksheet_to_dataframe(worksheet) -> pd.DataFrame:
-    values = worksheet.get_all_values()
-    if not values:
-        return pd.DataFrame()
-    header = [normalize_column_name(col) for col in values[0]]
-    rows = []
-    for row in values[1:]:
-        padded = list(row) + [""] * max(0, len(header) - len(row))
-        trimmed = padded[: len(header)]
-        if any(str(cell).strip() for cell in trimmed):
-            rows.append(trimmed)
-    return pd.DataFrame(rows, columns=header)
-
-
-def load_from_sheets() -> dict[str, pd.DataFrame] | None:
-    try:
-        client = get_sheets_client()
-        if client is None:
-            return None
-        spreadsheet = client.open_by_key(os.environ["GOOGLE_SHEET_ID"])
-        data: dict[str, pd.DataFrame] = {}
-        for key, (sheet_name, _) in SHEET_MAPPINGS.items():
-            try:
-                worksheet = spreadsheet.worksheet(sheet_name)
-            except Exception as exc:  # noqa: BLE001 - missing sheet should not stop the review.
-                print(f"warning: Google Sheets worksheet {sheet_name} not found or unreadable: {exc}")
-                data[key] = pd.DataFrame()
-                continue
-            df = worksheet_to_dataframe(worksheet)
-            data[key] = df
-            print(f"ok: loaded {len(df)} rows from Google Sheets {sheet_name}")
-        return data
-    except Exception as exc:  # noqa: BLE001 - fallback to local CSV is intentional.
-        print(f"warning: Google Sheets read failed; falling back to local CSV: {exc}")
-        return None
-
-
-def load_from_local_csv() -> dict[str, pd.DataFrame]:
-    data = {}
-    for key, (_, path) in SHEET_MAPPINGS.items():
-        df = read_csv(path)
-        data[key] = df
-        print(f"ok: loaded {len(df)} rows from local CSV {path}")
-    return data
-
-
-def load_input_data() -> dict[str, pd.DataFrame]:
-    sheets_data = load_from_sheets()
-    if sheets_data is not None:
-        return sheets_data
-    return load_from_local_csv()
-
-
 def find_date_column(df: pd.DataFrame) -> str | None:
     for col in DATE_COLUMNS:
         if col in df.columns:
@@ -182,10 +95,10 @@ def filter_period(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> p
 def enrich_evaluations(evaluations: pd.DataFrame, signals: pd.DataFrame) -> pd.DataFrame:
     if evaluations.empty or signals.empty or "signal_id" not in evaluations.columns or "signal_id" not in signals.columns:
         return evaluations.copy()
-    cols = [col for col in ["signal_id", "asset", "side", "rank", "date"] if col in signals.columns]
+    cols = [col for col in ["signal_id", "asset", "side", "rank", "regime", "date"] if col in signals.columns]
     lookup = signals[cols].drop_duplicates(subset=["signal_id"], keep="last")
     out = evaluations.merge(lookup, on="signal_id", how="left", suffixes=("", "_signal"))
-    for col in ["asset", "side", "rank"]:
+    for col in ["asset", "side", "rank", "regime"]:
         signal_col = f"{col}_signal"
         if signal_col in out.columns:
             if col in out.columns:
@@ -276,7 +189,41 @@ def proposed_change(
     return 0.0, f"変更なし | {stats_note}"
 
 
-def calibration_table(signals: pd.DataFrame, evaluations: pd.DataFrame, column: str, values: list[str] | None = None) -> pd.DataFrame:
+# SPEC-RD-001: 減衰の年齢は「結果が確定した日」で測る(シグナル日ではなく評価日を優先)
+DECAY_DATE_COLUMNS = ["evaluation_date", "hit_date", "date", "signal_date", "run_ts"]
+
+
+def decayed_metrics(eval_part: pd.DataFrame, as_of: pd.Timestamp | None) -> dict[str, float] | None:
+    """closed評価の減衰加重統計(SPEC-RD-001)。日付が取れない場合はNone。"""
+    if as_of is None:
+        return None
+    closed = closed_df(eval_part)
+    if closed.empty or "r_result" not in closed.columns:
+        return None
+    date_col = next((col for col in DECAY_DATE_COLUMNS if col in closed.columns), None)
+    if date_col is None:
+        return None
+    r = pd.to_numeric(closed["r_result"], errors="coerce")
+    dates = pd.to_datetime(closed[date_col], errors="coerce", utc=True).dt.tz_localize(None)
+    values: list[float] = []
+    ages: list[float] = []
+    for value, date in zip(r, dates):
+        if pd.isna(value) or pd.isna(date):
+            continue
+        values.append(float(value))
+        ages.append(float((as_of - date).days))
+    if not values:
+        return None
+    return stat_guards.decayed_mean(values, ages)
+
+
+def calibration_table(
+    signals: pd.DataFrame,
+    evaluations: pd.DataFrame,
+    column: str,
+    values: list[str] | None = None,
+    as_of: pd.Timestamp | None = None,
+) -> pd.DataFrame:
     if values is None:
         observed = set(signals[column].dropna().astype(str)) if column in signals.columns and not signals.empty else set()
         observed |= set(evaluations[column].dropna().astype(str)) if column in evaluations.columns and not evaluations.empty else set()
@@ -288,6 +235,16 @@ def calibration_table(signals: pd.DataFrame, evaluations: pd.DataFrame, column: 
         metrics = r_metrics(eval_part)
         r_values = numeric_r(closed_df(eval_part)).tolist()
         change, reason = proposed_change(metrics["closed_count"], metrics["win_rate"], metrics["average_r"], r_values)
+        decayed = decayed_metrics(eval_part, as_of)
+        decayed_avg_r = decayed["decayed_mean"] if decayed else 0.0
+        effective_n = decayed["effective_n"] if decayed else 0.0
+        # レジームシフト検知: 全期間平均と減衰平均の符号が逆 = 最近成績が反転している兆候
+        decay_divergence = bool(
+            decayed is not None
+            and metrics["average_r"] * decayed_avg_r < 0
+            and abs(metrics["average_r"]) > 0.05
+            and abs(decayed_avg_r) > 0.05
+        )
         rows.append(
             {
                 column: value,
@@ -296,6 +253,9 @@ def calibration_table(signals: pd.DataFrame, evaluations: pd.DataFrame, column: 
                 "win_rate": round(metrics["win_rate"], 4),
                 "total_r": round(metrics["total_r"], 4),
                 "average_r": round(metrics["average_r"], 4),
+                "decayed_avg_r": round(decayed_avg_r, 4),
+                "effective_n": round(effective_n, 2),
+                "decay_divergence": decay_divergence,
                 "best_r": round(metrics["max_win_r"], 4),
                 "worst_r": round(metrics["max_loss_r"], 4),
                 "proposed_weight_change": change,
@@ -365,17 +325,6 @@ def rule_changes(metrics: dict, mode_notes: list[str], summary: str) -> list[str
     return changes[:3]
 
 
-def markdown_table(df: pd.DataFrame, empty: str = "_該当なし_") -> str:
-    if df.empty:
-        return empty
-    view = df.fillna("").astype(str)
-    headers = list(view.columns)
-    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
-    for _, row in view.iterrows():
-        lines.append("| " + " | ".join(str(row[col]).replace("|", "\\|") for col in headers) + " |")
-    return "\n".join(lines)
-
-
 def load_reason_code_analysis() -> pd.DataFrame:
     path = RESULTS_DIR / "reason_code_analysis.csv"
     if not path.exists():
@@ -412,9 +361,10 @@ def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[p
     metrics = r_metrics(evaluations)
     pending_count = count_status(evaluations, "pending")
     skipped_count = count_status(evaluations, "skipped")
-    asset_table = calibration_table(signals, evaluations, "asset")
-    rank_table = calibration_table(signals, evaluations, "rank", ["A", "B", "NO_TRADE"])
-    side_table = calibration_table(signals, evaluations, "side", ["LONG", "SHORT", "NONE"])
+    asset_table = calibration_table(signals, evaluations, "asset", as_of=end)
+    rank_table = calibration_table(signals, evaluations, "rank", ["A", "B", "NO_TRADE"], as_of=end)
+    side_table = calibration_table(signals, evaluations, "side", ["LONG", "SHORT", "NONE"], as_of=end)
+    regime_table = calibration_table(signals, evaluations, "regime", ["UPTREND", "DOWNTREND", "RANGE", "UNKNOWN"], as_of=end)
     best_asset, worst_asset = best_worst(asset_table, "asset")
     best_rank, worst_rank = best_worst(rank_table, "rank")
     best_side, worst_side = best_worst(side_table, "side")
@@ -465,6 +415,8 @@ def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[p
         "asset_calibration": asset_table.to_dict(orient="records"),
         "rank_calibration": rank_table.to_dict(orient="records"),
         "side_calibration": side_table.to_dict(orient="records"),
+        "regime_calibration": regime_table.to_dict(orient="records"),
+        "decay_half_life_days": stat_guards.DECAY_HALF_LIFE_DAYS,
         "proposed_weight_changes": proposed_weight_changes,
     }
 
@@ -476,72 +428,35 @@ def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[p
         f"または統計的有意性(p < {stat_guards.SIGNIFICANCE_ALPHA})が確認できない区分には、重み変更を提案しません。"
         "weights.jsonの自動適用は引き続き行いません。(SPEC-SG-001)"
     )
+    divergent = regime_table[regime_table["decay_divergence"] == True] if not regime_table.empty else pd.DataFrame()  # noqa: E712
+    all_tables = pd.concat([t for t in [asset_table, rank_table, side_table] if not t.empty], ignore_index=True) if any(not t.empty for t in [asset_table, rank_table, side_table]) else pd.DataFrame()
+    other_divergent_count = int((all_tables["decay_divergence"] == True).sum()) if not all_tables.empty and "decay_divergence" in all_tables.columns else 0  # noqa: E712
+    if not divergent.empty or other_divergent_count > 0:
+        divergence_note = (
+            f"**警告: decay_divergence検出** (regime: {len(divergent)}件 / その他区分: {other_divergent_count}件)。"
+            "全期間と直近で成績の符号が反転しています。レジームシフトの可能性があるため、該当区分の重み変更提案は一層慎重に扱ってください。"
+        )
+    else:
+        divergence_note = "decay_divergenceは検出されていません。"
     conclusion = f"翌月モードは「{mode}」、最大日次リスクは {risk}% です。{(' / '.join(mode_notes) + '。') if mode_notes else ''}"
-    report = f"""# Tactical Swing OS Monthly Calibration
-
-## 1. 月次結論
-
-{conclusion}
-
-## 2. 月次サマリー
-
-{markdown_table(log)}
-
-評価データソース: {evaluation_meta["evaluation_source"]} / latest_evaluations_available: {evaluation_meta["latest_evaluations_available"]} / fallback_used: {evaluation_meta["fallback_used"]}
-
-## 3. 資産別較正
-
-{markdown_table(asset_table)}
-
-## 4. Rank別較正
-
-{markdown_table(rank_table)}
-
-## 5. Side別較正
-
-{markdown_table(side_table)}
-
-## 6. 翌月の暫定モード
-
-- next_month_mode: {mode}
-- max_daily_risk_pct: {risk}
-
-## 7. 重み変更案
-
-{summary}
-
-## 8. 据え置き理由
-
-weights.jsonは初期値のまま据え置きます。今回の出力は提案のみで、自動更新は行いません。
-
-## 9. データ不足の注意
-
-{data_warning}
-
-## 10. Reason Code較正メモ
-
-{reason_memo}
-
-### strong_positive reason_codes
-
-{markdown_table(strong_positive_reasons)}
-
-### strong_negative reason_codes
-
-{markdown_table(strong_negative_reasons)}
-
-## 11. MONTHLY_CALIBRATION_LOG CSV
-
-```csv
-{log.to_csv(index=False).strip()}
-```
-
-## 12. MONTHLY_CALIBRATION_LOG JSON
-
-```json
-{json.dumps([payload], ensure_ascii=False, indent=2)}
-```
-"""
+    report = render_monthly_report(
+        conclusion=conclusion,
+        log=log,
+        evaluation_meta=evaluation_meta,
+        asset_table=asset_table,
+        rank_table=rank_table,
+        side_table=side_table,
+        regime_table=regime_table,
+        divergence_note=divergence_note,
+        mode=mode,
+        risk=risk,
+        summary=summary,
+        data_warning=data_warning,
+        reason_memo=reason_memo,
+        strong_positive_reasons=strong_positive_reasons,
+        strong_negative_reasons=strong_negative_reasons,
+        payload=payload,
+    )
     report_path.write_text(report, encoding="utf-8")
     log.to_csv(RESULTS_DIR / "monthly_calibration.csv", index=False)
     (RESULTS_DIR / "monthly_calibration.json").write_text(json.dumps([payload], ensure_ascii=False, indent=2), encoding="utf-8")

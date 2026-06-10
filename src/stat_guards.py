@@ -171,3 +171,47 @@ def significance_report(values: Iterable[Any] | None) -> dict[str, Any]:
         "p_value": p_value,
         "significant": p_value < SIGNIFICANCE_ALPHA,
     }
+
+
+# === SPEC-RD-001: 忘却 (time decay) ===
+# 指数減衰の半減期(日)。古い成績ほど重みが下がる。情報提示用であり、
+# SPEC-SG-001の統計ゲート(無加重t検定)には影響しない。
+DECAY_HALF_LIFE_DAYS = 90
+
+
+def decay_weight(age_days: float, half_life_days: float = DECAY_HALF_LIFE_DAYS) -> float:
+    """経過日数に対する指数減衰重み。age=0で1.0、半減期ごとに半分。"""
+    if half_life_days <= 0:
+        return 1.0
+    return 0.5 ** (max(0.0, float(age_days)) / float(half_life_days))
+
+
+def decayed_mean(
+    values: Iterable[Any] | None,
+    age_days_list: Iterable[Any] | None,
+    half_life_days: float = DECAY_HALF_LIFE_DAYS,
+) -> dict[str, float]:
+    """減衰加重平均と実効サンプル数(重みの総和)を返す。
+
+    values と age_days_list は同じ長さであること。不正値のペアは除外。
+    """
+    if values is None or age_days_list is None:
+        return {"decayed_mean": 0.0, "effective_n": 0.0}
+    pairs: list[tuple[float, float]] = []
+    for value, age in zip(values, age_days_list):
+        try:
+            v = float(value)
+            a = float(age)
+        except (TypeError, ValueError):
+            continue
+        if math.isnan(v) or math.isinf(v) or math.isnan(a) or math.isinf(a):
+            continue
+        pairs.append((v, max(0.0, a)))
+    if not pairs:
+        return {"decayed_mean": 0.0, "effective_n": 0.0}
+    weights = [decay_weight(a, half_life_days) for _, a in pairs]
+    total = sum(weights)
+    if total <= 0:
+        return {"decayed_mean": 0.0, "effective_n": 0.0}
+    weighted = sum(w * v for (v, _), w in zip(pairs, weights))
+    return {"decayed_mean": weighted / total, "effective_n": total}

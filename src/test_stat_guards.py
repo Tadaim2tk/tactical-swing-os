@@ -93,3 +93,26 @@ def test_significant_but_low_sharpe_blocks_increase():
     change, reason = proposed_change(n, win, avg, values)
     assert change == 0.0
     assert "Sharpe" in reason
+
+
+# === SPEC-RD-001: time decay ===
+
+def test_decay_weight_half_life():
+    assert stat_guards.decay_weight(0) == 1.0
+    assert abs(stat_guards.decay_weight(90) - 0.5) < 1e-12
+    assert abs(stat_guards.decay_weight(180) - 0.25) < 1e-12
+    assert stat_guards.decay_weight(-10) == 1.0  # 未来日付は重み1に丸める
+
+
+def test_decayed_mean_recent_dominates():
+    # 直近+1.0(重み1.0) vs 360日前-1.0(重み0.0625) -> 正側に寄る
+    result = stat_guards.decayed_mean([1.0, -1.0], [0, 360])
+    assert result["decayed_mean"] > 0.8
+    assert abs(result["effective_n"] - 1.0625) < 1e-9
+
+
+def test_decayed_mean_handles_bad_input():
+    assert stat_guards.decayed_mean([], []) == {"decayed_mean": 0.0, "effective_n": 0.0}
+    assert stat_guards.decayed_mean(None, None) == {"decayed_mean": 0.0, "effective_n": 0.0}
+    result = stat_guards.decayed_mean([1.0, float("nan"), 2.0], [0, 0, "bad"])
+    assert result["effective_n"] == 1.0  # 有効ペアは(1.0, 0)のみ
