@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 
+from stat_guards import MIN_SAMPLES_WEIGHT_CHANGE
 from time_utils import format_jst, format_utc, now_utc
 
 
@@ -133,15 +134,24 @@ def audit_one(row: pd.Series) -> dict[str, Any]:
         reasons.append("insufficient_data_with_non_hold_proposal")
         action = "block_proposal"
 
-    if sample_count < 5 and direction != "hold" and "insufficient_data_with_non_hold_proposal" not in reasons:
-        audit_result = "warning" if audit_result == "passed" else audit_result
-        severity = stronger_severity(severity, "medium")
-        reasons.append("low_sample_non_hold_proposal")
-        if action != "block_proposal":
-            action = "review_before_any_change"
+    # 憲章ルール7(最低30サンプル, SPEC-SG-001): 30未満の非hold提案は警告ではなくブロック。
+    if (
+        sample_count < MIN_SAMPLES_WEIGHT_CHANGE
+        and direction != "hold"
+        and "insufficient_data_with_non_hold_proposal" not in reasons
+    ):
+        audit_result = "blocked"
+        severity = stronger_severity(severity, "high")
+        reasons.append("sample_count_below_30_minimum")
+        action = "block_proposal"
 
     if strength == "strong":
-        strong_ok = sample_count >= 10 and confidence in {"medium", "high"} and abs(proposed_delta) > 0 and not apply_automatically
+        strong_ok = (
+            sample_count >= MIN_SAMPLES_WEIGHT_CHANGE
+            and confidence in {"medium", "high"}
+            and abs(proposed_delta) > 0
+            and not apply_automatically
+        )
         if not strong_ok:
             audit_result = "warning" if audit_result == "passed" else audit_result
             severity = stronger_severity(severity, "medium")

@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 
+from stat_guards import MIN_SAMPLES_WEIGHT_CHANGE
 from time_utils import format_jst, format_utc, now_utc
 
 
@@ -176,8 +177,8 @@ def exclusion_reason(row: pd.Series, audit_result: str, audit_status: str) -> st
         return "apply_automatically_true"
     if str(row.get("confidence_level", "")) == "insufficient_data":
         return "insufficient_data"
-    if parse_int(row.get("sample_count", 0)) < 5:
-        return "sample_count_under_5"
+    if parse_int(row.get("sample_count", 0)) < MIN_SAMPLES_WEIGHT_CHANGE:
+        return "sample_count_below_30"
     if str(row.get("proposal_direction", "")) not in {"increase", "decrease"}:
         return "proposal_direction_not_increase_or_decrease"
     if parse_float(row.get("proposed_delta", 0)) == 0:

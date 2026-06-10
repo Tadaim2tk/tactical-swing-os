@@ -10,7 +10,7 @@ def proposal(**overrides):
         "proposal_id": "p1",
         "category": "asset",
         "target": "BTC",
-        "sample_count": 10,
+        "sample_count": 40,
         "confidence_level": "medium",
         "proposal_direction": "increase",
         "proposal_strength": "moderate",
@@ -55,8 +55,16 @@ def test_hold_proposal_is_excluded():
 
 
 def test_low_sample_is_excluded():
+    # SPEC-SG-001: 閾値は5件ではなく30件
+    row = pd.Series(proposal(sample_count=29))
+    assert wp.exclusion_reason(row, "passed", "passed") == "sample_count_below_30"
     row = pd.Series(proposal(sample_count=4))
-    assert wp.exclusion_reason(row, "passed", "passed") == "sample_count_under_5"
+    assert wp.exclusion_reason(row, "passed", "passed") == "sample_count_below_30"
+
+
+def test_sample_30_passes_threshold():
+    row = pd.Series(proposal(sample_count=30))
+    assert wp.exclusion_reason(row, "passed", "passed") == ""
 
 
 def test_eligible_increase_decrease_only_become_patches():

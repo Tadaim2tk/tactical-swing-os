@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 import evaluation_loader
+import stat_guards
 
 
 RESULTS_DIR = Path("results")
@@ -238,18 +239,41 @@ def count_status(evaluations: pd.DataFrame, status: str) -> int:
     return int((evaluations["evaluation_status"].astype(str).str.lower() == status).sum())
 
 
-def proposed_change(closed_count: int, win_rate: float, average_r: float) -> tuple[float, str]:
-    if closed_count < 5:
-        return 0.0, "データ不足"
-    if average_r > 0.3 and win_rate >= 0.5:
-        return 0.05, "average_r > 0.3 and win_rate >= 0.5"
-    if average_r > 0.1 and win_rate >= 0.45:
-        return 0.03, "average_r > 0.1 and win_rate >= 0.45"
+def proposed_change(
+    closed_count: int,
+    win_rate: float,
+    average_r: float,
+    r_values: list[float] | None = None,
+) -> tuple[float, str]:
+    """重み変更提案 (SPEC-SG-001)。
+
+    憲章ルールの実装:
+    - n >= 30 (MIN_SAMPLES_WEIGHT_CHANGE) 未満は提案禁止
+    - 一標本t検定 p < 0.05 (SIGNIFICANCE_ALPHA) を満たさない場合は提案禁止
+    - 増加提案: 有意性に加えて Sharpe > 0.5 を要求(過学習ブレーキ)
+    - 減少提案: 有意性のみ要求(Ruin回避を優先し、Sharpe閾値は課さない)
+    reason文字列には n / win / avg_r / sharpe / p を必ず記録する(後日監査用)。
+    """
+    if closed_count < stat_guards.MIN_SAMPLES_WEIGHT_CHANGE:
+        return 0.0, f"データ不足 (n={closed_count} < {stat_guards.MIN_SAMPLES_WEIGHT_CHANGE})"
+    report = stat_guards.significance_report(r_values or [])
+    stats_note = (
+        f"n={closed_count}, win={win_rate:.2f}, avg_r={average_r:.3f}, "
+        f"sharpe={report['sharpe']:.3f}, p={report['p_value']:.4f}"
+    )
+    if not report["significant"]:
+        return 0.0, f"統計的有意性なし (p >= {stat_guards.SIGNIFICANCE_ALPHA}) | {stats_note}"
     if average_r < -0.3:
-        return -0.05, "average_r < -0.3"
+        return -0.05, f"average_r < -0.3 (有意・リスク優先) | {stats_note}"
     if average_r < -0.1:
-        return -0.03, "average_r < -0.1"
-    return 0.0, "変更なし"
+        return -0.03, f"average_r < -0.1 (有意・リスク優先) | {stats_note}"
+    if report["sharpe"] <= stat_guards.MIN_SHARPE_FOR_INCREASE:
+        return 0.0, f"Sharpe <= {stat_guards.MIN_SHARPE_FOR_INCREASE} のため増加提案を保留 | {stats_note}"
+    if average_r > 0.3 and win_rate >= 0.5:
+        return 0.05, f"average_r > 0.3 and win_rate >= 0.5 | {stats_note}"
+    if average_r > 0.1 and win_rate >= 0.45:
+        return 0.03, f"average_r > 0.1 and win_rate >= 0.45 | {stats_note}"
+    return 0.0, f"変更なし | {stats_note}"
 
 
 def calibration_table(signals: pd.DataFrame, evaluations: pd.DataFrame, column: str, values: list[str] | None = None) -> pd.DataFrame:
@@ -262,7 +286,8 @@ def calibration_table(signals: pd.DataFrame, evaluations: pd.DataFrame, column: 
         sig_part = signals[signals[column].astype(str) == value] if column in signals.columns and not signals.empty else pd.DataFrame()
         eval_part = evaluations[evaluations[column].astype(str) == value] if column in evaluations.columns and not evaluations.empty else pd.DataFrame()
         metrics = r_metrics(eval_part)
-        change, reason = proposed_change(metrics["closed_count"], metrics["win_rate"], metrics["average_r"])
+        r_values = numeric_r(closed_df(eval_part)).tolist()
+        change, reason = proposed_change(metrics["closed_count"], metrics["win_rate"], metrics["average_r"], r_values)
         rows.append(
             {
                 column: value,
@@ -446,7 +471,11 @@ def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[p
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     report_path = REPORTS_DIR / f"{end.strftime('%Y-%m-%d')}_monthly_calibration.md"
-    data_warning = "closed評価が30〜50件以上たまるまでは、変更案を自動適用しません。"
+    data_warning = (
+        f"closed評価が{stat_guards.MIN_SAMPLES_WEIGHT_CHANGE}件未満、"
+        f"または統計的有意性(p < {stat_guards.SIGNIFICANCE_ALPHA})が確認できない区分には、重み変更を提案しません。"
+        "weights.jsonの自動適用は引き続き行いません。(SPEC-SG-001)"
+    )
     conclusion = f"翌月モードは「{mode}」、最大日次リスクは {risk}% です。{(' / '.join(mode_notes) + '。') if mode_notes else ''}"
     report = f"""# Tactical Swing OS Monthly Calibration
 
