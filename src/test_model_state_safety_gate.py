@@ -10,7 +10,7 @@ def proposal(**overrides):
         "proposal_id": "p1",
         "category": "asset",
         "target": "BTC",
-        "sample_count": 20,
+        "sample_count": 40,
         "confidence_level": "high",
         "proposal_direction": "hold",
         "proposal_strength": "none",
@@ -52,11 +52,35 @@ def test_insufficient_data_with_non_hold_is_blocked():
     assert "insufficient_data_with_non_hold_proposal" in result["reason"]
 
 
-def test_strong_with_low_sample_is_warning():
+def test_below_30_samples_non_hold_is_blocked():
+    # SPEC-SG-001: n<30の非hold提案は警告ではなくブロック
     result = audit.audit_one(
         pd.Series(
             proposal(
-                sample_count=6,
+                sample_count=10,
+                confidence_level="medium",
+                proposal_direction="increase",
+                proposed_delta=0.02,
+                max_allowed_delta=0.03,
+            )
+        )
+    )
+    assert result["audit_result"] == "blocked"
+    assert "sample_count_below_30_minimum" in result["reason"]
+    assert result["recommended_action"] == "block_proposal"
+
+
+def test_hold_with_low_sample_is_not_blocked_by_sample_rule():
+    result = audit.audit_one(pd.Series(proposal(sample_count=3, proposal_direction="hold")))
+    assert result["audit_result"] == "passed"
+
+
+def test_strong_with_weak_confidence_is_warning():
+    # n>=30だがconfidence=lowでstrongを名乗る提案は警告
+    result = audit.audit_one(
+        pd.Series(
+            proposal(
+                sample_count=35,
                 confidence_level="low",
                 proposal_direction="increase",
                 proposal_strength="strong",
