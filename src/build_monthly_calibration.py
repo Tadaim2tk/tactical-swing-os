@@ -192,6 +192,86 @@ def proposed_change(
     return 0.0, f"変更なし | {stats_note}"
 
 
+# === SPEC-NQ-001: ナラティブ信頼性 ===
+NARRATIVE_ALIGNMENT_CSV = RESULTS_DIR / "signal_narrative_alignment.csv"
+NARRATIVE_CATEGORIES = ["aligned", "conflicted", "neutral", "insufficient_data"]
+
+
+def load_narrative_alignment() -> pd.DataFrame:
+    """シグナル時点に記録された整合判定(追記専用CSV)を読む。再計算はしない(後知恵バイアス防止)。"""
+    df = read_csv(NARRATIVE_ALIGNMENT_CSV)
+    if df.empty or "signal_id" not in df.columns or "narrative_alignment" not in df.columns:
+        return pd.DataFrame()
+    # 最初の記録が正: 同一signal_idは最初の行のみ採用
+    return df.drop_duplicates(subset=["signal_id"], keep="first")
+
+
+def merge_narrative_alignment(frame: pd.DataFrame, alignment: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or alignment.empty or "signal_id" not in frame.columns:
+        out = frame.copy()
+        if "narrative_alignment" not in out.columns:
+            out["narrative_alignment"] = pd.NA
+        return out
+    lookup = alignment[["signal_id", "narrative_alignment"]].copy()
+    lookup["signal_id"] = lookup["signal_id"].astype(str)
+    out = frame.copy()
+    out["_sid"] = out["signal_id"].astype(str)
+    out = out.merge(lookup.rename(columns={"signal_id": "_sid"}), on="_sid", how="left", suffixes=("", "_recorded"))
+    if "narrative_alignment_recorded" in out.columns:
+        out["narrative_alignment"] = out["narrative_alignment_recorded"]
+        out = out.drop(columns=["narrative_alignment_recorded"])
+    return out.drop(columns=["_sid"])
+
+
+def narrative_edge_note(aligned_r: list[float], conflicted_r: list[float]) -> tuple[str, dict]:
+    """aligned群 vs conflicted群のWelch検定 (SPEC-NQ-001)。
+
+    AIの文章分析が統計的な付加価値を持つか(整合シグナルが矛盾シグナルに勝るか)を検定する。
+    両群とも n >= MIN_SAMPLES_WEIGHT_CHANGE が揃うまでは判定保留。
+    """
+    n_a, n_c = len(aligned_r), len(conflicted_r)
+    mean_a = sum(aligned_r) / n_a if n_a else 0.0
+    mean_c = sum(conflicted_r) / n_c if n_c else 0.0
+    edge = {
+        "aligned_n": n_a,
+        "conflicted_n": n_c,
+        "aligned_avg_r": round(mean_a, 4),
+        "conflicted_avg_r": round(mean_c, 4),
+        "mean_diff": round(mean_a - mean_c, 4),
+        "t_stat": 0.0,
+        "p_value": 1.0,
+        "welch_df": 0.0,
+        "verdict": "insufficient_data",
+    }
+    if n_a < stat_guards.MIN_SAMPLES_WEIGHT_CHANGE or n_c < stat_guards.MIN_SAMPLES_WEIGHT_CHANGE:
+        note = (
+            f"ナラティブ優位性検定: データ不足 (aligned n={n_a}, conflicted n={n_c}, "
+            f"必要数: 各{stat_guards.MIN_SAMPLES_WEIGHT_CHANGE})。判定保留。"
+        )
+        return note, edge
+    t_stat, p_value, df = stat_guards.t_test_welch(aligned_r, conflicted_r)
+    edge.update({"t_stat": round(t_stat, 4), "p_value": round(p_value, 4), "welch_df": round(df, 2)})
+    if p_value < stat_guards.SIGNIFICANCE_ALPHA and mean_a > mean_c:
+        edge["verdict"] = "narrative_edge_confirmed"
+        note = (
+            f"**ナラティブ優位性: 統計的に確認** (diff={mean_a - mean_c:+.3f}R, p={p_value:.4f})。"
+            "AI文章分析の整合判定は付加価値を持っています。"
+        )
+    elif p_value < stat_guards.SIGNIFICANCE_ALPHA and mean_a < mean_c:
+        edge["verdict"] = "narrative_inverse"
+        note = (
+            f"**警告: 逆ナラティブ効果** (diff={mean_a - mean_c:+.3f}R, p={p_value:.4f})。"
+            "整合シグナルが矛盾シグナルに有意に劣っています。ナラティブ層の見直しが必要です。"
+        )
+    else:
+        edge["verdict"] = "no_significant_edge"
+        note = (
+            f"ナラティブ優位性検定: 有意差なし (diff={mean_a - mean_c:+.3f}R, p={p_value:.4f})。"
+            "現時点でAI整合判定の付加価値は未証明です。"
+        )
+    return note, edge
+
+
 # SPEC-RD-001: 減衰の年齢は「結果が確定した日」で測る(シグナル日ではなく評価日を優先)
 DECAY_DATE_COLUMNS = ["evaluation_date", "hit_date", "date", "signal_date", "run_ts"]
 
@@ -368,6 +448,13 @@ def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[p
     rank_table = calibration_table(signals, evaluations, "rank", ["A", "B", "NO_TRADE"], as_of=end)
     side_table = calibration_table(signals, evaluations, "side", ["LONG", "SHORT", "NONE"], as_of=end)
     regime_table = calibration_table(signals, evaluations, "regime", ["UPTREND", "DOWNTREND", "RANGE", "UNKNOWN"], as_of=end)
+    narrative_alignment = load_narrative_alignment()
+    evaluations_n = merge_narrative_alignment(evaluations, narrative_alignment)
+    signals_n = merge_narrative_alignment(signals, narrative_alignment)
+    narrative_table = calibration_table(signals_n, evaluations_n, "narrative_alignment", NARRATIVE_CATEGORIES, as_of=end)
+    aligned_r = numeric_r(closed_df(evaluations_n[evaluations_n["narrative_alignment"].astype(str) == "aligned"])).tolist()
+    conflicted_r = numeric_r(closed_df(evaluations_n[evaluations_n["narrative_alignment"].astype(str) == "conflicted"])).tolist()
+    narrative_note, narrative_edge = narrative_edge_note(aligned_r, conflicted_r)
     best_asset, worst_asset = best_worst(asset_table, "asset")
     best_rank, worst_rank = best_worst(rank_table, "rank")
     best_side, worst_side = best_worst(side_table, "side")
@@ -419,6 +506,8 @@ def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[p
         "rank_calibration": rank_table.to_dict(orient="records"),
         "side_calibration": side_table.to_dict(orient="records"),
         "regime_calibration": regime_table.to_dict(orient="records"),
+        "narrative_calibration": narrative_table.to_dict(orient="records"),
+        "narrative_edge": narrative_edge,
         "decay_half_life_days": stat_guards.DECAY_HALF_LIFE_DAYS,
         "proposed_weight_changes": proposed_weight_changes,
     }
@@ -450,6 +539,8 @@ def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[p
         rank_table=rank_table,
         side_table=side_table,
         regime_table=regime_table,
+        narrative_table=narrative_table,
+        narrative_note=narrative_note,
         divergence_note=divergence_note,
         mode=mode,
         risk=risk,

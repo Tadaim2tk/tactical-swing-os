@@ -116,3 +116,26 @@ def test_decayed_mean_handles_bad_input():
     assert stat_guards.decayed_mean(None, None) == {"decayed_mean": 0.0, "effective_n": 0.0}
     result = stat_guards.decayed_mean([1.0, float("nan"), 2.0], [0, 0, "bad"])
     assert result["effective_n"] == 1.0  # 有効ペアは(1.0, 0)のみ
+
+
+# === SPEC-NQ-001: Welch二標本t検定 ===
+
+def test_welch_known_value():
+    # a=[1..5], b=[2..6]: t=-1.0, df=8, 両側p≈0.3466 (scipy基準値)
+    t, p, df = stat_guards.t_test_welch([1, 2, 3, 4, 5], [2, 3, 4, 5, 6])
+    assert abs(t + 1.0) < 1e-9
+    assert abs(df - 8.0) < 1e-9
+    assert abs(p - 0.3466) < 0.002
+
+
+def test_welch_clear_difference_is_significant():
+    a = [1.0, 1.1, 0.9, 1.2, 0.8] * 6   # mean=1.0, n=30
+    b = [-1.0, -0.9, -1.1, -0.8, -1.2] * 6  # mean=-1.0, n=30
+    t, p, _ = stat_guards.t_test_welch(a, b)
+    assert t > 10
+    assert p < 0.001
+
+
+def test_welch_insufficient_n():
+    assert stat_guards.t_test_welch([1.0], [1.0, 2.0]) == (0.0, 1.0, 0.0)
+    assert stat_guards.t_test_welch([], []) == (0.0, 1.0, 0.0)

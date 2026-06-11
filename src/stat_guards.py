@@ -97,7 +97,7 @@ def _regularized_incomplete_beta(a: float, b: float, x: float) -> float:
     return 1.0 - front * _betacf(b, a, 1.0 - x) / b
 
 
-def t_two_sided_p_value(t_stat: float, df: int) -> float:
+def t_two_sided_p_value(t_stat: float, df: float) -> float:
     """Student's t分布の正確な両側p値。 p = I_{df/(df+t^2)}(df/2, 1/2)"""
     if df <= 0:
         return 1.0
@@ -215,3 +215,35 @@ def decayed_mean(
         return {"decayed_mean": 0.0, "effective_n": 0.0}
     weighted = sum(w * v for (v, _), w in zip(pairs, weights))
     return {"decayed_mean": weighted / total, "effective_n": total}
+
+
+# === SPEC-NQ-001: ナラティブ×クオンツ ===
+
+def t_test_welch(
+    values_a: Iterable[Any] | None,
+    values_b: Iterable[Any] | None,
+) -> tuple[float, float, float]:
+    """Welchの二標本t検定(両側、等分散を仮定しない)。(t統計量, p値, 自由度)を返す。
+
+    どちらかの群が n < 2 の場合は検定不能として (0.0, 1.0, 0.0)。
+    自由度はWelch-Satterthwaite近似(非整数)。p値は正確なt分布から計算。
+    """
+    a = _clean_values(values_a)
+    b = _clean_values(values_b)
+    n_a, n_b = len(a), len(b)
+    if n_a < 2 or n_b < 2:
+        return 0.0, 1.0, 0.0
+    mean_a = sum(a) / n_a
+    mean_b = sum(b) / n_b
+    var_a = sum((v - mean_a) ** 2 for v in a) / (n_a - 1)
+    var_b = sum((v - mean_b) ** 2 for v in b) / (n_b - 1)
+    se_sq = var_a / n_a + var_b / n_b
+    if se_sq <= 0.0:
+        if mean_a != mean_b:
+            return math.copysign(math.inf, mean_a - mean_b), 0.0, float(n_a + n_b - 2)
+        return 0.0, 1.0, float(n_a + n_b - 2)
+    t_stat = (mean_a - mean_b) / math.sqrt(se_sq)
+    df = (se_sq ** 2) / (
+        (var_a / n_a) ** 2 / (n_a - 1) + (var_b / n_b) ** 2 / (n_b - 1)
+    )
+    return t_stat, t_two_sided_p_value(t_stat, df), df
