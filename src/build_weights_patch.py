@@ -171,6 +171,8 @@ def audit_lookup(audit: pd.DataFrame) -> dict[str, str]:
 def exclusion_reason(row: pd.Series, audit_result: str, audit_status: str) -> str:
     if audit_status == "blocked":
         return "audit_status_blocked"
+    if audit_status not in {"passed", "warning"}:
+        return f"audit_status_{audit_status or 'unavailable'}"
     if audit_result != "passed":
         return f"audit_result_{audit_result or 'missing'}"
     if parse_bool(row.get("apply_automatically", False)):

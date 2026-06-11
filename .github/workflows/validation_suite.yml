@@ -41,6 +41,14 @@ jobs:
           python src/propose_model_state_updates.py
           python src/audit_model_state_proposals.py
           python src/build_weights_patch.py
+          python src/review_weights_patch.py
+          python src/track_proposal_adoption.py
+          python src/build_weight_version_history.py
+          python src/build_meta_learning.py
+          python src/build_auto_calibration_candidates.py
+          python src/build_human_override_analytics.py
+          python src/build_portfolio_layer.py
+          python src/audit_datetime_consistency.py
           python src/build_dashboard.py
 
       - name: Write validation summary
@@ -66,6 +74,14 @@ jobs:
           check_file "model state update proposals" "results/model_state_update_proposals.json"
           check_file "model state proposal audit" "results/model_state_proposal_audit.json"
           check_file "weights patch proposal" "results/weights_patch_proposal.json"
+          check_file "weights patch review" "results/weights_patch_review_summary.json"
+          check_file "proposal adoption tracking" "results/proposal_adoption_tracking_summary.json"
+          check_file "weight version history" "results/weight_version_history_summary.json"
+          check_file "meta learning" "results/meta_learning_summary.json"
+          check_file "auto calibration candidates" "results/auto_calibration_candidates_summary.json"
+          check_file "human override analytics" "results/human_override_analytics_summary.json"
+          check_file "portfolio layer" "results/portfolio_layer_summary.json"
+          check_file "datetime audit" "results/datetime_audit_summary.json"
           check_file "dashboard" "reports/dashboard/index.html"
 
       - name: Upload validation artifacts
@@ -89,3 +105,35 @@ jobs:
             results/weights_patch_proposal.json
             results/weights_patch_summary.json
             reports/model_state/*_weights_patch_proposal.md
+            results/weights_patch_review.csv
+            results/weights_patch_review.json
+            results/weights_patch_review_summary.json
+            reports/model_state/*_weights_patch_review.md
+            results/proposal_adoption_tracking.csv
+            results/proposal_adoption_tracking.json
+            results/proposal_adoption_tracking_summary.json
+            reports/model_state/*_proposal_adoption_tracking.md
+            results/weight_version_history.csv
+            results/weight_version_history.json
+            results/weight_version_history_summary.json
+            reports/model_state/*_weight_version_history.md
+            results/meta_learning.csv
+            results/meta_learning.json
+            results/meta_learning_summary.json
+            reports/model_state/*_meta_learning.md
+            results/auto_calibration_candidates.csv
+            results/auto_calibration_candidates.json
+            results/auto_calibration_candidates_summary.json
+            reports/model_state/*_auto_calibration_candidates.md
+            results/human_override_analytics.csv
+            results/human_override_analytics.json
+            results/human_override_analytics_summary.json
+            reports/model_state/*_human_override_analytics.md
+            results/portfolio_layer.csv
+            results/portfolio_layer.json
+            results/portfolio_layer_summary.json
+            reports/portfolio/*_portfolio_layer.md
+            results/datetime_audit.csv
+            results/datetime_audit.json
+            results/datetime_audit_summary.json
+            reports/system/*_datetime_audit.md

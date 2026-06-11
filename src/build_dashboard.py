@@ -164,6 +164,123 @@ DISPLAY_LABELS = {
     "patch_action": "patch action",
     "current_weight": "現在weight",
     "proposed_value": "提案値",
+    "weights_patch_review_status": "review_status",
+    "weights_patch_review_candidate_count": "承認候補",
+    "weights_patch_review_hold_count": "保留候補",
+    "weights_patch_review_reject_count": "却下候補",
+    "weights_patch_review_blocked_count": "ブロック候補",
+    "weights_patch_review_recommended_next_action": "推奨次アクション",
+    "weights_patch_review_requires_human_approval": "人間承認",
+    "weights_patch_review_patch_applied": "patch適用",
+    "weights_patch_review_weights_json_updated": "weights.json更新",
+    "review_decision": "レビュー判定",
+    "recommended_human_action": "推奨人間アクション",
+    "review_reason": "レビュー理由",
+    "evidence_quality": "根拠品質",
+    "patch_risk_level": "patchリスク",
+    "missing_conditions": "不足条件",
+    "proposal_adoption_tracking_status": "tracking_status",
+    "proposal_adoption_total_count": "追跡対象",
+    "proposal_adoption_accepted_count": "採用済み",
+    "proposal_adoption_pending_review_count": "承認判断待ち",
+    "proposal_adoption_held_count": "保留",
+    "proposal_adoption_rejected_count": "却下",
+    "proposal_adoption_blocked_count": "ブロック",
+    "proposal_adoption_superseded_count": "置き換え済み",
+    "proposal_adoption_manual_decision_count": "手動判断",
+    "proposal_adoption_derived_decision_count": "レビュー由来",
+    "proposal_adoption_recommended_next_action": "推奨次アクション",
+    "adoption_status": "採用状態",
+    "adoption_source": "採用判断ソース",
+    "human_decision_recorded": "人間判断記録",
+    "tracking_reason": "追跡理由",
+    "weight_history_current_version": "現在Version",
+    "weight_history_version_count": "Version数",
+    "weight_history_tracked_count": "tracked件数",
+    "weight_history_held_count": "held件数",
+    "weight_history_candidate_count": "candidate件数",
+    "weight_history_approved_count": "approved件数",
+    "weight_history_rejected_count": "rejected件数",
+    "weight_history_blocked_count": "blocked件数",
+    "weight_history_weights_json_updated": "weights.json更新",
+    "weight_history_patch_applied": "patch適用",
+    "weight_history_requires_human_approval": "人間承認",
+    "version_id": "Version",
+    "description": "説明",
+    "notes": "備考",
+    "meta_learning_status": "meta_learning_status",
+    "meta_learning_total_candidates": "Meta Learning候補数",
+    "meta_learning_success_pattern_count": "成功パターン",
+    "meta_learning_failure_pattern_count": "失敗パターン",
+    "meta_learning_neutral_pattern_count": "中立パターン",
+    "meta_learning_insufficient_data_count": "データ不足",
+    "meta_learning_recommended_next_action": "推奨次アクション",
+    "meta_learning_apply_automatically": "自動適用",
+    "meta_learning_weights_json_updated": "weights.json更新",
+    "meta_learning_patch_applied": "patch適用",
+    "meta_learning_requires_human_approval": "人間承認",
+    "meta_learning_id": "Meta Learning ID",
+    "pattern_type": "パターン",
+    "impact_score": "impact score",
+    "impact_direction": "impact方向",
+    "learning_hypothesis": "学習仮説",
+    "evidence_summary": "根拠要約",
+    "auto_calibration_status": "auto calibration status",
+    "auto_calibration_candidate_count": "candidate count",
+    "auto_calibration_increase_count": "increase",
+    "auto_calibration_decrease_count": "decrease",
+    "auto_calibration_hold_count": "hold",
+    "auto_calibration_blocked_count": "blocked",
+    "auto_calibration_insufficient_data_count": "データ不足",
+    "auto_calibration_recommended_next_action": "recommended next action",
+    "auto_calibration_requires_human_approval": "人間承認",
+    "auto_calibration_patch_applied": "patch適用",
+    "auto_calibration_weights_json_updated": "weights.json更新",
+    "candidate_id": "Candidate ID",
+    "factor": "factor",
+    "classification": "分類",
+    "confidence": "confidence",
+    "sample_size": "サンプル数",
+    "suggested_delta": "suggested delta",
+    "suggested_value": "suggested value",
+    "human_override_status": "human override status",
+    "human_override_total_overrides": "total overrides",
+    "human_override_accepted_count": "accepted",
+    "human_override_held_count": "held",
+    "human_override_rejected_count": "rejected",
+    "human_override_blocked_count": "blocked",
+    "human_override_positive_count": "positive override",
+    "human_override_negative_count": "negative override",
+    "human_override_unknown_count": "unknown outcome",
+    "human_override_recommended_next_action": "recommended next action",
+    "human_override_requires_human_approval": "人間承認",
+    "portfolio_status": "portfolio status",
+    "portfolio_candidate_assets": "candidate assets",
+    "portfolio_defensive_assets": "defensive assets",
+    "portfolio_offensive_assets": "offensive assets",
+    "portfolio_cash_candidate": "cash candidate",
+    "portfolio_average_confidence": "average confidence",
+    "portfolio_concentration": "portfolio concentration",
+    "portfolio_risk_concentration": "risk concentration",
+    "portfolio_recommended_exposure": "recommended exposure",
+    "portfolio_recommended_next_action": "recommended next action",
+    "portfolio_requires_human_approval": "人間承認",
+    "allocation_score": "配分スコア",
+    "portfolio_weight_candidate": "配分候補",
+    "confidence": "信頼度",
+    "risk_class": "リスク分類",
+    "risk_role": "リスク役割",
+    "recommended_exposure": "推奨エクスポージャー",
+    "cash_ratio_candidate": "キャッシュ候補",
+    "override_type": "override type",
+    "override_reason": "override reason",
+    "impact_status": "impact status",
+    "datetime_audit_status": "datetime audit status",
+    "datetime_issues_found": "issues found",
+    "datetime_timezone_mismatch": "timezone mismatch",
+    "datetime_naive_datetime": "naive datetime count",
+    "datetime_timestamp_mismatch": "timestamp mismatch",
+    "datetime_recommended_action": "recommended action",
 }
 VALUE_LABELS = {
     "not available": "未取得",
@@ -196,6 +313,36 @@ VALUE_LABELS = {
     "moderate": "moderate（中程度）",
     "weak": "weak（弱い候補）",
     "none": "none（提案なし）",
+    "candidate": "candidate（承認候補）",
+    "reject": "reject（却下）",
+    "low": "low（低）",
+    "medium": "medium（中）",
+    "high": "high（高）",
+    "approve_later": "approve_later（後で承認検討）",
+    "wait_for_more_data": "wait_for_more_data（データ蓄積待ち）",
+    "manual_review": "manual_review（人間確認）",
+    "no_action": "no_action（対応なし）",
+    "active": "active（追跡中）",
+    "pending_review": "pending_review（承認判断待ち）",
+    "held": "held（保留）",
+    "accepted": "accepted（採用済み）",
+    "rejected": "rejected（却下）",
+    "superseded": "superseded（置き換え済み）",
+    "tracked": "tracked（追跡対象）",
+    "approved": "approved（承認済み）",
+    "success_pattern": "成功パターン",
+    "failure_pattern": "失敗パターン",
+    "neutral_pattern": "中立パターン",
+    "positive": "プラス",
+    "negative": "マイナス",
+    "human_review": "human_review（人間確認）",
+    "derived_from_review": "レビュー由来",
+    "manual": "手動判断",
+    "generate_meta_learning_or_proposal_impact": "Meta LearningまたはImpact生成待ち",
+    "wait_for_proposal_impact": "Proposal Impact待ち",
+    "review_successful_overrides": "有効な介入を確認",
+    "review_negative_overrides": "悪化した介入を確認",
+    "generate_adoption_tracking": "Adoption Tracking生成待ち",
 }
 
 
@@ -307,6 +454,30 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "weights_patch_proposal": read_csv(RESULTS_DIR / "weights_patch_proposal.csv"),
         "weights_patch_proposal_json": read_json(RESULTS_DIR / "weights_patch_proposal.json"),
         "weights_patch_summary_json": read_json(RESULTS_DIR / "weights_patch_summary.json"),
+        "weights_patch_review": read_csv(RESULTS_DIR / "weights_patch_review.csv"),
+        "weights_patch_review_json": read_json(RESULTS_DIR / "weights_patch_review.json"),
+        "weights_patch_review_summary_json": read_json(RESULTS_DIR / "weights_patch_review_summary.json"),
+        "proposal_adoption_tracking": read_csv(RESULTS_DIR / "proposal_adoption_tracking.csv"),
+        "proposal_adoption_tracking_json": read_json(RESULTS_DIR / "proposal_adoption_tracking.json"),
+        "proposal_adoption_tracking_summary_json": read_json(RESULTS_DIR / "proposal_adoption_tracking_summary.json"),
+        "weight_version_history": read_csv(RESULTS_DIR / "weight_version_history.csv"),
+        "weight_version_history_json": read_json(RESULTS_DIR / "weight_version_history.json"),
+        "weight_version_history_summary_json": read_json(RESULTS_DIR / "weight_version_history_summary.json"),
+        "meta_learning": read_csv(RESULTS_DIR / "meta_learning.csv"),
+        "meta_learning_json": read_json(RESULTS_DIR / "meta_learning.json"),
+        "meta_learning_summary_json": read_json(RESULTS_DIR / "meta_learning_summary.json"),
+        "auto_calibration_candidates": read_csv(RESULTS_DIR / "auto_calibration_candidates.csv"),
+        "auto_calibration_candidates_json": read_json(RESULTS_DIR / "auto_calibration_candidates.json"),
+        "auto_calibration_candidates_summary_json": read_json(RESULTS_DIR / "auto_calibration_candidates_summary.json"),
+        "human_override_analytics": read_csv(RESULTS_DIR / "human_override_analytics.csv"),
+        "human_override_analytics_json": read_json(RESULTS_DIR / "human_override_analytics.json"),
+        "human_override_analytics_summary_json": read_json(RESULTS_DIR / "human_override_analytics_summary.json"),
+        "portfolio_layer": read_csv(RESULTS_DIR / "portfolio_layer.csv"),
+        "portfolio_layer_json": read_json(RESULTS_DIR / "portfolio_layer.json"),
+        "portfolio_layer_summary_json": read_json(RESULTS_DIR / "portfolio_layer_summary.json"),
+        "datetime_audit": read_csv(RESULTS_DIR / "datetime_audit.csv"),
+        "datetime_audit_json": read_json(RESULTS_DIR / "datetime_audit.json"),
+        "datetime_audit_summary_json": read_json(RESULTS_DIR / "datetime_audit_summary.json"),
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
@@ -422,9 +593,25 @@ def table_html(df: pd.DataFrame, columns: list[str], empty: str = "データな�
         out.append("<tr>")
         for col in view.columns:
             raw = row.get(col, "")
-            if col in {"rank", "side", "recommended_action", "proposal_strength", "proposal_direction", "reliability_label", "assessment"}:
+            if col in {"rank", "side", "recommended_action", "proposal_strength", "proposal_direction", "reliability_label", "assessment", "classification", "override_type", "impact_status"}:
                 cell = badge(raw, col)
-            elif col in {"average_r", "avg_r", "total_r", "r_multiple", "win_rate", "best_r", "worst_r", "average_mfe_r", "proposed_delta", "proposed_weight"}:
+            elif col in {
+                "average_r",
+                "avg_r",
+                "total_r",
+                "r_multiple",
+                "win_rate",
+                "best_r",
+                "worst_r",
+                "average_mfe_r",
+                "proposed_delta",
+                "proposed_weight",
+                "suggested_delta",
+                "suggested_value",
+                "current_value",
+                "confidence",
+                "impact_score",
+            }:
                 cell = f'<span class="{value_class(raw)}">{fmt_num(raw)}</span>'
             elif is_numeric_cell(raw):
                 cell = fmt_num(raw)
@@ -814,6 +1001,460 @@ def weights_patch_summary(patch_csv: pd.DataFrame, patch_json, summary_json) -> 
     }
 
 
+def weights_patch_review_summary(review_csv: pd.DataFrame, review_json, summary_json) -> dict:
+    if isinstance(review_json, dict) and review_json:
+        rows = review_json.get("patch_review", []) or []
+        return {
+            "available": True,
+            "weights_patch_review_status": review_json.get("review_status", "unavailable"),
+            "weights_patch_review_candidate_count": int(numeric_or(review_json.get("candidate_count", 0), 0)),
+            "weights_patch_review_hold_count": int(numeric_or(review_json.get("hold_count", 0), 0)),
+            "weights_patch_review_reject_count": int(numeric_or(review_json.get("reject_count", 0), 0)),
+            "weights_patch_review_blocked_count": int(numeric_or(review_json.get("blocked_count", 0), 0)),
+            "weights_patch_review_recommended_next_action": review_json.get("recommended_next_action", "no_action"),
+            "weights_patch_review_requires_human_approval": "必須" if review_json.get("requires_human_approval", True) else "不要",
+            "weights_patch_review_patch_applied": str(review_json.get("patch_applied", False)).lower(),
+            "weights_patch_review_weights_json_updated": str(review_json.get("weights_json_updated", False)).lower(),
+            "candidate_rows": [row for row in rows if str(row.get("review_decision", "")) == "candidate"][:5],
+            "hold_rows": [row for row in rows if str(row.get("review_decision", "")) == "hold"][:5],
+        }
+    if isinstance(summary_json, dict) and summary_json:
+        candidates = review_csv[review_csv["review_decision"].astype(str) == "candidate"].head(5) if not review_csv.empty and "review_decision" in review_csv.columns else pd.DataFrame()
+        holds = review_csv[review_csv["review_decision"].astype(str) == "hold"].head(5) if not review_csv.empty and "review_decision" in review_csv.columns else pd.DataFrame()
+        return {
+            "available": True,
+            "weights_patch_review_status": summary_json.get("review_status", "unavailable"),
+            "weights_patch_review_candidate_count": int(numeric_or(summary_json.get("candidate_count", 0), 0)),
+            "weights_patch_review_hold_count": int(numeric_or(summary_json.get("hold_count", 0), 0)),
+            "weights_patch_review_reject_count": int(numeric_or(summary_json.get("reject_count", 0), 0)),
+            "weights_patch_review_blocked_count": int(numeric_or(summary_json.get("blocked_count", 0), 0)),
+            "weights_patch_review_recommended_next_action": summary_json.get("recommended_next_action", "no_action"),
+            "weights_patch_review_requires_human_approval": "必須" if summary_json.get("requires_human_approval", True) else "不要",
+            "weights_patch_review_patch_applied": str(summary_json.get("patch_applied", False)).lower(),
+            "weights_patch_review_weights_json_updated": str(summary_json.get("weights_json_updated", False)).lower(),
+            "candidate_rows": candidates.to_dict(orient="records"),
+            "hold_rows": holds.to_dict(orient="records"),
+        }
+    if not review_csv.empty and "review_decision" in review_csv.columns:
+        decision = review_csv["review_decision"].fillna("").astype(str)
+        risk = review_csv.get("patch_risk_level", pd.Series("", index=review_csv.index)).fillna("").astype(str)
+        return {
+            "available": True,
+            "weights_patch_review_status": "blocked" if (decision == "blocked").any() else "warning" if decision.isin(["hold", "reject"]).any() else "passed",
+            "weights_patch_review_candidate_count": int((decision == "candidate").sum()),
+            "weights_patch_review_hold_count": int((decision == "hold").sum()),
+            "weights_patch_review_reject_count": int((decision == "reject").sum()),
+            "weights_patch_review_blocked_count": int((decision == "blocked").sum()),
+            "weights_patch_review_recommended_next_action": "manual_review" if (decision == "candidate").any() else "wait_for_more_data" if (decision == "hold").any() else "no_action",
+            "weights_patch_review_requires_human_approval": "必須",
+            "weights_patch_review_patch_applied": "false",
+            "weights_patch_review_weights_json_updated": "false",
+            "weights_patch_review_low_risk_count": int((risk == "low").sum()),
+            "weights_patch_review_medium_risk_count": int((risk == "medium").sum()),
+            "weights_patch_review_high_risk_count": int((risk == "high").sum()),
+            "candidate_rows": review_csv[decision == "candidate"].head(5).to_dict(orient="records"),
+            "hold_rows": review_csv[decision == "hold"].head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "weights_patch_review_status": "unavailable",
+        "weights_patch_review_candidate_count": 0,
+        "weights_patch_review_hold_count": 0,
+        "weights_patch_review_reject_count": 0,
+        "weights_patch_review_blocked_count": 0,
+        "weights_patch_review_recommended_next_action": "no_action",
+        "weights_patch_review_requires_human_approval": "必須",
+        "weights_patch_review_patch_applied": "false",
+        "weights_patch_review_weights_json_updated": "false",
+        "candidate_rows": [],
+        "hold_rows": [],
+    }
+
+
+def proposal_adoption_summary(adoption_csv: pd.DataFrame, adoption_json, summary_json) -> dict:
+    payload = adoption_json if isinstance(adoption_json, dict) and adoption_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = adoption_json.get("adoptions", []) if isinstance(adoption_json, dict) else []
+        if not rows and not adoption_csv.empty:
+            rows = adoption_csv.to_dict(orient="records")
+        return {
+            "available": True,
+            "proposal_adoption_tracking_status": payload.get("tracking_status", "unavailable"),
+            "proposal_adoption_total_count": int(numeric_or(payload.get("total_tracked_proposals", len(rows)), 0)),
+            "proposal_adoption_accepted_count": int(numeric_or(payload.get("accepted_count", 0), 0)),
+            "proposal_adoption_pending_review_count": int(numeric_or(payload.get("pending_review_count", 0), 0)),
+            "proposal_adoption_held_count": int(numeric_or(payload.get("held_count", 0), 0)),
+            "proposal_adoption_rejected_count": int(numeric_or(payload.get("rejected_count", 0), 0)),
+            "proposal_adoption_blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+            "proposal_adoption_superseded_count": int(numeric_or(payload.get("superseded_count", 0), 0)),
+            "proposal_adoption_manual_decision_count": int(numeric_or(payload.get("manual_decision_count", 0), 0)),
+            "proposal_adoption_derived_decision_count": int(numeric_or(payload.get("derived_decision_count", 0), 0)),
+            "proposal_adoption_recommended_next_action": payload.get("recommended_next_action", "no_action"),
+            "pending_rows": [row for row in rows if str(row.get("adoption_status", "")) == "pending_review"][:5],
+            "held_rows": [row for row in rows if str(row.get("adoption_status", "")) == "held"][:5],
+        }
+    if not adoption_csv.empty and "adoption_status" in adoption_csv.columns:
+        status = adoption_csv["adoption_status"].fillna("").astype(str)
+        source = adoption_csv.get("adoption_source", pd.Series("", index=adoption_csv.index)).fillna("").astype(str)
+        return {
+            "available": True,
+            "proposal_adoption_tracking_status": "active",
+            "proposal_adoption_total_count": int(len(adoption_csv)),
+            "proposal_adoption_accepted_count": int((status == "accepted").sum()),
+            "proposal_adoption_pending_review_count": int((status == "pending_review").sum()),
+            "proposal_adoption_held_count": int((status == "held").sum()),
+            "proposal_adoption_rejected_count": int((status == "rejected").sum()),
+            "proposal_adoption_blocked_count": int((status == "blocked").sum()),
+            "proposal_adoption_superseded_count": int((status == "superseded").sum()),
+            "proposal_adoption_manual_decision_count": int((source == "manual").sum()),
+            "proposal_adoption_derived_decision_count": int((source == "derived_from_review").sum()),
+            "proposal_adoption_recommended_next_action": "manual_review" if (status == "pending_review").any() else "wait_for_more_data" if (status == "held").any() else "no_action",
+            "pending_rows": adoption_csv[status == "pending_review"].head(5).to_dict(orient="records"),
+            "held_rows": adoption_csv[status == "held"].head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "proposal_adoption_tracking_status": "unavailable",
+        "proposal_adoption_total_count": 0,
+        "proposal_adoption_accepted_count": 0,
+        "proposal_adoption_pending_review_count": 0,
+        "proposal_adoption_held_count": 0,
+        "proposal_adoption_rejected_count": 0,
+        "proposal_adoption_blocked_count": 0,
+        "proposal_adoption_superseded_count": 0,
+        "proposal_adoption_manual_decision_count": 0,
+        "proposal_adoption_derived_decision_count": 0,
+        "proposal_adoption_recommended_next_action": "no_action",
+        "pending_rows": [],
+        "held_rows": [],
+    }
+
+
+def weight_version_history_summary(history_csv: pd.DataFrame, history_json, summary_json) -> dict:
+    payload = history_json if isinstance(history_json, dict) and history_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = history_json.get("proposals", []) if isinstance(history_json, dict) else []
+        if not rows and not history_csv.empty:
+            rows = history_csv.to_dict(orient="records")
+        return {
+            "available": True,
+            "weight_history_current_version": payload.get("current_version", "v1"),
+            "weight_history_version_count": int(numeric_or(payload.get("version_count", 1), 1)),
+            "weight_history_tracked_count": int(numeric_or(payload.get("tracked_count", 0), 0)),
+            "weight_history_held_count": int(numeric_or(payload.get("held_count", 0), 0)),
+            "weight_history_candidate_count": int(numeric_or(payload.get("candidate_count", 0), 0)),
+            "weight_history_approved_count": int(numeric_or(payload.get("approved_count", 0), 0)),
+            "weight_history_rejected_count": int(numeric_or(payload.get("rejected_count", 0), 0)),
+            "weight_history_blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+            "weight_history_weights_json_updated": str(payload.get("weights_json_updated", False)).lower(),
+            "weight_history_patch_applied": str(payload.get("patch_applied", False)).lower(),
+            "weight_history_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "proposal_rows": rows[:5],
+        }
+    if not history_csv.empty and "adoption_status" in history_csv.columns:
+        status = history_csv["adoption_status"].fillna("").astype(str)
+        return {
+            "available": True,
+            "weight_history_current_version": "v1",
+            "weight_history_version_count": 1,
+            "weight_history_tracked_count": int((status == "tracked").sum()),
+            "weight_history_held_count": int((status == "held").sum()),
+            "weight_history_candidate_count": int((status == "candidate").sum()),
+            "weight_history_approved_count": int((status == "approved").sum()),
+            "weight_history_rejected_count": int((status == "rejected").sum()),
+            "weight_history_blocked_count": int((status == "blocked").sum()),
+            "weight_history_weights_json_updated": "false",
+            "weight_history_patch_applied": "false",
+            "weight_history_requires_human_approval": "必須",
+            "proposal_rows": history_csv.head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "weight_history_current_version": "v1",
+        "weight_history_version_count": 1,
+        "weight_history_tracked_count": 0,
+        "weight_history_held_count": 0,
+        "weight_history_candidate_count": 0,
+        "weight_history_approved_count": 0,
+        "weight_history_rejected_count": 0,
+        "weight_history_blocked_count": 0,
+        "weight_history_weights_json_updated": "false",
+        "weight_history_patch_applied": "false",
+        "weight_history_requires_human_approval": "必須",
+        "proposal_rows": [],
+    }
+
+
+def meta_learning_summary(meta_csv: pd.DataFrame, meta_json, summary_json) -> dict:
+    payload = meta_json if isinstance(meta_json, dict) and meta_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = meta_json.get("meta_learning_candidates", []) if isinstance(meta_json, dict) else []
+        if not rows and not meta_csv.empty:
+            rows = meta_csv.to_dict(orient="records")
+        return {
+            "available": True,
+            "meta_learning_status": payload.get("meta_learning_status", "unavailable"),
+            "meta_learning_total_candidates": int(numeric_or(payload.get("total_candidates", len(rows)), 0)),
+            "meta_learning_success_pattern_count": int(numeric_or(payload.get("success_pattern_count", 0), 0)),
+            "meta_learning_failure_pattern_count": int(numeric_or(payload.get("failure_pattern_count", 0), 0)),
+            "meta_learning_neutral_pattern_count": int(numeric_or(payload.get("neutral_pattern_count", 0), 0)),
+            "meta_learning_insufficient_data_count": int(numeric_or(payload.get("insufficient_data_count", 0), 0)),
+            "meta_learning_recommended_next_action": payload.get("recommended_next_action", "wait_for_more_data"),
+            "meta_learning_apply_automatically": str(payload.get("apply_automatically", False)).lower(),
+            "meta_learning_weights_json_updated": str(payload.get("weights_json_updated", False)).lower(),
+            "meta_learning_patch_applied": str(payload.get("patch_applied", False)).lower(),
+            "meta_learning_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "success_rows": [row for row in rows if str(row.get("pattern_type", "")) == "success_pattern"][:5],
+            "failure_rows": [row for row in rows if str(row.get("pattern_type", "")) == "failure_pattern"][:5],
+        }
+    if not meta_csv.empty and "pattern_type" in meta_csv.columns:
+        pattern = meta_csv["pattern_type"].fillna("").astype(str)
+        return {
+            "available": True,
+            "meta_learning_status": "active",
+            "meta_learning_total_candidates": int(len(meta_csv)),
+            "meta_learning_success_pattern_count": int((pattern == "success_pattern").sum()),
+            "meta_learning_failure_pattern_count": int((pattern == "failure_pattern").sum()),
+            "meta_learning_neutral_pattern_count": int((pattern == "neutral_pattern").sum()),
+            "meta_learning_insufficient_data_count": int((pattern == "insufficient_data").sum()),
+            "meta_learning_recommended_next_action": "human_review" if pattern.isin(["success_pattern", "failure_pattern"]).any() else "wait_for_more_data",
+            "meta_learning_apply_automatically": "false",
+            "meta_learning_weights_json_updated": "false",
+            "meta_learning_patch_applied": "false",
+            "meta_learning_requires_human_approval": "必須",
+            "success_rows": meta_csv[pattern == "success_pattern"].head(5).to_dict(orient="records"),
+            "failure_rows": meta_csv[pattern == "failure_pattern"].head(5).to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "meta_learning_status": "unavailable",
+        "meta_learning_total_candidates": 0,
+        "meta_learning_success_pattern_count": 0,
+        "meta_learning_failure_pattern_count": 0,
+        "meta_learning_neutral_pattern_count": 0,
+        "meta_learning_insufficient_data_count": 0,
+        "meta_learning_recommended_next_action": "wait_for_more_data",
+        "meta_learning_apply_automatically": "false",
+        "meta_learning_weights_json_updated": "false",
+        "meta_learning_patch_applied": "false",
+        "meta_learning_requires_human_approval": "必須",
+        "success_rows": [],
+        "failure_rows": [],
+    }
+
+
+def auto_calibration_summary(candidate_csv: pd.DataFrame, candidate_json, summary_json) -> dict:
+    payload = candidate_json if isinstance(candidate_json, dict) and candidate_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = candidate_json.get("candidates", []) if isinstance(candidate_json, dict) else []
+        if not rows and not candidate_csv.empty:
+            rows = candidate_csv.to_dict(orient="records")
+        sorted_rows = sorted(rows, key=lambda row: numeric_or(row.get("confidence", 0), 0), reverse=True)
+        return {
+            "available": True,
+            "auto_calibration_status": payload.get("candidate_status", "unavailable"),
+            "auto_calibration_candidate_count": int(numeric_or(payload.get("candidate_count", len(rows)), 0)),
+            "auto_calibration_increase_count": int(numeric_or(payload.get("increase_count", 0), 0)),
+            "auto_calibration_decrease_count": int(numeric_or(payload.get("decrease_count", 0), 0)),
+            "auto_calibration_hold_count": int(numeric_or(payload.get("hold_count", 0), 0)),
+            "auto_calibration_blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+            "auto_calibration_insufficient_data_count": int(numeric_or(payload.get("insufficient_data_count", 0), 0)),
+            "auto_calibration_recommended_next_action": payload.get("recommended_next_action", "wait_for_more_data"),
+            "auto_calibration_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "auto_calibration_patch_applied": str(payload.get("patch_applied", False)).lower(),
+            "auto_calibration_weights_json_updated": str(payload.get("weights_json_updated", False)).lower(),
+            "top_candidates": sorted_rows[:5],
+        }
+    if not candidate_csv.empty and "classification" in candidate_csv.columns:
+        classification = candidate_csv["classification"].fillna("").astype(str)
+        top = candidate_csv.sort_values("confidence", ascending=False).head(5) if "confidence" in candidate_csv.columns else candidate_csv.head(5)
+        return {
+            "available": True,
+            "auto_calibration_status": "active",
+            "auto_calibration_candidate_count": int(len(candidate_csv)),
+            "auto_calibration_increase_count": int((classification == "increase").sum()),
+            "auto_calibration_decrease_count": int((classification == "decrease").sum()),
+            "auto_calibration_hold_count": int((classification == "hold").sum()),
+            "auto_calibration_blocked_count": int((classification == "blocked").sum()),
+            "auto_calibration_insufficient_data_count": int((classification == "insufficient_data").sum()),
+            "auto_calibration_recommended_next_action": "human_review" if classification.isin(["increase", "decrease"]).any() else "wait_for_more_data",
+            "auto_calibration_requires_human_approval": "必須",
+            "auto_calibration_patch_applied": "false",
+            "auto_calibration_weights_json_updated": "false",
+            "top_candidates": top.to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "auto_calibration_status": "unavailable",
+        "auto_calibration_candidate_count": 0,
+        "auto_calibration_increase_count": 0,
+        "auto_calibration_decrease_count": 0,
+        "auto_calibration_hold_count": 0,
+        "auto_calibration_blocked_count": 0,
+        "auto_calibration_insufficient_data_count": 0,
+        "auto_calibration_recommended_next_action": "wait_for_more_data",
+        "auto_calibration_requires_human_approval": "必須",
+        "auto_calibration_patch_applied": "false",
+        "auto_calibration_weights_json_updated": "false",
+        "top_candidates": [],
+    }
+
+
+def human_override_summary(override_csv: pd.DataFrame, override_json, summary_json) -> dict:
+    payload = override_json if isinstance(override_json, dict) and override_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        rows = override_json.get("overrides", []) if isinstance(override_json, dict) else []
+        if not rows and not override_csv.empty:
+            rows = override_csv.to_dict(orient="records")
+        top_rows = sorted(rows, key=lambda row: abs(numeric_or(row.get("impact_score", 0), 0)), reverse=True)
+        return {
+            "available": True,
+            "human_override_status": payload.get("analytics_status", "unavailable"),
+            "human_override_total_overrides": int(numeric_or(payload.get("total_overrides", len(rows)), 0)),
+            "human_override_accepted_count": int(numeric_or(payload.get("accepted_count", 0), 0)),
+            "human_override_held_count": int(numeric_or(payload.get("held_count", 0), 0)),
+            "human_override_rejected_count": int(numeric_or(payload.get("rejected_count", 0), 0)),
+            "human_override_blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+            "human_override_positive_count": int(numeric_or(payload.get("positive_override_count", 0), 0)),
+            "human_override_negative_count": int(numeric_or(payload.get("negative_override_count", 0), 0)),
+            "human_override_unknown_count": int(numeric_or(payload.get("unknown_outcome_count", 0), 0)),
+            "human_override_recommended_next_action": payload.get("recommended_next_action", "wait_for_more_data"),
+            "human_override_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "top_rows": top_rows[:5],
+        }
+    if not override_csv.empty and "override_type" in override_csv.columns:
+        override_type = override_csv["override_type"].fillna("").astype(str)
+        impact_status = override_csv.get("impact_status", pd.Series("", index=override_csv.index)).fillna("").astype(str)
+        impact_score = pd.to_numeric(override_csv.get("impact_score", pd.Series(0, index=override_csv.index)), errors="coerce").fillna(0)
+        top = override_csv.reindex(impact_score.abs().sort_values(ascending=False).index).head(5) if "impact_score" in override_csv.columns else override_csv.head(5)
+        return {
+            "available": True,
+            "human_override_status": "active",
+            "human_override_total_overrides": int(len(override_csv)),
+            "human_override_accepted_count": int((override_type == "accepted").sum()),
+            "human_override_held_count": int((override_type == "held").sum()),
+            "human_override_rejected_count": int((override_type == "rejected").sum()),
+            "human_override_blocked_count": int((override_type == "blocked").sum()),
+            "human_override_positive_count": int((impact_status == "positive").sum()),
+            "human_override_negative_count": int((impact_status == "negative").sum()),
+            "human_override_unknown_count": int((impact_status == "unknown").sum()),
+            "human_override_recommended_next_action": "wait_for_proposal_impact" if (impact_status == "unknown").any() else "review_successful_overrides",
+            "human_override_requires_human_approval": "必須",
+            "top_rows": top.to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "human_override_status": "unavailable",
+        "human_override_total_overrides": 0,
+        "human_override_accepted_count": 0,
+        "human_override_held_count": 0,
+        "human_override_rejected_count": 0,
+        "human_override_blocked_count": 0,
+        "human_override_positive_count": 0,
+        "human_override_negative_count": 0,
+        "human_override_unknown_count": 0,
+        "human_override_recommended_next_action": "wait_for_more_data",
+        "human_override_requires_human_approval": "必須",
+        "top_rows": [],
+    }
+
+
+def portfolio_layer_summary(portfolio_csv: pd.DataFrame, portfolio_json, summary_json) -> dict:
+    payload = summary_json if isinstance(summary_json, dict) and summary_json else portfolio_json if isinstance(portfolio_json, dict) else {}
+    rows = portfolio_json.get("portfolio_candidates", []) if isinstance(portfolio_json, dict) else []
+    if payload:
+        if not rows and not portfolio_csv.empty:
+            rows = portfolio_csv.to_dict(orient="records")
+        top_rows = sorted(rows, key=lambda row: numeric_or(row.get("portfolio_weight_candidate", 0), 0), reverse=True)[:5]
+        return {
+            "available": True,
+            "portfolio_status": payload.get("portfolio_status", "active"),
+            "portfolio_candidate_assets": int(numeric_or(payload.get("candidate_assets", len(top_rows)), 0)),
+            "portfolio_defensive_assets": int(numeric_or(payload.get("defensive_assets", 0), 0)),
+            "portfolio_offensive_assets": int(numeric_or(payload.get("offensive_assets", 0), 0)),
+            "portfolio_cash_candidate": numeric_or(payload.get("cash_candidate", payload.get("cash_ratio_candidate", 0)), 0),
+            "portfolio_average_confidence": numeric_or(payload.get("average_confidence", 0), 0),
+            "portfolio_concentration": numeric_or(payload.get("portfolio_concentration", 0), 0),
+            "portfolio_risk_concentration": numeric_or(payload.get("risk_concentration", 0), 0),
+            "portfolio_recommended_exposure": numeric_or(payload.get("recommended_exposure", 0), 0),
+            "portfolio_recommended_next_action": payload.get("recommended_next_action", "human_review_allocations"),
+            "portfolio_requires_human_approval": "必須" if payload.get("requires_human_approval", True) else "不要",
+            "top_rows": top_rows,
+        }
+    if not portfolio_csv.empty:
+        weights = pd.to_numeric(portfolio_csv.get("portfolio_weight_candidate", pd.Series(dtype=float)), errors="coerce").fillna(0)
+        confidence = pd.to_numeric(portfolio_csv.get("confidence", pd.Series(dtype=float)), errors="coerce").fillna(0)
+        risk_class = portfolio_csv.get("risk_class", pd.Series(dtype=str)).fillna("").astype(str)
+        risk_role = portfolio_csv.get("risk_role", pd.Series(dtype=str)).fillna("").astype(str)
+        candidate_mask = weights > 0
+        top = portfolio_csv.sort_values("portfolio_weight_candidate", ascending=False).head(5) if "portfolio_weight_candidate" in portfolio_csv.columns else portfolio_csv.head(5)
+        return {
+            "available": True,
+            "portfolio_status": "active",
+            "portfolio_candidate_assets": int(candidate_mask.sum()),
+            "portfolio_defensive_assets": int(((risk_role == "defensive") & candidate_mask).sum()),
+            "portfolio_offensive_assets": int(((risk_role == "offensive") & candidate_mask).sum()),
+            "portfolio_cash_candidate": max(0.0, 1.0 - float(weights.sum())),
+            "portfolio_average_confidence": float(confidence.mean()) if not confidence.empty else 0,
+            "portfolio_concentration": float(weights.max()) if not weights.empty else 0,
+            "portfolio_risk_concentration": float(weights[risk_class == "high"].sum()) if not weights.empty else 0,
+            "portfolio_recommended_exposure": float(weights.sum()),
+            "portfolio_recommended_next_action": "human_review_allocations",
+            "portfolio_requires_human_approval": "必須",
+            "top_rows": top.to_dict(orient="records"),
+        }
+    return {
+        "available": False,
+        "portfolio_status": "unavailable",
+        "portfolio_candidate_assets": 0,
+        "portfolio_defensive_assets": 0,
+        "portfolio_offensive_assets": 0,
+        "portfolio_cash_candidate": 0,
+        "portfolio_average_confidence": 0,
+        "portfolio_concentration": 0,
+        "portfolio_risk_concentration": 0,
+        "portfolio_recommended_exposure": 0,
+        "portfolio_recommended_next_action": "generate_upstream_analysis",
+        "portfolio_requires_human_approval": "必須",
+        "top_rows": [],
+    }
+
+
+def datetime_audit_summary(audit_json, summary_json, audit_csv: pd.DataFrame) -> dict:
+    payload = audit_json if isinstance(audit_json, dict) and audit_json else summary_json if isinstance(summary_json, dict) else {}
+    if payload:
+        return {
+            "available": True,
+            "datetime_audit_status": payload.get("audit_status", "unavailable"),
+            "datetime_issues_found": int(numeric_or(payload.get("issues_found", len(audit_csv)), 0)),
+            "datetime_timezone_mismatch": int(numeric_or(payload.get("timezone_mismatch", 0), 0)),
+            "datetime_naive_datetime": int(numeric_or(payload.get("naive_datetime", 0), 0)),
+            "datetime_timestamp_mismatch": int(numeric_or(payload.get("timestamp_mismatch", 0), 0)),
+            "datetime_recommended_action": payload.get("recommended_action", "monitor"),
+        }
+    if not audit_csv.empty:
+        issue_type = audit_csv.get("issue_type", pd.Series("", index=audit_csv.index)).fillna("").astype(str)
+        severity = audit_csv.get("severity", pd.Series("", index=audit_csv.index)).fillna("").astype(str)
+        return {
+            "available": True,
+            "datetime_audit_status": "warning" if (severity == "warning").any() else "passed",
+            "datetime_issues_found": int(len(audit_csv)),
+            "datetime_timezone_mismatch": int((issue_type == "timezone_mismatch").sum()),
+            "datetime_naive_datetime": int((issue_type == "naive_datetime").sum()),
+            "datetime_timestamp_mismatch": int((issue_type == "timestamp_mismatch").sum()),
+            "datetime_recommended_action": "normalize_to_timestamp" if (issue_type == "timestamp_mismatch").any() else "monitor",
+        }
+    return {
+        "available": False,
+        "datetime_audit_status": "unavailable",
+        "datetime_issues_found": 0,
+        "datetime_timezone_mismatch": 0,
+        "datetime_naive_datetime": 0,
+        "datetime_timestamp_mismatch": 0,
+        "datetime_recommended_action": "monitor",
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {
@@ -969,6 +1610,46 @@ def build_dashboard() -> tuple[dict, str]:
         extras["weights_patch_proposal_json"],
         extras["weights_patch_summary_json"],
     )
+    weights_patch_review = weights_patch_review_summary(
+        extras["weights_patch_review"],
+        extras["weights_patch_review_json"],
+        extras["weights_patch_review_summary_json"],
+    )
+    proposal_adoption = proposal_adoption_summary(
+        extras["proposal_adoption_tracking"],
+        extras["proposal_adoption_tracking_json"],
+        extras["proposal_adoption_tracking_summary_json"],
+    )
+    weight_history = weight_version_history_summary(
+        extras["weight_version_history"],
+        extras["weight_version_history_json"],
+        extras["weight_version_history_summary_json"],
+    )
+    meta_learning = meta_learning_summary(
+        extras["meta_learning"],
+        extras["meta_learning_json"],
+        extras["meta_learning_summary_json"],
+    )
+    auto_calibration = auto_calibration_summary(
+        extras["auto_calibration_candidates"],
+        extras["auto_calibration_candidates_json"],
+        extras["auto_calibration_candidates_summary_json"],
+    )
+    human_override = human_override_summary(
+        extras["human_override_analytics"],
+        extras["human_override_analytics_json"],
+        extras["human_override_analytics_summary_json"],
+    )
+    portfolio_layer = portfolio_layer_summary(
+        extras["portfolio_layer"],
+        extras["portfolio_layer_json"],
+        extras["portfolio_layer_summary_json"],
+    )
+    datetime_health = datetime_audit_summary(
+        extras["datetime_audit_json"],
+        extras["datetime_audit_summary_json"],
+        extras["datetime_audit"],
+    )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -991,6 +1672,14 @@ def build_dashboard() -> tuple[dict, str]:
         "rule_update_proposals": len(rule_updates),
         "model_state_update_proposals": len(model_state_updates),
         "weights_patch_proposal": len(extras["weights_patch_proposal"]),
+        "weights_patch_review": len(extras["weights_patch_review"]),
+        "proposal_adoption_tracking": len(extras["proposal_adoption_tracking"]),
+        "weight_version_history": len(extras["weight_version_history"]),
+        "meta_learning": len(extras["meta_learning"]),
+        "auto_calibration_candidates": len(extras["auto_calibration_candidates"]),
+        "human_override_analytics": len(extras["human_override_analytics"]),
+        "portfolio_layer": len(extras["portfolio_layer"]),
+        "datetime_audit": len(extras["datetime_audit"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -1036,6 +1725,14 @@ def build_dashboard() -> tuple[dict, str]:
         "rule_update_summary": rule_update_summary,
         "model_state_update_summary": model_state_summary,
         "weights_patch_summary": weights_patch,
+        "weights_patch_review_summary": weights_patch_review,
+        "proposal_adoption_summary": proposal_adoption,
+        "weight_version_history_summary": weight_history,
+        "meta_learning_summary": meta_learning,
+        "auto_calibration_summary": auto_calibration,
+        "human_override_summary": human_override,
+        "portfolio_layer_summary": portfolio_layer,
+        "datetime_audit_summary": datetime_health,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -1063,6 +1760,14 @@ def build_dashboard() -> tuple[dict, str]:
         model_state_updates=model_state_updates,
         model_state_summary=model_state_summary,
         weights_patch=weights_patch,
+        weights_patch_review=weights_patch_review,
+        proposal_adoption=proposal_adoption,
+        weight_history=weight_history,
+        meta_learning=meta_learning,
+        auto_calibration=auto_calibration,
+        human_override=human_override,
+        portfolio_layer=portfolio_layer,
+        datetime_health=datetime_health,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
@@ -1099,6 +1804,14 @@ def render_html(
     model_state_updates: pd.DataFrame,
     model_state_summary: dict,
     weights_patch: dict,
+    weights_patch_review: dict,
+    proposal_adoption: dict,
+    weight_history: dict,
+    meta_learning: dict,
+    auto_calibration: dict,
+    human_override: dict,
+    portfolio_layer: dict,
+    datetime_health: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -1131,6 +1844,16 @@ def render_html(
             stat_card("latest rule_update_proposals", latest_dates["latest_rule_update_proposals_date"] or "未取得"),
             stat_card("latest_model_state_update_proposals", latest_dates["latest_model_state_update_proposals_date"] or "未取得"),
             stat_card("latest ai feedback", latest_dates["latest_ai_feedback_date"] or "未取得"),
+        ]
+    )
+    datetime_stats = "".join(
+        [
+            stat_card("datetime_audit_status", datetime_health.get("datetime_audit_status", "unavailable")),
+            stat_card("datetime_issues_found", datetime_health.get("datetime_issues_found", 0)),
+            stat_card("datetime_timezone_mismatch", datetime_health.get("datetime_timezone_mismatch", 0)),
+            stat_card("datetime_naive_datetime", datetime_health.get("datetime_naive_datetime", 0)),
+            stat_card("datetime_timestamp_mismatch", datetime_health.get("datetime_timestamp_mismatch", 0)),
+            stat_card("datetime_recommended_action", datetime_health.get("datetime_recommended_action", "monitor")),
         ]
     )
     eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
@@ -1209,6 +1932,119 @@ def render_html(
         ]
     )
     weights_patch_candidates = pd.DataFrame(weights_patch.get("patch_candidates", []) or [])
+    weights_patch_review_stats = "".join(
+        [
+            stat_card("weights_patch_review_status", weights_patch_review.get("weights_patch_review_status", "unavailable")),
+            stat_card("weights_patch_review_candidate_count", weights_patch_review.get("weights_patch_review_candidate_count", 0)),
+            stat_card("weights_patch_review_hold_count", weights_patch_review.get("weights_patch_review_hold_count", 0)),
+            stat_card("weights_patch_review_reject_count", weights_patch_review.get("weights_patch_review_reject_count", 0)),
+            stat_card("weights_patch_review_blocked_count", weights_patch_review.get("weights_patch_review_blocked_count", 0)),
+            stat_card("weights_patch_review_recommended_next_action", weights_patch_review.get("weights_patch_review_recommended_next_action", "no_action")),
+            stat_card("weights_patch_review_requires_human_approval", weights_patch_review.get("weights_patch_review_requires_human_approval", "必須")),
+            stat_card("weights_patch_review_patch_applied", weights_patch_review.get("weights_patch_review_patch_applied", "false")),
+            stat_card("weights_patch_review_weights_json_updated", weights_patch_review.get("weights_patch_review_weights_json_updated", "false")),
+        ]
+    )
+    weights_patch_review_candidates = pd.DataFrame(weights_patch_review.get("candidate_rows", []) or [])
+    weights_patch_review_holds = pd.DataFrame(weights_patch_review.get("hold_rows", []) or [])
+    proposal_adoption_stats = "".join(
+        [
+            stat_card("proposal_adoption_tracking_status", proposal_adoption.get("proposal_adoption_tracking_status", "unavailable")),
+            stat_card("proposal_adoption_total_count", proposal_adoption.get("proposal_adoption_total_count", 0)),
+            stat_card("proposal_adoption_accepted_count", proposal_adoption.get("proposal_adoption_accepted_count", 0)),
+            stat_card("proposal_adoption_pending_review_count", proposal_adoption.get("proposal_adoption_pending_review_count", 0)),
+            stat_card("proposal_adoption_held_count", proposal_adoption.get("proposal_adoption_held_count", 0)),
+            stat_card("proposal_adoption_rejected_count", proposal_adoption.get("proposal_adoption_rejected_count", 0)),
+            stat_card("proposal_adoption_blocked_count", proposal_adoption.get("proposal_adoption_blocked_count", 0)),
+            stat_card("proposal_adoption_superseded_count", proposal_adoption.get("proposal_adoption_superseded_count", 0)),
+            stat_card("proposal_adoption_manual_decision_count", proposal_adoption.get("proposal_adoption_manual_decision_count", 0)),
+            stat_card("proposal_adoption_derived_decision_count", proposal_adoption.get("proposal_adoption_derived_decision_count", 0)),
+            stat_card("proposal_adoption_recommended_next_action", proposal_adoption.get("proposal_adoption_recommended_next_action", "no_action")),
+        ]
+    )
+    proposal_adoption_pending = pd.DataFrame(proposal_adoption.get("pending_rows", []) or [])
+    proposal_adoption_held = pd.DataFrame(proposal_adoption.get("held_rows", []) or [])
+    weight_history_stats = "".join(
+        [
+            stat_card("weight_history_current_version", weight_history.get("weight_history_current_version", "v1")),
+            stat_card("weight_history_version_count", weight_history.get("weight_history_version_count", 1)),
+            stat_card("weight_history_tracked_count", weight_history.get("weight_history_tracked_count", 0)),
+            stat_card("weight_history_held_count", weight_history.get("weight_history_held_count", 0)),
+            stat_card("weight_history_candidate_count", weight_history.get("weight_history_candidate_count", 0)),
+            stat_card("weight_history_approved_count", weight_history.get("weight_history_approved_count", 0)),
+            stat_card("weight_history_rejected_count", weight_history.get("weight_history_rejected_count", 0)),
+            stat_card("weight_history_blocked_count", weight_history.get("weight_history_blocked_count", 0)),
+            stat_card("weight_history_weights_json_updated", weight_history.get("weight_history_weights_json_updated", "false")),
+            stat_card("weight_history_patch_applied", weight_history.get("weight_history_patch_applied", "false")),
+            stat_card("weight_history_requires_human_approval", weight_history.get("weight_history_requires_human_approval", "必須")),
+        ]
+    )
+    weight_history_rows = pd.DataFrame(weight_history.get("proposal_rows", []) or [])
+    meta_learning_stats = "".join(
+        [
+            stat_card("meta_learning_status", meta_learning.get("meta_learning_status", "unavailable")),
+            stat_card("meta_learning_total_candidates", meta_learning.get("meta_learning_total_candidates", 0)),
+            stat_card("meta_learning_success_pattern_count", meta_learning.get("meta_learning_success_pattern_count", 0)),
+            stat_card("meta_learning_failure_pattern_count", meta_learning.get("meta_learning_failure_pattern_count", 0)),
+            stat_card("meta_learning_neutral_pattern_count", meta_learning.get("meta_learning_neutral_pattern_count", 0)),
+            stat_card("meta_learning_insufficient_data_count", meta_learning.get("meta_learning_insufficient_data_count", 0)),
+            stat_card("meta_learning_recommended_next_action", meta_learning.get("meta_learning_recommended_next_action", "wait_for_more_data")),
+            stat_card("meta_learning_apply_automatically", meta_learning.get("meta_learning_apply_automatically", "false")),
+            stat_card("meta_learning_weights_json_updated", meta_learning.get("meta_learning_weights_json_updated", "false")),
+            stat_card("meta_learning_patch_applied", meta_learning.get("meta_learning_patch_applied", "false")),
+            stat_card("meta_learning_requires_human_approval", meta_learning.get("meta_learning_requires_human_approval", "必須")),
+        ]
+    )
+    meta_learning_success = pd.DataFrame(meta_learning.get("success_rows", []) or [])
+    meta_learning_failure = pd.DataFrame(meta_learning.get("failure_rows", []) or [])
+    auto_calibration_stats = "".join(
+        [
+            stat_card("auto_calibration_status", auto_calibration.get("auto_calibration_status", "unavailable")),
+            stat_card("auto_calibration_candidate_count", auto_calibration.get("auto_calibration_candidate_count", 0)),
+            stat_card("auto_calibration_increase_count", auto_calibration.get("auto_calibration_increase_count", 0)),
+            stat_card("auto_calibration_decrease_count", auto_calibration.get("auto_calibration_decrease_count", 0)),
+            stat_card("auto_calibration_hold_count", auto_calibration.get("auto_calibration_hold_count", 0)),
+            stat_card("auto_calibration_blocked_count", auto_calibration.get("auto_calibration_blocked_count", 0)),
+            stat_card("auto_calibration_insufficient_data_count", auto_calibration.get("auto_calibration_insufficient_data_count", 0)),
+            stat_card("auto_calibration_recommended_next_action", auto_calibration.get("auto_calibration_recommended_next_action", "wait_for_more_data")),
+            stat_card("auto_calibration_requires_human_approval", auto_calibration.get("auto_calibration_requires_human_approval", "必須")),
+            stat_card("auto_calibration_patch_applied", auto_calibration.get("auto_calibration_patch_applied", "false")),
+            stat_card("auto_calibration_weights_json_updated", auto_calibration.get("auto_calibration_weights_json_updated", "false")),
+        ]
+    )
+    auto_calibration_top = pd.DataFrame(auto_calibration.get("top_candidates", []) or [])
+    human_override_stats = "".join(
+        [
+            stat_card("human_override_status", human_override.get("human_override_status", "unavailable")),
+            stat_card("human_override_total_overrides", human_override.get("human_override_total_overrides", 0)),
+            stat_card("human_override_accepted_count", human_override.get("human_override_accepted_count", 0)),
+            stat_card("human_override_held_count", human_override.get("human_override_held_count", 0)),
+            stat_card("human_override_rejected_count", human_override.get("human_override_rejected_count", 0)),
+            stat_card("human_override_blocked_count", human_override.get("human_override_blocked_count", 0)),
+            stat_card("human_override_positive_count", human_override.get("human_override_positive_count", 0)),
+            stat_card("human_override_negative_count", human_override.get("human_override_negative_count", 0)),
+            stat_card("human_override_unknown_count", human_override.get("human_override_unknown_count", 0)),
+            stat_card("human_override_recommended_next_action", human_override.get("human_override_recommended_next_action", "wait_for_more_data")),
+            stat_card("human_override_requires_human_approval", human_override.get("human_override_requires_human_approval", "必須")),
+        ]
+    )
+    human_override_top = pd.DataFrame(human_override.get("top_rows", []) or [])
+    portfolio_stats = "".join(
+        [
+            stat_card("portfolio_status", portfolio_layer.get("portfolio_status", "unavailable")),
+            stat_card("portfolio_candidate_assets", portfolio_layer.get("portfolio_candidate_assets", 0)),
+            stat_card("portfolio_defensive_assets", portfolio_layer.get("portfolio_defensive_assets", 0)),
+            stat_card("portfolio_offensive_assets", portfolio_layer.get("portfolio_offensive_assets", 0)),
+            stat_card("portfolio_cash_candidate", fmt_num(portfolio_layer.get("portfolio_cash_candidate", 0))),
+            stat_card("portfolio_average_confidence", fmt_num(portfolio_layer.get("portfolio_average_confidence", 0))),
+            stat_card("portfolio_concentration", fmt_num(portfolio_layer.get("portfolio_concentration", 0))),
+            stat_card("portfolio_risk_concentration", fmt_num(portfolio_layer.get("portfolio_risk_concentration", 0))),
+            stat_card("portfolio_recommended_exposure", fmt_num(portfolio_layer.get("portfolio_recommended_exposure", 0))),
+            stat_card("portfolio_recommended_next_action", portfolio_layer.get("portfolio_recommended_next_action", "generate_upstream_analysis")),
+            stat_card("portfolio_requires_human_approval", portfolio_layer.get("portfolio_requires_human_approval", "必須")),
+        ]
+    )
+    portfolio_top = pd.DataFrame(portfolio_layer.get("top_rows", []) or [])
     pending_stats = "".join(
         [
             stat_card("pending_reevaluation_count", pending_summary.get("pending_reevaluation_count", 0)),
@@ -1286,8 +2122,9 @@ def render_html(
     </div>
     <p class="lead">{html.escape(DASHBOARD_DESCRIPTION)}</p>
   </header>
-  <main>
+    <main>
     <section class="card"><h2>システム状態</h2><div class="grid">{system_stats}</div></section>
+    <section class="card"><h2>System Health</h2>{'<div class="empty">Datetime Audit未取得</div>' if not datetime_health.get('available') else f'<div class="grid">{datetime_stats}</div>'}</section>
     <section class="card"><h2>本日のシグナル概要</h2><div class="grid">{signal_stats}</div>{table_html(signals, ["asset","side","rank","type","recommended_action","signal_strength","setup_quality_score","entry_quality_score","direction_confidence","reason_codes","no_trade_reason"])}</section>
     <section class="card"><h2>評価概要</h2><div class="grid">{eval_stats}</div></section>
     <section class="card"><h2>資産別成績</h2>{table_html(asset_table, ["asset","signals","evaluations","win_rate","total_r","average_r","missed_opportunity_count"])}</section>
@@ -1296,6 +2133,13 @@ def render_html(
     <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
     <section class="card"><h2>Model State 更新提案</h2>{'<div class="empty">Model State更新提案未取得</div>' if not model_state_summary.get('available') else f'<div class="grid">{model_state_stats}</div>'}<h3>strong候補 上位5件</h3>{table_html(model_state_strong, ["category","target","sample_count","win_rate","avg_r","proposal_direction","proposal_strength","proposed_delta","proposed_weight","rationale"], "strong候補なし")}</section>
     <section class="card"><h2>Weights Patch候補</h2>{'<div class="empty">Weights Patch候補未取得</div>' if not weights_patch.get('available') else f'<div class="grid">{weights_patch_stats}</div>'}<h3>patch候補 上位5件</h3>{table_html(weights_patch_candidates, ["weight_path","patch_action","current_weight","proposed_delta","proposed_value","proposal_direction","proposal_strength","rationale"], "patch候補なし")}</section>
+    <section class="card"><h2>Weights Patchレビュー</h2>{'<div class="empty">Weights Patchレビュー未取得</div>' if not weights_patch_review.get('available') else f'<div class="grid">{weights_patch_review_stats}</div>'}<h3>承認候補 上位5件</h3>{table_html(weights_patch_review_candidates, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","patch_risk_level","review_reason"], "承認候補なし")}<h3>保留候補 上位5件</h3>{table_html(weights_patch_review_holds, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","evidence_quality","missing_conditions","review_reason"], "保留候補なし")}</section>
+    <section class="card"><h2>Proposal Adoption Tracking</h2>{'<div class="empty">Proposal Adoption Tracking未取得</div>' if not proposal_adoption.get('available') else f'<div class="grid">{proposal_adoption_stats}</div>'}<h3>承認判断待ち 上位5件</h3>{table_html(proposal_adoption_pending, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "承認判断待ちなし")}<h3>保留中 上位5件</h3>{table_html(proposal_adoption_held, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "保留中なし")}</section>
+    <section class="card"><h2>Weight Version History</h2>{'<div class="empty">Weight Version History未取得</div>' if not weight_history.get('available') else f'<div class="grid">{weight_history_stats}</div>'}<h3>Proposal一覧 上位5件</h3>{table_html(weight_history_rows, ["version_id","source","proposal_id","review_decision","adoption_status","description","weights_json_updated","patch_applied","requires_human_approval","notes"], "履歴Proposalなし")}</section>
+    <section class="card"><h2>Meta Learning</h2>{'<div class="empty">Meta Learning未取得</div>' if not meta_learning.get('available') else f'<div class="grid">{meta_learning_stats}</div>'}<h3>成功パターン候補 上位5件</h3>{table_html(meta_learning_success, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "成功パターン候補なし")}<h3>失敗パターン候補 上位5件</h3>{table_html(meta_learning_failure, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "失敗パターン候補なし")}</section>
+    <section class="card"><h2>Auto Calibration Candidates</h2>{'<div class="empty">Auto Calibration Candidates未取得</div>' if not auto_calibration.get('available') else f'<div class="grid">{auto_calibration_stats}</div>'}<h3>top confidence candidates</h3>{table_html(auto_calibration_top, ["candidate_id","asset","category","target","factor","classification","current_value","suggested_delta","suggested_value","confidence","sample_size","source","rationale"], "候補なし")}</section>
+    <section class="card"><h2>Human Override Analytics</h2>{'<div class="empty">Human Override Analytics未取得</div>' if not human_override.get('available') else f'<div class="grid">{human_override_stats}</div>'}<h3>override impact 上位5件</h3>{table_html(human_override_top, ["proposal_id","review_decision","adoption_status","override_type","override_reason","impact_status","impact_score","source","recommended_next_action"], "override分析なし")}</section>
+    <section class="card"><h2>Portfolio Layer</h2>{'<div class="empty">Portfolio Layer未取得</div>' if not portfolio_layer.get('available') else f'<div class="grid">{portfolio_stats}</div>'}<h3>top allocation candidates</h3>{table_html(portfolio_top, ["asset","allocation_score","portfolio_weight_candidate","confidence","risk_class","risk_role","recommended_exposure","cash_ratio_candidate","latest_rank","latest_side","rationale"], "配分候補なし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>

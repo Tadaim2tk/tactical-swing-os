@@ -1,16 +1,16 @@
-name: Tactical Swing OS weights patch proposal
+name: Tactical Swing OS weight version history
 
 on:
   workflow_dispatch:
   schedule:
-    # 04:05 UTC is 13:05 JST.
-    - cron: "5 4 * * 6"
+    # 04:20 UTC is 13:20 JST.
+    - cron: "20 4 * * 6"
 
 permissions:
   contents: read
 
 jobs:
-  weights-patch:
+  weight-version-history:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -56,10 +56,13 @@ jobs:
       - name: Track proposal adoption
         run: python src/track_proposal_adoption.py
 
-      - name: Upload weights patch artifacts
+      - name: Build weight version history
+        run: python src/build_weight_version_history.py
+
+      - name: Upload weight version history artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tactical-swing-os-weights-patch-${{ github.run_id }}
+          name: tactical-swing-os-weight-version-history-${{ github.run_id }}
           if-no-files-found: warn
           path: |
             reports/model_state/*.md
@@ -74,8 +77,10 @@ jobs:
             results/weights_patch_review.csv
             results/weights_patch_review.json
             results/weights_patch_review_summary.json
-            reports/model_state/*_weights_patch_review.md
             results/proposal_adoption_tracking.csv
             results/proposal_adoption_tracking.json
             results/proposal_adoption_tracking_summary.json
-            reports/model_state/*_proposal_adoption_tracking.md
+            results/weight_version_history.csv
+            results/weight_version_history.json
+            results/weight_version_history_summary.json
+            reports/model_state/*_weight_version_history.md
