@@ -32,6 +32,8 @@ def render_monthly_report(
     rank_table: pd.DataFrame,
     side_table: pd.DataFrame,
     regime_table: pd.DataFrame,
+    narrative_table: pd.DataFrame,
+    narrative_note: str,
     divergence_note: str,
     mode: str,
     risk: float,
@@ -76,24 +78,33 @@ def render_monthly_report(
 
 {divergence_note}
 
-## 7. 翌月の暫定モード
+## 7. ナラティブ信頼性 (SPEC-NQ-001)
+
+{markdown_table(narrative_table)}
+
+- 整合判定はシグナル発生時点に記録された値のみを使用(追記専用・後知恵バイアス防止)
+- 重み変更提案はSPEC-SG-001と同一ゲート(n>=30, p<0.05, 増加はSharpe>0.5)に従う
+
+{narrative_note}
+
+## 8. 翌月の暫定モード
 
 - next_month_mode: {mode}
 - max_daily_risk_pct: {risk}
 
-## 8. 重み変更案
+## 9. 重み変更案
 
 {summary}
 
-## 9. 据え置き理由
+## 10. 据え置き理由
 
 weights.jsonは初期値のまま据え置きます。今回の出力は提案のみで、自動更新は行いません。
 
-## 10. データ不足の注意
+## 11. データ不足の注意
 
 {data_warning}
 
-## 11. Reason Code較正メモ
+## 12. Reason Code較正メモ
 
 {reason_memo}
 
@@ -105,13 +116,13 @@ weights.jsonは初期値のまま据え置きます。今回の出力は提案�
 
 {markdown_table(strong_negative_reasons)}
 
-## 12. MONTHLY_CALIBRATION_LOG CSV
+## 13. MONTHLY_CALIBRATION_LOG CSV
 
 ```csv
 {log.to_csv(index=False).strip()}
 ```
 
-## 13. MONTHLY_CALIBRATION_LOG JSON
+## 14. MONTHLY_CALIBRATION_LOG JSON
 
 ```json
 {json.dumps([payload], ensure_ascii=False, indent=2)}
