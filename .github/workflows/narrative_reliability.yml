@@ -1,0 +1,60 @@
+name: Tactical Swing OS narrative reliability
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:50 UTC is 13:50 JST. 日次サイクル後にナラティブ整合を記録し信頼性を集計する。
+    - cron: "50 4 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  narrative-reliability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build latest evaluations
+        run: |
+          python src/build_latest_evaluations.py || echo "warning: latest evaluations failed; continuing"
+
+      - name: Record narrative alignment (append-only, at-signal-time)
+        run: |
+          python src/export_narrative_alignment.py || echo "warning: alignment export failed; continuing"
+
+      - name: Build narrative reliability
+        run: python src/build_narrative_reliability.py
+
+      - name: Commit narrative artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add results/signal_narrative_alignment.csv results/narrative_reliability.csv results/narrative_reliability.json reports/narrative/ 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "chore: narrative alignment + reliability artifacts [skip ci]"
+          git push || echo "warning: push failed (possibly no changes or concurrent update)"
+
+      - name: Upload narrative artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-narrative-reliability-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            results/signal_narrative_alignment.csv
+            results/narrative_reliability.csv
+            results/narrative_reliability.json
+            reports/narrative/*.md
