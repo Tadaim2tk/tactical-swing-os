@@ -1,0 +1,31 @@
+{
+  "_meta": {
+    "spec": "SPEC-TC-001",
+    "status": "unconfigured",
+    "source": "PLACEHOLDER - 全コストは0(=ネットR=グロスR)。XMTradingの実測スプレッド・手数料・スワップを source 付きで記入するまで採用しない(証拠主義)。",
+    "units": "price: 各アセットの建値と同じ価格単位(USDJPYなら円、BTCなら米ドル、指数ならポイント)。bars: 営業日バー。",
+    "fields": {
+      "spread": "往復スプレッド(price)。Entry/Exitの不利約定の合計。",
+      "commission_round_turn": "1往復あたりの手数料(price換算)。",
+      "swap_per_bar": "1バー保有あたりのスワップ/金利コスト(price、正でコスト)。"
+    }
+  },
+  "default": {
+    "spread": 0.0,
+    "commission_round_turn": 0.0,
+    "swap_per_bar": 0.0,
+    "source": "unconfigured"
+  },
+  "assets": {
+    "BTC": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+    "ETH": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+    "GOLD": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+    "WTI": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+    "USDJPY": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+    "SPX": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+    "NASDAQ": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+    "DXY": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+    "VIX": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+    "US10Y": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"}
+  }
+}

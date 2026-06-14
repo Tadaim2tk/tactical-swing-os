@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import cost_model
+
 
 RAW_DIR = Path("data/raw")
 RESULTS_DIR = Path("results")
@@ -40,6 +42,9 @@ EVALUATION_COLUMNS = [
     "mae_r",
     "r_multiple",
     "r_result",
+    "cost_r",
+    "r_result_net",
+    "cost_source",
     "outcome",
     "error_type",
     "missed_opportunity",
@@ -152,6 +157,9 @@ def base_result(signal: pd.Series) -> dict:
         "mae_r": None,
         "r_multiple": None,
         "r_result": None,
+        "cost_r": 0.0,
+        "r_result_net": None,
+        "cost_source": "unconfigured",
         "outcome": "open_unresolved",
         "error_type": "",
         "missed_opportunity": False,
@@ -169,7 +177,22 @@ def finish(result: dict, *, status: str, evaluation_status: str, outcome: str, e
     result["error_type"] = error_type
     if note:
         result["notes"] = append_note(result["notes"], note)
+    # コスト未適用の経路(no_trade/no_entry/open等)はネット=グロスで埋める(SPEC-TC-001)
+    if result.get("r_result_net") is None:
+        result["r_result_net"] = result.get("r_result")
     return result
+
+
+def apply_cost(result: dict, asset: str, risk_per_unit: float, bars_held: float) -> None:
+    """closed評価のグロスRへ取引コストを適用し、ネットRを記録する (SPEC-TC-001)。"""
+    gross = result.get("r_result")
+    if gross is None:
+        return
+    cost = cost_model.asset_cost(asset)
+    c_r = cost_model.cost_r(asset, risk_per_unit, bars_held)
+    result["cost_r"] = round(c_r, 4)
+    result["r_result_net"] = round(float(gross) - c_r, 4)
+    result["cost_source"] = cost["source"]
 
 
 def append_note(notes: str | None, note: str) -> str:
@@ -303,7 +326,7 @@ def evaluate_trade(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
     result["mfe_r"] = round(float(mfe / risk), 4)
     result["mae_r"] = round(float(mae / risk), 4)
 
-    for _, bar in after_entry.iterrows():
+    for bars_held, (_, bar) in enumerate(after_entry.iterrows(), start=1):
         bar_date = date_str(bar["date"])
         high = float(bar["high"])
         low = float(bar["low"])
@@ -322,14 +345,17 @@ def evaluate_trade(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
             result["notes"] = append_note(result["notes"], "same_bar_sl_tp_conservative_sl")
         if sl_hit:
             result.update({"sl_hit": True, "sl_hit_date": bar_date, "hit_date": bar_date, "hit_level": "SL", "r_multiple": -1.0, "r_result": -1.0})
+            apply_cost(result, result["asset"], risk, bars_held)
             return finish(result, status="closed", evaluation_status="closed", outcome="loss_sl", error_type="stop_loss", note="Virtual evaluation only")
         if tp2_hit:
             r_multiple = round(float(tp_r), 4)
             result.update({"tp1_hit": True, "tp1_hit_date": bar_date, "tp2_hit": True, "tp2_hit_date": bar_date, "hit_date": bar_date, "hit_level": "TP2", "r_multiple": r_multiple, "r_result": r_multiple})
+            apply_cost(result, result["asset"], risk, bars_held)
             return finish(result, status="closed", evaluation_status="closed", outcome="win_tp2", error_type="target_reached", note="Virtual evaluation only")
         if tp1_hit:
             r_multiple = round(float(tp_r), 4)
             result.update({"tp1_hit": True, "tp1_hit_date": bar_date, "hit_date": bar_date, "hit_level": "TP1", "r_multiple": r_multiple, "r_result": r_multiple})
+            apply_cost(result, result["asset"], risk, bars_held)
             return finish(result, status="closed", evaluation_status="closed", outcome="win_tp1", error_type="target_reached", note="Virtual evaluation only")
 
     last_close = float(after_entry.iloc[-1]["close"])
