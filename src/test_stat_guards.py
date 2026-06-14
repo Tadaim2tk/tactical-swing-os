@@ -139,3 +139,64 @@ def test_welch_clear_difference_is_significant():
 def test_welch_insufficient_n():
     assert stat_guards.t_test_welch([1.0], [1.0, 2.0]) == (0.0, 1.0, 0.0)
     assert stat_guards.t_test_welch([], []) == (0.0, 1.0, 0.0)
+
+
+# === SPEC-DSR-001: Deflated Sharpe Ratio (多重検定補正) ===
+
+def test_norm_cdf_known_values():
+    assert abs(stat_guards.norm_cdf(0.0) - 0.5) < 1e-12
+    assert abs(stat_guards.norm_cdf(1.959963985) - 0.975) < 1e-6
+    assert abs(stat_guards.norm_cdf(-1.959963985) - 0.025) < 1e-6
+
+
+def test_norm_ppf_known_values():
+    assert abs(stat_guards.norm_ppf(0.975) - 1.959963985) < 1e-6
+    assert abs(stat_guards.norm_ppf(0.5)) < 1e-9
+
+
+def test_norm_ppf_roundtrip():
+    for p in [0.01, 0.1, 0.5, 0.9, 0.99]:
+        assert abs(stat_guards.norm_cdf(stat_guards.norm_ppf(p)) - p) < 1e-7
+
+
+def test_norm_ppf_edges():
+    assert stat_guards.norm_ppf(0.0) == float("-inf")
+    assert stat_guards.norm_ppf(1.0) == float("inf")
+
+
+def test_psr_strong_positive_high():
+    strong = [0.5] * 40 + [0.4] * 40  # 高い平均・低い分散
+    assert stat_guards.probabilistic_sharpe_ratio(strong, 0.0) > 0.99
+
+
+def test_psr_insufficient_or_zero_std():
+    assert stat_guards.probabilistic_sharpe_ratio([1.0], 0.0) == 0.0
+    assert stat_guards.probabilistic_sharpe_ratio([2.0, 2.0, 2.0], 0.0) == 0.0
+
+
+def test_expected_max_sharpe_grows_with_trials():
+    e10 = stat_guards.expected_max_sharpe(10, 0.25)
+    e360 = stat_guards.expected_max_sharpe(360, 0.25)
+    assert e360 > e10 > 0.0
+
+
+def test_expected_max_sharpe_degenerate():
+    assert stat_guards.expected_max_sharpe(1, 0.25) == 0.0
+    assert stat_guards.expected_max_sharpe(360, 0.0) == 0.0
+
+
+def test_dsr_deflation_rejects_lucky_cell():
+    # 単独t検定は通るが多重検定では偽陽性になる中程度のセル
+    import random
+    random.seed(1)
+    moderate = [random.gauss(0.15, 0.5) for _ in range(40)]
+    assert stat_guards.significance_report(moderate)["significant"]  # 単独検定は通過
+    dsr_single = stat_guards.deflated_sharpe_ratio(moderate, 1, 0.0)
+    dsr_multi = stat_guards.deflated_sharpe_ratio(moderate, 360, 0.25)
+    assert dsr_multi < dsr_single
+    assert dsr_multi < stat_guards.DEFLATED_SHARPE_CONFIDENCE  # 多重検定後は棄却
+
+
+def test_dsr_strong_cell_survives_deflation():
+    strong = [0.5] * 40 + [0.4] * 40
+    assert stat_guards.deflated_sharpe_ratio(strong, 360, 0.25) > stat_guards.DEFLATED_SHARPE_CONFIDENCE

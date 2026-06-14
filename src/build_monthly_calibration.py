@@ -160,22 +160,27 @@ def proposed_change(
     win_rate: float,
     average_r: float,
     r_values: list[float] | None = None,
+    n_trials: int = 1,
+    sharpe_variance: float = 0.0,
 ) -> tuple[float, str]:
-    """重み変更提案 (SPEC-SG-001)。
+    """重み変更提案 (SPEC-SG-001 + SPEC-DSR-001)。
 
     憲章ルールの実装:
     - n >= 30 (MIN_SAMPLES_WEIGHT_CHANGE) 未満は提案禁止
     - 一標本t検定 p < 0.05 (SIGNIFICANCE_ALPHA) を満たさない場合は提案禁止
-    - 増加提案: 有意性に加えて Sharpe > 0.5 を要求(過学習ブレーキ)
-    - 減少提案: 有意性のみ要求(Ruin回避を優先し、Sharpe閾値は課さない)
-    reason文字列には n / win / avg_r / sharpe / p を必ず記録する(後日監査用)。
+    - 増加提案: 有意性 + Sharpe > 0.5 + Deflated Sharpe Ratio >= 0.95 を要求
+      (n_trials個のセルを同時検定する選択バイアスを割り引く多重検定ブレーキ)
+    - 減少提案: 有意性のみ要求(Ruin回避を優先し、Sharpe/DSR閾値は課さない)
+    reason文字列には n / win / avg_r / sharpe / p / DSR を必ず記録する(後日監査用)。
     """
     if closed_count < stat_guards.MIN_SAMPLES_WEIGHT_CHANGE:
         return 0.0, f"データ不足 (n={closed_count} < {stat_guards.MIN_SAMPLES_WEIGHT_CHANGE})"
     report = stat_guards.significance_report(r_values or [])
+    dsr = stat_guards.deflated_sharpe_ratio(r_values or [], n_trials, sharpe_variance)
     stats_note = (
         f"n={closed_count}, win={win_rate:.2f}, avg_r={average_r:.3f}, "
-        f"sharpe={report['sharpe']:.3f}, p={report['p_value']:.4f}"
+        f"sharpe={report['sharpe']:.3f}, p={report['p_value']:.4f}, "
+        f"DSR={dsr:.3f}(N={n_trials})"
     )
     if not report["significant"]:
         return 0.0, f"統計的有意性なし (p >= {stat_guards.SIGNIFICANCE_ALPHA}) | {stats_note}"
@@ -185,10 +190,15 @@ def proposed_change(
         return -0.03, f"average_r < -0.1 (有意・リスク優先) | {stats_note}"
     if report["sharpe"] <= stat_guards.MIN_SHARPE_FOR_INCREASE:
         return 0.0, f"Sharpe <= {stat_guards.MIN_SHARPE_FOR_INCREASE} のため増加提案を保留 | {stats_note}"
+    if dsr < stat_guards.DEFLATED_SHARPE_CONFIDENCE:
+        return 0.0, (
+            f"Deflated Sharpe < {stat_guards.DEFLATED_SHARPE_CONFIDENCE} "
+            f"(多重検定で偶然の可能性) のため増加提案を保留 | {stats_note}"
+        )
     if average_r > 0.3 and win_rate >= 0.5:
-        return 0.05, f"average_r > 0.3 and win_rate >= 0.5 | {stats_note}"
+        return 0.05, f"average_r > 0.3 and win_rate >= 0.5 (DSR通過) | {stats_note}"
     if average_r > 0.1 and win_rate >= 0.45:
-        return 0.03, f"average_r > 0.1 and win_rate >= 0.45 | {stats_note}"
+        return 0.03, f"average_r > 0.1 and win_rate >= 0.45 (DSR通過) | {stats_note}"
     return 0.0, f"変更なし | {stats_note}"
 
 
@@ -300,24 +310,59 @@ def decayed_metrics(eval_part: pd.DataFrame, as_of: pd.Timestamp | None) -> dict
     return stat_guards.decayed_mean(values, ages)
 
 
+def _resolve_values(signals: pd.DataFrame, evaluations: pd.DataFrame, column: str, values: list[str] | None) -> list[str]:
+    if values is not None:
+        return values
+    observed = set(signals[column].dropna().astype(str)) if column in signals.columns and not signals.empty else set()
+    observed |= set(evaluations[column].dropna().astype(str)) if column in evaluations.columns and not evaluations.empty else set()
+    return sorted(observed)
+
+
+def _cell_r_values(evaluations: pd.DataFrame, column: str, value: str) -> list[float]:
+    eval_part = evaluations[evaluations[column].astype(str) == value] if column in evaluations.columns and not evaluations.empty else pd.DataFrame()
+    return numeric_r(closed_df(eval_part)).tolist()
+
+
+def gather_trial_context(specs: list[tuple[pd.DataFrame, pd.DataFrame, str, list[str] | None]]) -> tuple[int, float]:
+    """全較正セル横断で「試行数N」と「セル間Sharpe分散」を求める (SPEC-DSR-001)。
+
+    Deflated Sharpe Ratio の基準値計算に使う。MIN_SAMPLES_WEIGHT_CHANGE 件以上の
+    closed評価を持つセルだけを1試行として数える(検定対象になり得たセルの数)。
+    """
+    sharpes: list[float] = []
+    for signals, evaluations, column, values in specs:
+        for value in _resolve_values(signals, evaluations, column, values):
+            r_values = _cell_r_values(evaluations, column, value)
+            if len(r_values) >= stat_guards.MIN_SAMPLES_WEIGHT_CHANGE:
+                sharpes.append(stat_guards.sharpe_ratio(r_values))
+    n_trials = len(sharpes)
+    if n_trials < 2:
+        return max(n_trials, 1), 0.0
+    mean = sum(sharpes) / n_trials
+    variance = sum((s - mean) ** 2 for s in sharpes) / (n_trials - 1)
+    return n_trials, variance
+
+
 def calibration_table(
     signals: pd.DataFrame,
     evaluations: pd.DataFrame,
     column: str,
     values: list[str] | None = None,
     as_of: pd.Timestamp | None = None,
+    n_trials: int = 1,
+    sharpe_variance: float = 0.0,
 ) -> pd.DataFrame:
-    if values is None:
-        observed = set(signals[column].dropna().astype(str)) if column in signals.columns and not signals.empty else set()
-        observed |= set(evaluations[column].dropna().astype(str)) if column in evaluations.columns and not evaluations.empty else set()
-        values = sorted(observed)
+    values = _resolve_values(signals, evaluations, column, values)
     rows = []
     for value in values:
         sig_part = signals[signals[column].astype(str) == value] if column in signals.columns and not signals.empty else pd.DataFrame()
         eval_part = evaluations[evaluations[column].astype(str) == value] if column in evaluations.columns and not evaluations.empty else pd.DataFrame()
         metrics = r_metrics(eval_part)
         r_values = numeric_r(closed_df(eval_part)).tolist()
-        change, reason = proposed_change(metrics["closed_count"], metrics["win_rate"], metrics["average_r"], r_values)
+        change, reason = proposed_change(
+            metrics["closed_count"], metrics["win_rate"], metrics["average_r"],
+            r_values, n_trials=n_trials, sharpe_variance=sharpe_variance,
+        )
         decayed = decayed_metrics(eval_part, as_of)
         decayed_avg_r = decayed["decayed_mean"] if decayed else 0.0
         effective_n = decayed["effective_n"] if decayed else 0.0
@@ -444,14 +489,24 @@ def build_monthly_calibration(start: pd.Timestamp, end: pd.Timestamp) -> tuple[p
     metrics = r_metrics(evaluations)
     pending_count = count_status(evaluations, "pending")
     skipped_count = count_status(evaluations, "skipped")
-    asset_table = calibration_table(signals, evaluations, "asset", as_of=end)
-    rank_table = calibration_table(signals, evaluations, "rank", ["A", "B", "NO_TRADE"], as_of=end)
-    side_table = calibration_table(signals, evaluations, "side", ["LONG", "SHORT", "NONE"], as_of=end)
-    regime_table = calibration_table(signals, evaluations, "regime", ["UPTREND", "DOWNTREND", "RANGE", "UNKNOWN"], as_of=end)
     narrative_alignment = load_narrative_alignment()
     evaluations_n = merge_narrative_alignment(evaluations, narrative_alignment)
     signals_n = merge_narrative_alignment(signals, narrative_alignment)
-    narrative_table = calibration_table(signals_n, evaluations_n, "narrative_alignment", NARRATIVE_CATEGORIES, as_of=end)
+    # SPEC-DSR-001: 多重検定補正の事前パス。全較正セルを横断して試行数Nと
+    # セル間Sharpe分散を1度だけ求め、増加提案のDSRゲートに共通で渡す。
+    n_trials, sharpe_variance = gather_trial_context([
+        (signals, evaluations, "asset", None),
+        (signals, evaluations, "rank", ["A", "B", "NO_TRADE"]),
+        (signals, evaluations, "side", ["LONG", "SHORT", "NONE"]),
+        (signals, evaluations, "regime", ["UPTREND", "DOWNTREND", "RANGE", "UNKNOWN"]),
+        (signals_n, evaluations_n, "narrative_alignment", NARRATIVE_CATEGORIES),
+    ])
+    dsr_kwargs = {"n_trials": n_trials, "sharpe_variance": sharpe_variance}
+    asset_table = calibration_table(signals, evaluations, "asset", as_of=end, **dsr_kwargs)
+    rank_table = calibration_table(signals, evaluations, "rank", ["A", "B", "NO_TRADE"], as_of=end, **dsr_kwargs)
+    side_table = calibration_table(signals, evaluations, "side", ["LONG", "SHORT", "NONE"], as_of=end, **dsr_kwargs)
+    regime_table = calibration_table(signals, evaluations, "regime", ["UPTREND", "DOWNTREND", "RANGE", "UNKNOWN"], as_of=end, **dsr_kwargs)
+    narrative_table = calibration_table(signals_n, evaluations_n, "narrative_alignment", NARRATIVE_CATEGORIES, as_of=end, **dsr_kwargs)
     aligned_r = numeric_r(closed_df(evaluations_n[evaluations_n["narrative_alignment"].astype(str) == "aligned"])).tolist()
     conflicted_r = numeric_r(closed_df(evaluations_n[evaluations_n["narrative_alignment"].astype(str) == "conflicted"])).tolist()
     narrative_note, narrative_edge = narrative_edge_note(aligned_r, conflicted_r)

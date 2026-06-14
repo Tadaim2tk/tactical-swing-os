@@ -86,6 +86,53 @@ def test_gate_unchanged_by_decay():
     assert change == 0.0 and "データ不足" in reason
 
 
+# === SPEC-DSR-001: Deflated Sharpe Ratio (多重検定補正) ===
+
+def test_single_trial_increase_still_passes():
+    # n_trials=1(デフォルト)なら多重検定補正なし=従来通り増加提案が出る
+    import random
+    random.seed(2)
+    strong = [random.gauss(0.5, 0.4) for _ in range(40)]
+    avg = sum(strong) / len(strong)
+    change, reason = cal.proposed_change(40, 0.6, avg, strong, n_trials=1, sharpe_variance=0.0)
+    assert change > 0.0
+    assert "DSR=" in reason
+
+
+def test_dsr_blocks_lucky_increase_under_many_trials():
+    # 単独検定は通る中程度セルが、多数試行(N=360)では偽陽性として保留される
+    import random
+    random.seed(7)
+    moderate = [random.gauss(0.32, 0.5) for _ in range(40)]
+    avg = sum(moderate) / len(moderate)
+    rep = cal.stat_guards.significance_report(moderate)
+    # 前提: Sharpe>0.5 を通過する(=DSRゲートまで到達する)セルであること
+    assert rep["sharpe"] > cal.stat_guards.MIN_SHARPE_FOR_INCREASE
+    change, reason = cal.proposed_change(40, 0.6, avg, moderate, n_trials=360, sharpe_variance=0.25)
+    assert change == 0.0
+    assert "Deflated Sharpe" in reason
+
+
+def test_dsr_does_not_block_decrease():
+    # 減少提案はリスク優先でDSRゲートを課さない
+    losers = [-0.5] * 40
+    change, reason = cal.proposed_change(40, 0.1, -0.5, losers, n_trials=360, sharpe_variance=0.25)
+    assert change < 0.0
+
+
+def test_gather_trial_context_counts_eligible_cells():
+    signals = pd.DataFrame({"asset": ["X"] * 40 + ["Y"] * 10})
+    evals = pd.DataFrame({
+        "asset": ["X"] * 40 + ["Y"] * 10,
+        "evaluation_status": ["closed"] * 50,
+        "r_result": [0.3] * 40 + [0.1] * 10,
+    })
+    n_trials, variance = cal.gather_trial_context([(signals, evals, "asset", None)])
+    # Xは40件(>=30)で1試行、Yは10件で対象外 → N=1
+    assert n_trials == 1
+    assert variance == 0.0
+
+
 # === SPEC-NQ-001: ナラティブ信頼性 ===
 
 def make_alignment():
