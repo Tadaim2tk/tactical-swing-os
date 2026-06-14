@@ -173,6 +173,123 @@ def significance_report(values: Iterable[Any] | None) -> dict[str, Any]:
     }
 
 
+# === SPEC-DSR-001: Deflated Sharpe Ratio (多重検定補正) ===
+# 月次較正は asset/rank/side/regime/narrative にわたり多数のセルを同時に検定する。
+# 純粋な偶然でも一部のセルは p<0.05 を満たす(選択バイアス)。
+# Deflated Sharpe Ratio (Bailey & Lopez de Prado, 2014) は「N回の試行のうち
+# 期待される最大Sharpe」を基準に観測Sharpeを割り引き、偶然の好成績を排除する。
+# これは憲章「過学習への冷徹なブレーキ」「後知恵バイアス排除」の統計的実装。
+
+# DSRがこの確信度以上のときのみ「多重検定後も有意」と判定する。
+DEFLATED_SHARPE_CONFIDENCE = 0.95
+# オイラー＝マスケローニ定数(期待最大Sharpeの推定に使う)。
+_EULER_MASCHERONI = 0.5772156649015329
+
+
+def norm_cdf(x: float) -> float:
+    """標準正規分布の累積分布関数 Φ(x)。標準ライブラリのerfで計算。"""
+    return 0.5 * math.erfc(-float(x) / math.sqrt(2.0))
+
+
+def norm_ppf(p: float) -> float:
+    """標準正規分布の逆累積分布関数(probit)。Acklamの有理近似。
+
+    p<=0 で -inf、p>=1 で +inf。相対誤差は約1.15e-9。
+    """
+    if p <= 0.0:
+        return -math.inf
+    if p >= 1.0:
+        return math.inf
+    a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+         1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00]
+    b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+         6.680131188771972e+01, -1.328068155288572e+01]
+    c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+         -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00]
+    d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+         3.754408661907416e+00]
+    p_low = 0.02425
+    p_high = 1.0 - p_low
+    if p < p_low:
+        q = math.sqrt(-2.0 * math.log(p))
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / \
+               ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+    if p <= p_high:
+        q = p - 0.5
+        r = q * q
+        return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / \
+               (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0)
+    q = math.sqrt(-2.0 * math.log(1.0 - p))
+    return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / \
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+
+
+def _moments(clean: list[float]) -> tuple[float, float, float, float]:
+    """(mean, std(標本/n-1), skewness, kurtosis(正規=3)) を返す。"""
+    n = len(clean)
+    mean = sum(clean) / n
+    var_sample = sum((v - mean) ** 2 for v in clean) / (n - 1)
+    std = math.sqrt(var_sample) if var_sample > 0 else 0.0
+    if std <= 0.0:
+        return mean, 0.0, 0.0, 3.0
+    m2 = sum((v - mean) ** 2 for v in clean) / n
+    m3 = sum((v - mean) ** 3 for v in clean) / n
+    m4 = sum((v - mean) ** 4 for v in clean) / n
+    skew = m3 / (m2 ** 1.5) if m2 > 0 else 0.0
+    kurt = m4 / (m2 ** 2) if m2 > 0 else 3.0
+    return mean, std, skew, kurt
+
+
+def probabilistic_sharpe_ratio(values: Iterable[Any] | None, sr_benchmark: float = 0.0) -> float:
+    """確率的Sharpe比(PSR): 真のSharpeが sr_benchmark を超える確率。
+
+    歪度・尖度(非正規性)を補正する。n<2 や std=0 では 0.0。
+    Sharpeは1トレードあたり(非年率)で観測系列と同一単位。
+    """
+    clean = _clean_values(values)
+    n = len(clean)
+    if n < 2:
+        return 0.0
+    mean, std, skew, kurt = _moments(clean)
+    if std <= 0.0:
+        return 0.0
+    sr_hat = mean / std
+    denom = 1.0 - skew * sr_hat + ((kurt - 1.0) / 4.0) * sr_hat * sr_hat
+    if denom <= 0.0:
+        return 0.0
+    z = (sr_hat - sr_benchmark) * math.sqrt(n - 1) / math.sqrt(denom)
+    return norm_cdf(z)
+
+
+def expected_max_sharpe(n_trials: int, sharpe_variance: float) -> float:
+    """N回の独立試行で期待される最大Sharpe比(帰無仮説の基準値)。
+
+    Bailey & Lopez de Prado (2014) 式。sharpe_variance は試行間のSharpeの分散。
+    n_trials<=1 または分散<=0 のとき 0.0(=多重検定補正なし)。
+    """
+    if n_trials <= 1 or sharpe_variance <= 0.0:
+        return 0.0
+    sigma = math.sqrt(sharpe_variance)
+    e = math.e
+    z1 = norm_ppf(1.0 - 1.0 / n_trials)
+    z2 = norm_ppf(1.0 - 1.0 / (n_trials * e))
+    return sigma * ((1.0 - _EULER_MASCHERONI) * z1 + _EULER_MASCHERONI * z2)
+
+
+def deflated_sharpe_ratio(
+    values: Iterable[Any] | None,
+    n_trials: int,
+    sharpe_variance: float,
+) -> float:
+    """Deflated Sharpe Ratio: 多重検定(N試行)を考慮しても観測Sharpeが
+    偶然の最大値を超える確率。1.0に近いほど本物の優位性。
+
+    n_trials<=1 のときは単一検定とみなし PSR(vs 0) に一致する。
+    """
+    sr_star = expected_max_sharpe(n_trials, sharpe_variance)
+    return probabilistic_sharpe_ratio(values, sr_star)
+
+
 # === SPEC-RD-001: 忘却 (time decay) ===
 # 指数減衰の半減期(日)。古い成績ほど重みが下がる。情報提示用であり、
 # SPEC-SG-001の統計ゲート(無加重t検定)には影響しない。
