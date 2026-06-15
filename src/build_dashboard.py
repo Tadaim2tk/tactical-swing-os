@@ -380,6 +380,15 @@ def read_json(path: Path):
         return None
 
 
+def read_text(path: Path) -> str:
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def get_sheets_client():
     service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     sheet_id = os.getenv("GOOGLE_SHEET_ID")
@@ -481,6 +490,12 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "ai_feedback_json": read_json(RESULTS_DIR / "ai_feedback.json"),
         "news_narrative_scores_json": read_json(RESULTS_DIR / "news_narrative_scores.json"),
         "latest_evaluations_summary_json": read_json(RESULTS_DIR / "latest_evaluations_summary.json"),
+        "prediction_calibration": read_csv(RESULTS_DIR / "prediction_calibration.csv"),
+        "prediction_calibration_json": read_json(RESULTS_DIR / "prediction_calibration.json"),
+        "narrative_reliability": read_csv(RESULTS_DIR / "narrative_reliability.csv"),
+        "narrative_reliability_json": read_json(RESULTS_DIR / "narrative_reliability.json"),
+        "cost_model_json": read_json(Path("config/cost_model.json")),
+        "latest_audit_status": read_text(RESULTS_DIR / "latest_audit_status.txt"),
     }
     return data, extras, source
 
@@ -1455,6 +1470,106 @@ def datetime_audit_summary(audit_json, summary_json, audit_csv: pd.DataFrame) ->
     }
 
 
+def prediction_calibration_summary(calibration_json, calibration_csv: pd.DataFrame) -> dict:
+    """予測キャリブレーション層 (SPEC-BC-001) のDashboard表示用サマリー。分析専用。"""
+    payload = calibration_json if isinstance(calibration_json, dict) and calibration_json else {}
+    if not payload:
+        return {"available": False, "calibration_status": "unavailable"}
+    return {
+        "available": True,
+        "calibration_status": payload.get("calibration_status", "unavailable"),
+        "implied_probability_source": payload.get("implied_probability_source", "frozen_default"),
+        "ranks_tracked": int(numeric_or(payload.get("ranks_tracked", 0), 0)),
+        "overconfident_count": int(numeric_or(payload.get("overconfident_count", 0), 0)),
+        "underconfident_count": int(numeric_or(payload.get("underconfident_count", 0), 0)),
+        "well_calibrated_count": int(numeric_or(payload.get("well_calibrated_count", 0), 0)),
+        "insufficient_data_count": int(numeric_or(payload.get("insufficient_data_count", 0), 0)),
+        "overall_brier": numeric_or(payload.get("overall_brier", 0.0), 0.0),
+        "reference_brier": numeric_or(payload.get("reference_brier", 0.0), 0.0),
+        "brier_skill_score": numeric_or(payload.get("brier_skill_score", 0.0), 0.0),
+        "scored_n": int(numeric_or(payload.get("scored_n", 0), 0)),
+        "requires_human_approval": bool(payload.get("requires_human_approval", True)),
+        "weights_json_updated": bool(payload.get("weights_json_updated", False)),
+    }
+
+
+def narrative_reliability_summary(reliability_json, reliability_csv: pd.DataFrame) -> dict:
+    """ナラティブ信頼性ゲート (SPEC-NQ-001) のDashboard表示用サマリー。分析専用。"""
+    payload = reliability_json if isinstance(reliability_json, dict) and reliability_json else {}
+    if not payload:
+        return {"available": False, "narrative_reliability_status": "unavailable"}
+    return {
+        "available": True,
+        "narrative_reliability_status": payload.get("narrative_reliability_status", "unavailable"),
+        "narrative_source": payload.get("narrative_source", "unavailable"),
+        "total_narratives": int(numeric_or(payload.get("total_narratives", 0), 0)),
+        "strong_positive_count": int(numeric_or(payload.get("strong_positive_count", 0), 0)),
+        "strong_negative_count": int(numeric_or(payload.get("strong_negative_count", 0), 0)),
+        "unproven_count": int(numeric_or(payload.get("unproven_count", 0), 0)),
+        "insufficient_data_count": int(numeric_or(payload.get("insufficient_data_count", 0), 0)),
+        "decay_divergence_count": int(numeric_or(payload.get("decay_divergence_count", 0), 0)),
+        "requires_human_approval": bool(payload.get("requires_human_approval", True)),
+        "weights_json_updated": bool(payload.get("weights_json_updated", False)),
+    }
+
+
+def transaction_cost_summary(evaluations: pd.DataFrame, cost_model_json) -> dict:
+    """取引コストモデル (SPEC-TC-001) の表示用サマリー。分析専用・実売買なし。
+
+    evaluations の net R / cost R 列の有無と、config/cost_model.json の設定状態を要約する。
+    """
+    meta = (cost_model_json or {}).get("_meta", {}) if isinstance(cost_model_json, dict) else {}
+    assets = (cost_model_json or {}).get("assets", {}) if isinstance(cost_model_json, dict) else {}
+    default_source = ((cost_model_json or {}).get("default", {}) or {}).get("source", "unconfigured") if isinstance(cost_model_json, dict) else "unconfigured"
+    configured_assets = 0
+    for cfg in (assets.values() if isinstance(assets, dict) else []):
+        if isinstance(cfg, dict) and str(cfg.get("source", "unconfigured")) not in ("", "unconfigured"):
+            configured_assets += 1
+
+    cols = set(evaluations.columns) if not evaluations.empty else set()
+    net_available = "r_result_net" in cols
+    gross_available = "r_result" in cols
+    cost_col = "cost_r" in cols
+    cost_adjusted_rows = 0
+    all_costs_zero = True
+    if not evaluations.empty and cost_col:
+        cost_series = pd.to_numeric(evaluations["cost_r"], errors="coerce").fillna(0.0)
+        cost_adjusted_rows = int((cost_series.abs() > 0).sum())
+        all_costs_zero = bool((cost_series.abs() == 0).all())
+    cost_source_unconfigured = True
+    if not evaluations.empty and "cost_source" in cols:
+        sources = evaluations["cost_source"].fillna("unconfigured").astype(str)
+        cost_source_unconfigured = bool((sources.isin(["", "unconfigured"])).all())
+
+    status = str(meta.get("status", "unconfigured")) if meta else "unconfigured"
+    warning = ""
+    if status == "unconfigured" or (all_costs_zero and cost_source_unconfigured):
+        warning = "コスト未設定: 全コスト0のためネットR=グロスR。XMTrading実測値をsource付きで記入するまで分析は理論値です。"
+    return {
+        "available": True,
+        "cost_model_status": status,
+        "configured_asset_count": int(configured_assets),
+        "default_source": str(default_source),
+        "net_r_available": bool(net_available),
+        "gross_r_available": bool(gross_available),
+        "cost_adjusted_rows": int(cost_adjusted_rows),
+        "all_costs_zero_or_unconfigured": bool(all_costs_zero and cost_source_unconfigured),
+        "warning": warning,
+    }
+
+
+def audit_report_summary(audit_status_text: str) -> dict:
+    """統合状態確認用 Audit Report (SPEC) のサマリー。statusのみ表示。"""
+    status = str(audit_status_text or "").strip()
+    available = bool(status)
+    return {
+        "available": available,
+        "latest_audit_status": status or "unavailable",
+        "latest_audit_report_date": latest_file_date("reports/audit/*_audit_report.md"),
+        "audit_report_available": available,
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {
@@ -1650,6 +1765,16 @@ def build_dashboard() -> tuple[dict, str]:
         extras["datetime_audit_summary_json"],
         extras["datetime_audit"],
     )
+    prediction_calibration = prediction_calibration_summary(
+        extras["prediction_calibration_json"],
+        extras["prediction_calibration"],
+    )
+    narrative_reliability = narrative_reliability_summary(
+        extras["narrative_reliability_json"],
+        extras["narrative_reliability"],
+    )
+    transaction_cost = transaction_cost_summary(evaluations, extras["cost_model_json"])
+    audit_report = audit_report_summary(extras["latest_audit_status"])
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -1680,6 +1805,8 @@ def build_dashboard() -> tuple[dict, str]:
         "human_override_analytics": len(extras["human_override_analytics"]),
         "portfolio_layer": len(extras["portfolio_layer"]),
         "datetime_audit": len(extras["datetime_audit"]),
+        "prediction_calibration": len(extras["prediction_calibration"]),
+        "narrative_reliability": len(extras["narrative_reliability"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -1733,6 +1860,10 @@ def build_dashboard() -> tuple[dict, str]:
         "human_override_summary": human_override,
         "portfolio_layer_summary": portfolio_layer,
         "datetime_audit_summary": datetime_health,
+        "prediction_calibration_summary": prediction_calibration,
+        "narrative_reliability_summary": narrative_reliability,
+        "transaction_cost_summary": transaction_cost,
+        "audit_report_summary": audit_report,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -1768,6 +1899,12 @@ def build_dashboard() -> tuple[dict, str]:
         human_override=human_override,
         portfolio_layer=portfolio_layer,
         datetime_health=datetime_health,
+        prediction_calibration=prediction_calibration,
+        prediction_calibration_table=extras["prediction_calibration"],
+        narrative_reliability=narrative_reliability,
+        narrative_reliability_table=extras["narrative_reliability"],
+        transaction_cost=transaction_cost,
+        audit_report=audit_report,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,
@@ -1812,6 +1949,12 @@ def render_html(
     human_override: dict,
     portfolio_layer: dict,
     datetime_health: dict,
+    prediction_calibration: dict,
+    prediction_calibration_table: pd.DataFrame,
+    narrative_reliability: dict,
+    narrative_reliability_table: pd.DataFrame,
+    transaction_cost: dict,
+    audit_report: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -1854,6 +1997,57 @@ def render_html(
             stat_card("datetime_naive_datetime", datetime_health.get("datetime_naive_datetime", 0)),
             stat_card("datetime_timestamp_mismatch", datetime_health.get("datetime_timestamp_mismatch", 0)),
             stat_card("datetime_recommended_action", datetime_health.get("datetime_recommended_action", "monitor")),
+        ]
+    )
+    prediction_calibration_stats = "".join(
+        [
+            stat_card("calibration_status", prediction_calibration.get("calibration_status", "unavailable")),
+            stat_card("ranks_tracked", prediction_calibration.get("ranks_tracked", 0)),
+            stat_card("overconfident", prediction_calibration.get("overconfident_count", 0)),
+            stat_card("underconfident", prediction_calibration.get("underconfident_count", 0)),
+            stat_card("well_calibrated", prediction_calibration.get("well_calibrated_count", 0)),
+            stat_card("insufficient_data", prediction_calibration.get("insufficient_data_count", 0)),
+            stat_card("overall_brier", fmt_num(prediction_calibration.get("overall_brier", 0.0))),
+            stat_card("reference_brier", fmt_num(prediction_calibration.get("reference_brier", 0.0))),
+            stat_card("brier_skill_score", fmt_num(prediction_calibration.get("brier_skill_score", 0.0))),
+            stat_card("scored_n", prediction_calibration.get("scored_n", 0)),
+            stat_card("requires_human_approval", str(prediction_calibration.get("requires_human_approval", True)).lower()),
+            stat_card("weights_json_updated", str(prediction_calibration.get("weights_json_updated", False)).lower()),
+        ]
+    )
+    narrative_reliability_stats = "".join(
+        [
+            stat_card("reliability_status", narrative_reliability.get("narrative_reliability_status", "unavailable")),
+            stat_card("narrative_source", narrative_reliability.get("narrative_source", "unavailable")),
+            stat_card("total_narratives", narrative_reliability.get("total_narratives", 0)),
+            stat_card("strong_positive", narrative_reliability.get("strong_positive_count", 0)),
+            stat_card("strong_negative", narrative_reliability.get("strong_negative_count", 0)),
+            stat_card("unproven", narrative_reliability.get("unproven_count", 0)),
+            stat_card("insufficient_data", narrative_reliability.get("insufficient_data_count", 0)),
+            stat_card("decay_divergence", narrative_reliability.get("decay_divergence_count", 0)),
+            stat_card("requires_human_approval", str(narrative_reliability.get("requires_human_approval", True)).lower()),
+            stat_card("weights_json_updated", str(narrative_reliability.get("weights_json_updated", False)).lower()),
+        ]
+    )
+    transaction_cost_stats = "".join(
+        [
+            stat_card("cost_model_status", transaction_cost.get("cost_model_status", "unconfigured")),
+            stat_card("configured_assets", transaction_cost.get("configured_asset_count", 0)),
+            stat_card("default_source", transaction_cost.get("default_source", "unconfigured")),
+            stat_card("net_r_available", str(transaction_cost.get("net_r_available", False)).lower()),
+            stat_card("gross_r_available", str(transaction_cost.get("gross_r_available", False)).lower()),
+            stat_card("cost_adjusted_rows", transaction_cost.get("cost_adjusted_rows", 0)),
+        ]
+    )
+    transaction_cost_warning = transaction_cost.get("warning", "")
+    transaction_cost_warning_html = (
+        f'<p class="notice">{html.escape(transaction_cost_warning)}</p>' if transaction_cost_warning else ""
+    )
+    audit_report_stats = "".join(
+        [
+            stat_card("latest_audit_status", audit_report.get("latest_audit_status", "unavailable")),
+            stat_card("latest_audit_report_date", audit_report.get("latest_audit_report_date") or "未取得"),
+            stat_card("audit_report_available", str(audit_report.get("audit_report_available", False)).lower()),
         ]
     )
     eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
@@ -2140,6 +2334,10 @@ def render_html(
     <section class="card"><h2>Auto Calibration Candidates</h2>{'<div class="empty">Auto Calibration Candidates未取得</div>' if not auto_calibration.get('available') else f'<div class="grid">{auto_calibration_stats}</div>'}<h3>top confidence candidates</h3>{table_html(auto_calibration_top, ["candidate_id","asset","category","target","factor","classification","current_value","suggested_delta","suggested_value","confidence","sample_size","source","rationale"], "候補なし")}</section>
     <section class="card"><h2>Human Override Analytics</h2>{'<div class="empty">Human Override Analytics未取得</div>' if not human_override.get('available') else f'<div class="grid">{human_override_stats}</div>'}<h3>override impact 上位5件</h3>{table_html(human_override_top, ["proposal_id","review_decision","adoption_status","override_type","override_reason","impact_status","impact_score","source","recommended_next_action"], "override分析なし")}</section>
     <section class="card"><h2>Portfolio Layer</h2>{'<div class="empty">Portfolio Layer未取得</div>' if not portfolio_layer.get('available') else f'<div class="grid">{portfolio_stats}</div>'}<h3>top allocation candidates</h3>{table_html(portfolio_top, ["asset","allocation_score","portfolio_weight_candidate","confidence","risk_class","risk_role","recommended_exposure","cash_ratio_candidate","latest_rank","latest_side","rationale"], "配分候補なし")}</section>
+    <section class="card"><h2>Prediction Calibration</h2><p class="notice">AIの確信度を採点する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Prediction Calibration未取得</div>' if not prediction_calibration.get('available') else f'<div class="grid">{prediction_calibration_stats}</div>'}<h3>Rank別キャリブレーション</h3>{table_html(prediction_calibration_table, ["rank","implied_probability","closed_count","hit_rate","calibration_gap","brier_score","p_value","calibration_verdict","recommended_action"], "キャリブレーションデータなし")}</section>
+    <section class="card"><h2>Narrative Reliability</h2><p class="notice">ナラティブの統計的信頼性を検定する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Narrative Reliability未取得</div>' if not narrative_reliability.get('available') else f'<div class="grid">{narrative_reliability_stats}</div>'}<h3>ナラティブ別信頼性</h3>{table_html(narrative_reliability_table, ["narrative","closed_count","win_rate","average_r","p_value","reliability_label","recommended_action"], "ナラティブ信頼性データなし")}</section>
+    <section class="card"><h2>Transaction Cost Model</h2><p class="notice">ネットR評価のための分析専用モデルです。実売買・発注は行いません。</p>{transaction_cost_warning_html}<div class="grid">{transaction_cost_stats}</div></section>
+    <section class="card"><h2>Audit Report</h2><p class="notice">統合状態確認用のシステム監査です。</p><div class="grid">{audit_report_stats}</div></section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
