@@ -59,6 +59,30 @@ def test_build_dashboard_is_thin():
     assert lines < 500, f"build_dashboard.py is {lines} lines; expected thin orchestration"
 
 
+def test_build_dashboard_has_main_entrypoint():
+    # 回帰防止: 分割時に __main__ ガードが脱落すると `python build_dashboard.py` が
+    # 何も生成せず exit 0 になり、Pages artifact の tar が失敗する。
+    source = (Path(__file__).parent / "build_dashboard.py").read_text(encoding="utf-8")
+    assert 'if __name__ == "__main__":' in source
+    assert "raise SystemExit(main())" in source
+
+
+def test_main_actually_generates_outputs(tmp_path, monkeypatch):
+    # main() を実行して実際に index.html / dashboard_summary.json が生成されることを保証する
+    # (出力先を一時ディレクトリへ差し替え、リポジトリの成果物を汚さない)。
+    import dashboard_io
+    out_dir = tmp_path / "dashboard"
+    monkeypatch.setattr(bd, "REPORTS_DIR", out_dir, raising=False)
+    monkeypatch.setattr(dashboard_io, "REPORTS_DIR", out_dir, raising=False)
+    rc = bd.main()
+    assert rc == 0
+    assert (out_dir / "index.html").exists()
+    assert (out_dir / "dashboard_summary.json").exists()
+    html_text = (out_dir / "index.html").read_text(encoding="utf-8")
+    for section in ["Prediction Calibration", "Narrative Reliability", "Transaction Cost Model", "Audit Report"]:
+        assert f"<h2>{section}</h2>" in html_text
+
+
 # === 空データでもサマリー関数が落ちない ===
 
 def test_summaries_handle_empty_data():
