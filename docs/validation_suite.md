@@ -38,6 +38,15 @@ workflowは以下をartifactとして保存します。
 
 Step Summaryには、主要なCSV/JSON/HTMLが生成されたかどうかが表示されます。
 
+## 統合済み分析レイヤー
+
+以下のレイヤーは validation suite と Dashboard の両方で毎回生成・検証・表示されます。いずれも分析・検証専用であり、自動適用・自動発注・weights.json更新は行いません。
+
+- **Prediction Calibration** (SPEC-BC-001): AI確信度の採点。`results/prediction_calibration.json` を生成し Step Summary で存在確認
+- **Narrative Reliability** (SPEC-NQ-001): ナラティブの統計的信頼性検定。`results/narrative_reliability.json` を生成
+- **Transaction Cost** (SPEC-TC-001): ネットR評価のための分析モデル。`evaluate_signal.py` に組み込まれ、`config/cost_model.json` の設定状態を Dashboard で要約。実売買ではありません
+- **Audit Report**: 統合状態確認用のシステム監査。`results/latest_audit_status.txt` と `reports/audit/*_audit_report.md` を生成
+
 ## 安全条件
 
 このworkflowは検証専用です。

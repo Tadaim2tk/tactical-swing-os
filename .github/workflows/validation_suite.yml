@@ -49,6 +49,9 @@ jobs:
           python src/build_human_override_analytics.py
           python src/build_portfolio_layer.py
           python src/audit_datetime_consistency.py
+          python src/build_prediction_calibration.py
+          python src/build_narrative_reliability.py
+          python src/build_audit_report.py
           python src/build_dashboard.py
 
       - name: Write validation summary
@@ -82,6 +85,10 @@ jobs:
           check_file "human override analytics" "results/human_override_analytics_summary.json"
           check_file "portfolio layer" "results/portfolio_layer_summary.json"
           check_file "datetime audit" "results/datetime_audit_summary.json"
+          check_file "prediction calibration" "results/prediction_calibration.json"
+          check_file "narrative reliability" "results/narrative_reliability.json"
+          check_file "transaction cost model" "config/cost_model.json"
+          check_file "audit report status" "results/latest_audit_status.txt"
           check_file "dashboard" "reports/dashboard/index.html"
 
       - name: Upload validation artifacts
@@ -137,3 +144,11 @@ jobs:
             results/datetime_audit.json
             results/datetime_audit_summary.json
             reports/system/*_datetime_audit.md
+            results/prediction_calibration.csv
+            results/prediction_calibration.json
+            reports/calibration/*_prediction_calibration.md
+            results/narrative_reliability.csv
+            results/narrative_reliability.json
+            reports/narrative/*_narrative_reliability.md
+            results/latest_audit_status.txt
+            reports/audit/*_audit_report.md

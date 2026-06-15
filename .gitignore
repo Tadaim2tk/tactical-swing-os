@@ -74,3 +74,7 @@ results/datetime_audit.csv
 results/datetime_audit.json
 results/datetime_audit_summary.json
 reports/system/*_datetime_audit.md
+reports/calibration/*_prediction_calibration.md
+reports/narrative/*_narrative_reliability.md
+reports/audit/*_audit_report.md
+results/latest_audit_status.txt

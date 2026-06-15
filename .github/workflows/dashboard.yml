@@ -122,6 +122,18 @@ jobs:
         run: |
           python src/audit_datetime_consistency.py || echo "warning: datetime audit failed; continuing dashboard"
 
+      - name: Build prediction calibration for dashboard
+        run: |
+          python src/build_prediction_calibration.py || echo "warning: prediction calibration failed; continuing dashboard"
+
+      - name: Build narrative reliability for dashboard
+        run: |
+          python src/build_narrative_reliability.py || echo "warning: narrative reliability failed; continuing dashboard"
+
+      - name: Build audit report for dashboard
+        run: |
+          python src/build_audit_report.py || echo "warning: audit report failed; continuing dashboard"
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -189,6 +201,14 @@ jobs:
             results/datetime_audit.json
             results/datetime_audit_summary.json
             reports/system/*_datetime_audit.md
+            results/prediction_calibration.csv
+            results/prediction_calibration.json
+            reports/calibration/*_prediction_calibration.md
+            results/narrative_reliability.csv
+            results/narrative_reliability.json
+            reports/narrative/*_narrative_reliability.md
+            results/latest_audit_status.txt
+            reports/audit/*_audit_report.md
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

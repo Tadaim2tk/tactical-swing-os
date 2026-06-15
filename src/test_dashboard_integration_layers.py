@@ -1,0 +1,133 @@
+"""統合フェーズで追加した4レイヤーのDashboardサマリー関数の単体テスト。
+
+分析・表示専用であり、実売買/発注/weights更新は一切しないことを併せて検証する。
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).parent))
+import build_dashboard as bd
+
+
+# === Prediction Calibration ===
+
+def test_prediction_calibration_summary_from_json():
+    payload = {
+        "calibration_status": "tracking",
+        "implied_probability_source": "frozen_default",
+        "ranks_tracked": 3,
+        "overconfident_count": 1,
+        "underconfident_count": 0,
+        "well_calibrated_count": 2,
+        "insufficient_data_count": 0,
+        "overall_brier": 0.21,
+        "reference_brier": 0.25,
+        "brier_skill_score": 0.16,
+        "scored_n": 42,
+        "requires_human_approval": True,
+        "weights_json_updated": False,
+    }
+    s = bd.prediction_calibration_summary(payload, pd.DataFrame())
+    assert s["available"] is True
+    assert s["calibration_status"] == "tracking"
+    assert s["scored_n"] == 42
+    assert s["weights_json_updated"] is False  # 安全条件: weights更新なし
+
+
+def test_prediction_calibration_summary_unavailable():
+    s = bd.prediction_calibration_summary(None, pd.DataFrame())
+    assert s["available"] is False
+    assert s["calibration_status"] == "unavailable"
+
+
+# === Narrative Reliability ===
+
+def test_narrative_reliability_summary_from_json():
+    payload = {
+        "narrative_reliability_status": "tracking",
+        "narrative_source": "signal_narrative_alignment",
+        "total_narratives": 4,
+        "strong_positive_count": 1,
+        "strong_negative_count": 0,
+        "unproven_count": 3,
+        "insufficient_data_count": 0,
+        "decay_divergence_count": 1,
+        "requires_human_approval": True,
+        "weights_json_updated": False,
+    }
+    s = bd.narrative_reliability_summary(payload, pd.DataFrame())
+    assert s["available"] is True
+    assert s["total_narratives"] == 4
+    assert s["weights_json_updated"] is False
+
+
+def test_narrative_reliability_summary_unavailable():
+    s = bd.narrative_reliability_summary({}, pd.DataFrame())
+    assert s["available"] is False
+
+
+# === Transaction Cost ===
+
+def test_transaction_cost_summary_unconfigured_warns():
+    cost_model_json = {
+        "_meta": {"status": "unconfigured"},
+        "default": {"source": "unconfigured"},
+        "assets": {"BTC": {"source": "unconfigured"}},
+    }
+    evals = pd.DataFrame({
+        "r_result": [1.0, -1.0],
+        "r_result_net": [1.0, -1.0],
+        "cost_r": [0.0, 0.0],
+        "cost_source": ["unconfigured", "unconfigured"],
+    })
+    s = bd.transaction_cost_summary(evals, cost_model_json)
+    assert s["cost_model_status"] == "unconfigured"
+    assert s["net_r_available"] is True
+    assert s["gross_r_available"] is True
+    assert s["cost_adjusted_rows"] == 0
+    assert s["configured_asset_count"] == 0
+    assert s["warning"]  # 未設定の警告が出る
+
+
+def test_transaction_cost_summary_configured():
+    cost_model_json = {
+        "_meta": {"status": "configured"},
+        "default": {"source": "broker_x"},
+        "assets": {"BTC": {"source": "broker_x"}, "WTI": {"source": "unconfigured"}},
+    }
+    evals = pd.DataFrame({
+        "r_result": [1.0, -1.0],
+        "r_result_net": [0.8, -1.2],
+        "cost_r": [0.2, 0.2],
+        "cost_source": ["broker_x", "broker_x"],
+    })
+    s = bd.transaction_cost_summary(evals, cost_model_json)
+    assert s["configured_asset_count"] == 1
+    assert s["cost_adjusted_rows"] == 2
+    assert s["warning"] == ""  # 設定済みなら警告なし
+
+
+def test_transaction_cost_summary_empty_evaluations():
+    s = bd.transaction_cost_summary(pd.DataFrame(), {"_meta": {"status": "unconfigured"}})
+    assert s["available"] is True
+    assert s["net_r_available"] is False
+
+
+# === Audit Report ===
+
+def test_audit_report_summary_pass():
+    s = bd.audit_report_summary("PASS")
+    assert s["available"] is True
+    assert s["latest_audit_status"] == "PASS"
+    assert s["audit_report_available"] is True
+
+
+def test_audit_report_summary_empty():
+    s = bd.audit_report_summary("")
+    assert s["available"] is False
+    assert s["latest_audit_status"] == "unavailable"

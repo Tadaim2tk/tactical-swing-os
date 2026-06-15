@@ -71,6 +71,10 @@ GitHub Actions runner はUTC基準で動くため、そのまま表示すると�
 - `Reason Code Performance`: positive / negative / insufficient data の理由コード
 - `No Trade Reason Analysis`: NO_TRADE理由ごとの暫定評価
 - `Rule Update Proposals`: ルール更新提案一覧
+- `Prediction Calibration`: AIの確信度(implied probability)を実績で採点する分析専用層 (SPEC-BC-001)。Rank別のhit_rate/calibration_gap/Brier/p値を表示。weights.jsonは更新しません
+- `Narrative Reliability`: ナラティブの統計的信頼性を検定する分析専用層 (SPEC-NQ-001)。ナラティブ別のwin_rate/average_r/p値/信頼性ラベルを表示。weights.jsonは更新しません
+- `Transaction Cost Model`: ネットR評価のための分析専用モデル (SPEC-TC-001)。コスト設定状態(status/configured assets/net R available等)を表示。実売買・発注は行いません。コスト未設定時は「ネットR=グロスR」の警告を表示します
+- `Audit Report`: 統合状態確認用のシステム監査ステータス(latest_audit_status)を表示
 - `News Narrative Summary`: RSS/公開見出しから推定したニュースナラティブ要約
 - `Pending Re-evaluation Summary`: 未決着シグナルの継続再評価要約
 - `Latest Evaluation View Summary`: append-only履歴から選んだ最新評価ビュー要約
