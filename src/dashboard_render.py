@@ -487,6 +487,8 @@ def render_html(
     narrative_reliability_table: pd.DataFrame,
     transaction_cost: dict,
     audit_report: dict,
+    narrative_lookahead: dict,
+    narrative_lookahead_table: pd.DataFrame,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -580,6 +582,19 @@ def render_html(
             stat_card("latest_audit_status", audit_report.get("latest_audit_status", "unavailable")),
             stat_card("latest_audit_report_date", audit_report.get("latest_audit_report_date") or "未取得"),
             stat_card("audit_report_available", str(audit_report.get("audit_report_available", False)).lower()),
+        ]
+    )
+    narrative_lookahead_stats = "".join(
+        [
+            stat_card("audit_status", narrative_lookahead.get("audit_status", "unavailable")),
+            stat_card("total_checked", narrative_lookahead.get("total_checked", 0)),
+            stat_card("warning", narrative_lookahead.get("warning_count", 0)),
+            stat_card("high_risk", narrative_lookahead.get("high_risk_count", 0)),
+            stat_card("blocked", narrative_lookahead.get("blocked_count", 0)),
+            stat_card("unknown_timing", narrative_lookahead.get("unknown_timing_count", 0)),
+            stat_card("max_lookahead_score", narrative_lookahead.get("max_lookahead_score", 0)),
+            stat_card("recommended_next_action", narrative_lookahead.get("recommended_next_action", "continue_monitoring")),
+            stat_card("requires_human_approval", str(narrative_lookahead.get("requires_human_approval", True)).lower()),
         ]
     )
     eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
@@ -870,6 +885,7 @@ def render_html(
     <section class="card"><h2>Narrative Reliability</h2><p class="notice">ナラティブの統計的信頼性を検定する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Narrative Reliability未取得</div>' if not narrative_reliability.get('available') else f'<div class="grid">{narrative_reliability_stats}</div>'}<h3>ナラティブ別信頼性</h3>{table_html(narrative_reliability_table, ["narrative","closed_count","win_rate","average_r","p_value","reliability_label","recommended_action"], "ナラティブ信頼性データなし")}</section>
     <section class="card"><h2>Transaction Cost Model</h2><p class="notice">ネットR評価のための分析専用モデルです。実売買・発注は行いません。</p>{transaction_cost_warning_html}<div class="grid">{transaction_cost_stats}</div></section>
     <section class="card"><h2>Audit Report</h2><p class="notice">統合状態確認用のシステム監査です。</p><div class="grid">{audit_report_stats}</div></section>
+    <section class="card"><h2>Narrative Lookahead Audit</h2><p class="notice">ニュース/AI要約への未来情報・評価結果の混入を検出する研究プロセス監査です。自動売買判断ではなく、weights.jsonも更新しません。</p>{'<div class="empty">Narrative Lookahead Audit未取得</div>' if not narrative_lookahead.get('available') else f'<div class="grid">{narrative_lookahead_stats}</div>'}<h3>warning / high_risk / blocked 詳細</h3>{table_html(narrative_lookahead_table[narrative_lookahead_table['lookahead_risk_level'].isin(['warning','high_risk','blocked'])] if (not narrative_lookahead_table.empty and 'lookahead_risk_level' in narrative_lookahead_table.columns) else narrative_lookahead_table, ["source_type","source_timing_class","lookahead_risk_level","lookahead_score","issue_type","detected_terms","recommended_action","text_excerpt"], "混入検出なし(または未取得)")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>

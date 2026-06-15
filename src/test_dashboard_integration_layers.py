@@ -131,3 +131,35 @@ def test_audit_report_summary_empty():
     s = bd.audit_report_summary("")
     assert s["available"] is False
     assert s["latest_audit_status"] == "unavailable"
+
+
+# === Narrative Lookahead Audit ===
+
+def test_narrative_lookahead_summary_from_json():
+    payload = {
+        "audit_status": "warning",
+        "total_checked": 10,
+        "passed_count": 7,
+        "warning_count": 2,
+        "high_risk_count": 1,
+        "blocked_count": 0,
+        "unavailable_count": 0,
+        "unknown_timing_count": 3,
+        "max_lookahead_score": 50,
+        "recommended_next_action": "時間軸の人間確認を推奨",
+        "requires_human_approval": True,
+        "weights_json_updated": False,
+        "generate_signal_updated": False,
+    }
+    s = bd.narrative_lookahead_summary(payload, pd.DataFrame())
+    assert s["available"] is True
+    assert s["audit_status"] == "warning"
+    assert s["high_risk_count"] == 1
+    assert s["weights_json_updated"] is False
+    assert s["generate_signal_updated"] is False
+
+
+def test_narrative_lookahead_summary_unavailable():
+    s = bd.narrative_lookahead_summary(None, pd.DataFrame())
+    assert s["available"] is False
+    assert s["audit_status"] == "unavailable"
