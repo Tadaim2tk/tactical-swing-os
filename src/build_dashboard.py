@@ -250,3 +250,7 @@ def build_dashboard() -> tuple[dict, str]:
 def main() -> int:
     build_dashboard()
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
