@@ -570,7 +570,10 @@ def render_html(
         [
             stat_card("cost_model_status", transaction_cost.get("cost_model_status", "unconfigured")),
             stat_card("configured_assets", transaction_cost.get("configured_asset_count", 0)),
+            stat_card("unsourced_nonzero", transaction_cost.get("unsourced_nonzero_count", 0)),
+            stat_card("missing_provenance", transaction_cost.get("missing_provenance_count", 0)),
             stat_card("default_source", transaction_cost.get("default_source", "unconfigured")),
+            stat_card("configured_sources", ", ".join(transaction_cost.get("configured_sources", []) or []) or "なし"),
             stat_card("net_r_available", str(transaction_cost.get("net_r_available", False)).lower()),
             stat_card("gross_r_available", str(transaction_cost.get("gross_r_available", False)).lower()),
             stat_card("cost_adjusted_rows", transaction_cost.get("cost_adjusted_rows", 0)),

@@ -64,3 +64,15 @@ r_result_net = r_result_gross - cost_r           (コストは常に減算)
 
 1. ユーザーがXMTradingの実測コストを `config/cost_model.json` に source 付きで記入。
 2. 月次較正・統計ゲートの判定を `r_result_net` ベースへ切り替えるかを別途決定。
+
+## 7. Phase 26 拡張: 証拠フレーム
+
+本仕様の上に、出典メタと機械的ガードを追加した。詳細は
+[transaction_cost_evidence.md](transaction_cost_evidence.md)。
+
+- 各アセットに `source_date` / `source_type`(measured|published_spec) / `responsibility` を追加。
+- **証拠主義の機械的強制**: `source` が未設定のコストは値が非ゼロでも net R に採用しない
+  (`cost_model.is_sourced` / `cost_in_price`)。出典のない数値が黙って評価へ混入しない。
+- `cost_model.validate_cost_model()` が未出典の非ゼロコスト/メタ欠落を列挙。
+- Dashboard が configured/unconfigured・source・unsourced_nonzero を表示。
+- コスト値そのものは AI が捏造せず、人間が出典付きで記入する。
