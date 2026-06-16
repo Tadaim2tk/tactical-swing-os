@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "spec": "JP-COST-001",
+    "broker": "マネックス証券 ワン株（単元未満株）",
+    "status": "unconfigured",
+    "source": "PLACEHOLDER — 実際の手数料はマネックス証券公式ページで確認し、source・source_date・source_type を記入するまで net R に採用しない（証拠主義）。",
+    "evidence_rule": "source が空/unconfigured のコストは、値が非ゼロでも計算に採用しない。",
+    "fee_url": "https://www.monex.co.jp/wankabu/ (要確認)",
+    "fields": {
+      "buy_rate": "買い手数料率（小数）e.g. 0.0055 = 0.55%",
+      "buy_min_fee": "買い最低手数料（円）",
+      "sell_rate": "売り手数料率（小数）",
+      "sell_min_fee": "売り最低手数料（円）",
+      "tax_rate": "消費税率（小数）e.g. 0.1 = 10%。手数料が税込みなら 0.0 を設定。",
+      "execution_lag_days": "注文→約定の営業日数ラグ（ワン株 = 1）",
+      "source": "出典。公式URL等。空/unconfigured は未出典。",
+      "source_date": "出典確認日（YYYY-MM-DD）。",
+      "source_type": "published_spec（公式仕様）| measured（実測）",
+      "responsibility": "更新責任者"
+    }
+  },
+  "monex_wankabu": {
+    "buy_rate": 0.0,
+    "buy_min_fee": 0.0,
+    "sell_rate": 0.0,
+    "sell_min_fee": 0.0,
+    "tax_rate": 0.0,
+    "execution_lag_days": 1,
+    "source": "unconfigured",
+    "source_date": "",
+    "source_type": "unconfigured",
+    "responsibility": ""
+  }
+}

@@ -86,3 +86,7 @@ results/adversarial_review.csv
 results/adversarial_review.json
 results/adversarial_review_summary.json
 reports/audit/*_adversarial_review.md
+results/jp_swing_evaluated.csv
+results/jp_swing_evaluated.json
+results/jp_swing_summary.json
+reports/jp_swing/*.md
