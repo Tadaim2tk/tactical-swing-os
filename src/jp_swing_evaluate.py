@@ -1,16 +1,30 @@
-"""JP One-Share Swing 評価エンジン (JP-EVAL-001)。
+"""JP One-Share Swing 評価エンジン (JP-EVAL-001 rev2)。
 
 約定済み仮説の評価を行う。
 
-設計上の制約:
-- horizon は 10/20/30 営業日（固定）
-- 1日ラグを考慮した「約定日 = 注文日 + 1営業日」を前提とする
-- outcome_type A〜F の自動推定は補助的なもの。thesis_correct / timing_correct / execution_degraded
-  は人間が記入する（機械的に決定できない）
-- yfinance で JP 株 OHLCV を取得する（ticker は '7203.T' 形式）
+─── 設計上の前提 ────────────────────────────────────────────────────
+・horizon は 10/20/30 営業日（fixed）
+・評価開始は actual_execution_date の翌日（>）。
+  理由: ワン株は寄付約定。約定日のバーは入場価格を含むため同日 SL/TP を
+  チェックすると「約定直後に即 SL 判定」という論理矛盾が起きる。
+  同日チェックを外すことで「約定後の値動き」のみを評価対象にする。
+  これは意図的な除外であり、ドキュメントとテストで明示する。
 
-False-confidence ルール（TSO 安全思想から継承）:
-  「データ不足 → 不明」。outcome が判定できない場合は open_unresolved。
+─── コスト計算の分離方針 ────────────────────────────────────────────
+net_pnl_jpy = gross_pnl - buy_fee - sell_fee
+  gross_pnl = (exit_price - actual_entry_price) × shares
+  actual_entry_price にはラグコストが既に埋め込まれている。
+
+execution_lag_cost_jpy = (actual_entry_price - expected_entry_price) × shares
+  【帰因(attribution)専用・signed value】
+  net_pnl には含めない（二重計上防止）。
+  正 → 想定より高く買わされた（ラグが不利に働いた）
+  負 → 想定より安く買えた（ラグが有利に働いた）
+
+─── 補助フラグ（人間入力） ──────────────────────────────────────────
+thesis_hit / timing_hit / execution_hurt / market_regime_hurt / lucky_flag
+は機械的に決定できない。評価エンジンは補助推定 _suggest_outcome() を
+提供するが、最終確定は人間が記入する（false-confidence ルール）。
 """
 
 from __future__ import annotations
@@ -76,12 +90,20 @@ def evaluate_signal(
 ) -> dict[str, Any]:
     """仮説台帳の1行を評価する。
 
+    フィールド名は JP_SIGNAL_COLUMNS（rev2）に準拠:
+      actual_execution_date  — 約定日（旧: actual_entry_date / order_date）
+      thesis_hit             — 仮説が正しかったか（旧: thesis_correct）
+      timing_hit             — タイミングが正しかったか（旧: timing_correct）
+      execution_hurt         — ラグ/費用で実質不利だったか（旧: execution_degraded）
+
     ohlcv が None のときは yfinance で自動取得を試みる。
     評価できない場合は status=open のまま返す。
     """
     ticker = str(row.get("ticker", ""))
-    entry_date_str = str(row.get("actual_entry_date", "") or row.get("order_date", ""))
+    # actual_execution_date が主キー（旧 actual_entry_date / order_date は参照しない）
+    exec_date_str = str(row.get("actual_execution_date", "") or "").strip()
     entry_price = _coerce(row.get("actual_entry_price"))
+    expected_price = _coerce(row.get("expected_entry_price"))
     sl_price = _coerce(row.get("sl_price"))
     tp1_price = _coerce(row.get("tp1_price"))
     tp2_price = _coerce(row.get("tp2_price"))
@@ -95,29 +117,29 @@ def evaluate_signal(
     if result["status"] == "closed":
         return result
 
-    if math.isnan(entry_price) or entry_price <= 0.0 or shares <= 0:
-        return result  # 未約定
+    if not exec_date_str or math.isnan(entry_price) or entry_price <= 0.0 or shares <= 0:
+        return result  # 未約定 or 必須項目欠落 → pending のまま
 
     result["status"] = "open"
 
     if ohlcv is None:
         try:
-            entry_dt = pd.Timestamp(entry_date_str)
+            exec_dt = pd.Timestamp(exec_date_str)
         except Exception:
             return result
-        end_dt = entry_dt + pd.offsets.BDay(horizon + 5)
-        ohlcv = fetch_ohlcv(ticker, start=str(entry_dt.date()), end=str(end_dt.date()))
+        end_dt = exec_dt + pd.offsets.BDay(horizon + 5)
+        ohlcv = fetch_ohlcv(ticker, start=str(exec_dt.date()), end=str(end_dt.date()))
 
     if ohlcv is None or ohlcv.empty:
         return result
 
-    # エントリー日以降の足
     try:
-        entry_dt = pd.Timestamp(entry_date_str)
+        exec_dt = pd.Timestamp(exec_date_str)
     except Exception:
         return result
 
-    future = ohlcv[ohlcv["date"] > entry_dt].head(horizon)
+    # 約定日の翌日から評価（設計上の除外: モジュール冒頭のコメント参照）
+    future = ohlcv[ohlcv["date"] > exec_dt].head(horizon)
     if future.empty:
         return result
 
@@ -127,9 +149,6 @@ def evaluate_signal(
     sl_hit = False
     tp1_hit = False
     tp2_hit = False
-    sl_hit_date = None
-    tp1_hit_date = None
-    tp2_hit_date = None
     exit_price_eval = entry_price
     exit_date_eval = None
 
@@ -140,33 +159,30 @@ def evaluate_signal(
 
         if not math.isnan(sl_price) and bar_low <= sl_price:
             sl_hit = True
-            sl_hit_date = bar_date
             exit_price_eval = sl_price
             exit_date_eval = bar_date
             break
 
         if not math.isnan(tp1_price) and bar_high >= tp1_price:
             tp1_hit = True
-            tp1_hit_date = bar_date
             if not exit_date_eval:
                 exit_price_eval = tp1_price
                 exit_date_eval = bar_date
 
         if not math.isnan(tp2_price) and bar_high >= tp2_price:
             tp2_hit = True
-            tp2_hit_date = bar_date
             exit_price_eval = tp2_price
             exit_date_eval = bar_date
             break
 
-    # 時間切れの場合は最終足の終値で仮評価
+    # horizon 満了 → 最終足の終値で評価
     time_exit = not sl_hit and not tp2_hit
     if time_exit and not exit_date_eval:
         last_bar = future.iloc[-1]
         exit_price_eval = float(last_bar["close"])
         exit_date_eval = last_bar["date"]
 
-    # PnL 計算
+    # PnL 計算 ─ net_pnl = gross_pnl - fees のみ（ラグコストは含まない）
     gross_pnl = (exit_price_eval - entry_price) * shares
     buy_fee = cost_lib.buy_commission(entry_price, shares, cfg)
     sell_fee = cost_lib.sell_commission(exit_price_eval, shares, cfg)
@@ -177,9 +193,13 @@ def evaluate_signal(
 
     holding_days = len(future[future["date"] <= exit_date_eval]) if exit_date_eval else len(future)
 
-    result["sl_price"] = sl_price
-    result["tp1_price"] = tp1_price
-    result["tp2_price"] = tp2_price if not math.isnan(tp2_price) else result["tp2_price"]
+    # execution_lag_cost_jpy ─ 帰因専用・net_pnl には含めない
+    lag_cost = (
+        cost_lib.execution_lag_cost_jpy(expected_price, entry_price, shares)
+        if not math.isnan(expected_price) and not math.isnan(entry_price)
+        else 0.0
+    )
+
     result["exit_date"] = str(exit_date_eval.date()) if exit_date_eval else result["exit_date"]
     result["exit_price"] = round(exit_price_eval, 2)
     result["exit_reason"] = (
@@ -191,6 +211,7 @@ def evaluate_signal(
     result["holding_days"] = holding_days
     result["buy_fee_jpy"] = round(buy_fee, 0)
     result["sell_fee_jpy"] = round(sell_fee, 0)
+    result["execution_lag_cost_jpy"] = round(lag_cost, 0)
     result["gross_pnl_jpy"] = round(gross_pnl, 0)
     result["net_pnl_jpy"] = round(net_pnl, 0)
     result["risk_jpy"] = round(risk_jpy, 0)
@@ -198,48 +219,52 @@ def evaluate_signal(
     result["net_r"] = round(n_r, 3)
     result["status"] = "closed" if (sl_hit or tp2_hit or time_exit) else "open"
 
-    # outcome_type の補助推定（thesis_correct等の人間入力が優先）
     result["outcome_type"] = _suggest_outcome(result, row)
 
-    # execution_degraded の自動チェック
-    if not result.get("execution_degraded"):
+    # execution_hurt 自動フラグ（人間未記入の場合のみ）
+    raw_hurt = str(row.get("execution_hurt", "")).strip().lower()
+    if raw_hurt not in {"true", "false", "1", "0", "yes", "no"}:
         effective_rate = cost_lib.effective_fee_rate(entry_price, shares, cfg)
-        result["execution_degraded"] = bool(effective_rate > 0.02)  # コスト率 2%超で自動フラグ
+        result["execution_hurt"] = bool(
+            effective_rate > 0.02 or abs(lag_cost) / (entry_price * shares) > 0.01
+        )
 
     return result
 
 
 def _suggest_outcome(result: dict[str, Any], original_row: dict[str, Any]) -> str:
-    """outcome_type を補助推定する。確定は人間の判断が優先。
+    """outcome_type を補助推定する（確定は人間の記入が優先）。
 
-    thesis_correct / timing_correct が記入済みの場合はそれを優先する。
+    読む人間フラグ名（rev2）:
+      thesis_hit / timing_hit / execution_hurt / lucky_flag
     """
-    # 人間が既に記入していれば維持
     existing = str(original_row.get("outcome_type", "")).strip()
     if existing and existing in ledger.OUTCOME_TYPES:
         return existing
 
-    thesis_correct = str(original_row.get("thesis_correct", "")).strip().lower()
-    timing_correct = str(original_row.get("timing_correct", "")).strip().lower()
-    execution_degraded = str(result.get("execution_degraded", "")).strip().lower()
+    def _bool(key: str) -> str:
+        return str(original_row.get(key, "")).strip().lower()
+
+    thesis_hit = _bool("thesis_hit")
+    timing_hit = _bool("timing_hit")
+    execution_hurt = _bool("execution_hurt")
     exit_reason = str(result.get("exit_reason", ""))
-    net_r = _coerce(result.get("net_r", float("nan")))
+    net_r_val = _coerce(result.get("net_r", float("nan")))
 
-    win = exit_reason in {"tp1_hit", "tp2_hit"} or (not math.isnan(net_r) and net_r > 0.0)
-    loss = exit_reason == "sl_hit" or (not math.isnan(net_r) and net_r < 0.0)
+    win = exit_reason in {"tp1_hit", "tp2_hit"} or (not math.isnan(net_r_val) and net_r_val > 0.0)
+    loss = exit_reason == "sl_hit" or (not math.isnan(net_r_val) and net_r_val < 0.0)
 
-    if execution_degraded in {"true", "1", "yes"} and loss:
+    if execution_hurt in {"true", "1", "yes"} and loss:
         return "C"
-    if thesis_correct == "true" and timing_correct == "true" and win:
+    if thesis_hit == "true" and timing_hit == "true" and win:
         return "A"
-    if thesis_correct == "true" and timing_correct == "false":
+    if thesis_hit == "true" and timing_hit == "false":
         return "B"
-    if thesis_correct == "false" and win:
+    if thesis_hit == "false" and win:
         return "F"
-    if thesis_correct == "false" and loss:
+    if thesis_hit == "false" and loss:
         return "D"
-    # 判定不能 → open_unresolved（false-confidence ルール）
-    return ""
+    return ""  # false-confidence: 判定不能は強制しない
 
 
 # ── 集計 ─────────────────────────────────────────────────────────
@@ -249,12 +274,11 @@ def summarize(df: pd.DataFrame) -> dict[str, Any]:
     closed = df[df["status"] == "closed"].copy()
     total = len(df)
     n_closed = len(closed)
-    n_open = len(df[df["status"] == "open"])
 
     summary: dict[str, Any] = {
         "total_hypotheses": total,
         "closed": n_closed,
-        "open": n_open,
+        "open": len(df[df["status"] == "open"]),
         "pending": len(df[df["status"] == "pending"]),
     }
 
@@ -268,14 +292,13 @@ def summarize(df: pd.DataFrame) -> dict[str, Any]:
     net_rs = safe_float_col("net_r")
     gross_rs = safe_float_col("gross_r")
     wins = (net_rs > 0).sum()
-    losses = (net_rs < 0).sum()
 
     summary["win_rate"] = round(wins / n_closed, 3) if n_closed > 0 else None
     summary["avg_net_r"] = round(float(net_rs.mean()), 3) if not net_rs.isna().all() else None
     summary["avg_gross_r"] = round(float(gross_rs.mean()), 3) if not gross_rs.isna().all() else None
     summary["total_net_pnl_jpy"] = int(safe_float_col("net_pnl_jpy").sum())
+    summary["total_lag_cost_jpy"] = int(safe_float_col("execution_lag_cost_jpy").sum())
 
-    # outcome 分布
     outcome_counts: dict[str, int] = {k: 0 for k in ledger.OUTCOME_TYPES}
     for ot in closed["outcome_type"].dropna():
         ot_str = str(ot).strip()
@@ -283,7 +306,6 @@ def summarize(df: pd.DataFrame) -> dict[str, Any]:
             outcome_counts[ot_str] += 1
     summary["outcome_distribution"] = outcome_counts
 
-    # calibration: confidence_pct が記入済みの closed 行のみ
     conf_col = safe_float_col("confidence_pct")
     valid = closed[conf_col.notna() & net_rs.notna()].copy()
     if len(valid) >= 5:
