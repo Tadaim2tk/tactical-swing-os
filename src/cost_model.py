@@ -177,7 +177,7 @@ def validate_cost_model(model: dict[str, Any] | None = None, today: Any = None) 
     - invalid_source_type: sourced だが source_type が measured/published_spec でない (Phase 26.1)
     - missing_responsibility: 出典はあるが更新責任者が無い
 
-    today: 未来日付判定の基準日(YYYY-MM-DD)。None なら実行日(date.today())。
+    today: 未来日付判定の基準日(YYYY-MM-DD)。None または不正なら UTC基準の今日(_today_utc)。
     """
     model = model or load_cost_model()
     # today 未指定/不正なら UTC の今日へフォールバック(future チェックを黙って無効化しない)
