@@ -307,3 +307,54 @@ def test_run_checklist_separates_severity():
     r = adv.run_checklist(answers)
     assert len(r["critical_fails"]) == 1
     assert all(i["id"] != critical[0].id for i in r["high_fails"])
+
+
+# ── 検証CLI (Phase 27.1): 読み取り専用・ネットワーク無し ─────────
+
+def test_cli_clean_data_exits_zero(tmp_path, capsys):
+    """有効な仮説1件 + 空のpass_log → 検証OK・exit 0。"""
+    sig = tmp_path / "sig.csv"
+    pl = tmp_path / "pl.csv"
+    row = _minimal_signal()
+    pd.DataFrame([row], columns=ledger.JP_SIGNAL_COLUMNS).to_csv(sig, index=False)
+    pd.DataFrame(columns=ledger.JP_PASS_LOG_COLUMNS).to_csv(pl, index=False)
+    rc = ledger.main(["--signals", str(sig), "--pass-log", str(pl)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "OK" in out
+    assert "読み取り専用" in out  # 安全注意が出る
+
+
+def test_cli_invalid_data_exits_one(tmp_path, capsys):
+    """falsifier 未記入 → 検出されて exit 1。"""
+    sig = tmp_path / "sig.csv"
+    pl = tmp_path / "pl.csv"
+    row = _minimal_signal()
+    row["falsifier"] = ""  # 必須が空
+    pd.DataFrame([row], columns=ledger.JP_SIGNAL_COLUMNS).to_csv(sig, index=False)
+    pd.DataFrame(columns=ledger.JP_PASS_LOG_COLUMNS).to_csv(pl, index=False)
+    rc = ledger.main(["--signals", str(sig), "--pass-log", str(pl)])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "falsifier" in out
+
+
+def test_cli_does_not_modify_input_files(tmp_path):
+    """CLIは読み取り専用 — 入力CSVのバイト列が前後で一致すること。"""
+    sig = tmp_path / "sig.csv"
+    pl = tmp_path / "pl.csv"
+    pd.DataFrame([_minimal_signal()], columns=ledger.JP_SIGNAL_COLUMNS).to_csv(sig, index=False)
+    pd.DataFrame(columns=ledger.JP_PASS_LOG_COLUMNS).to_csv(pl, index=False)
+    before_sig = sig.read_bytes(); before_pl = pl.read_bytes()
+    ledger.main(["--signals", str(sig), "--pass-log", str(pl)])
+    assert sig.read_bytes() == before_sig
+    assert pl.read_bytes() == before_pl
+
+
+def test_cli_empty_files_exit_zero(tmp_path):
+    """ヘッダーのみ(出荷seedと同じ状態) → exit 0。"""
+    sig = tmp_path / "sig.csv"
+    pl = tmp_path / "pl.csv"
+    pd.DataFrame(columns=ledger.JP_SIGNAL_COLUMNS).to_csv(sig, index=False)
+    pd.DataFrame(columns=ledger.JP_PASS_LOG_COLUMNS).to_csv(pl, index=False)
+    assert ledger.main(["--signals", str(sig), "--pass-log", str(pl)]) == 0

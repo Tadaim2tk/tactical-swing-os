@@ -263,6 +263,12 @@ def validate_pass_row(row: dict[str, Any]) -> list[str]:
 
 # ── I/O ──────────────────────────────────────────────────────────
 
+def _normalize_str_df(df: pd.DataFrame) -> pd.DataFrame:
+    """dtype=str で読み込んだ DataFrame の欠損("nan"文字列含む)を空文字へ正規化する。
+    enum バリデータが "nan" を不明値として誤検出するのを防ぐ。"""
+    return df.fillna("").replace({"nan": ""})
+
+
 def load_signals(path: Path = SIGNALS_PATH) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame(columns=JP_SIGNAL_COLUMNS)
@@ -270,6 +276,7 @@ def load_signals(path: Path = SIGNALS_PATH) -> pd.DataFrame:
         df = pd.read_csv(path, dtype=str)
     except (pd.errors.EmptyDataError, OSError):
         return pd.DataFrame(columns=JP_SIGNAL_COLUMNS)
+    df = _normalize_str_df(df)
     for col in JP_SIGNAL_COLUMNS:
         if col not in df.columns:
             df[col] = ""
@@ -283,6 +290,7 @@ def load_pass_log(path: Path = PASS_LOG_PATH) -> pd.DataFrame:
         df = pd.read_csv(path, dtype=str)
     except (pd.errors.EmptyDataError, OSError):
         return pd.DataFrame(columns=JP_PASS_LOG_COLUMNS)
+    df = _normalize_str_df(df)
     for col in JP_PASS_LOG_COLUMNS:
         if col not in df.columns:
             df[col] = ""
@@ -315,3 +323,47 @@ def validate_pass_log_df(df: pd.DataFrame) -> list[dict[str, Any]]:
         if errors:
             all_issues.append({"row_index": i, "pass_id": row.get("pass_id", ""), "errors": errors})
     return all_issues
+
+
+# === 検証CLI (Phase 27.1) =============================================
+# ネットワーク無し・読み取り専用。data/jp_swing_*.csv の入力ミスを検出するためのみ。
+# 実売買・発注・broker操作は一切しない。
+
+def _format_issues(issues: list[dict[str, Any]], label: str) -> str:
+    if not issues:
+        return f"[{label}] OK — 0 件の問題"
+    lines = [f"[{label}] {len(issues)} 行に問題があります:"]
+    for issue in issues:
+        idx = issue.get("row_index", "?")
+        hid = issue.get("hypothesis_id") or issue.get("pass_id") or ""
+        lines.append(f"  row {idx} {hid}")
+        for err in issue.get("errors", []):
+            lines.append(f"    - {err}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """JP Swing Ledger の検証CLI(読み取り専用)。"""
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="JP Swing Ledger validator (read-only, no network, no orders)."
+    )
+    parser.add_argument("--signals", type=Path, default=SIGNALS_PATH, help="仮説台帳のCSV")
+    parser.add_argument("--pass-log", type=Path, default=PASS_LOG_PATH, help="見送りログのCSV")
+    args = parser.parse_args(argv)
+
+    sig_df = load_signals(args.signals)
+    pass_df = load_pass_log(args.pass_log)
+    sig_issues = validate_signals_df(sig_df) if not sig_df.empty else []
+    pass_issues = validate_pass_log_df(pass_df) if not pass_df.empty else []
+
+    print(f"Signals:  {len(sig_df)} rows loaded from {args.signals}")
+    print(f"Pass log: {len(pass_df)} rows loaded from {args.pass_log}")
+    print(_format_issues(sig_issues, "signals"))
+    print(_format_issues(pass_issues, "pass_log"))
+    print("\n安全注意: この検証は読み取り専用です。実売買・発注・broker操作は一切行いません。")
+    return 1 if (sig_issues or pass_issues) else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
