@@ -491,6 +491,7 @@ def render_html(
     narrative_lookahead_table: pd.DataFrame,
     adversarial_review: dict,
     adversarial_review_table: pd.DataFrame,
+    data_health: dict,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -615,6 +616,21 @@ def render_html(
             stat_card("requires_human_approval", str(adversarial_review.get("requires_human_approval", True)).lower()),
         ]
     )
+    data_health_stats = "".join(
+        [
+            stat_card("health_status", data_health.get("health_status", "unavailable")),
+            stat_card("total_layers", data_health.get("total_layers", 0)),
+            stat_card("fresh", data_health.get("fresh_count", 0)),
+            stat_card("stale", data_health.get("stale_count", 0)),
+            stat_card("empty", data_health.get("empty_count", 0)),
+            stat_card("missing", data_health.get("missing_count", 0)),
+            stat_card("unavailable", data_health.get("unavailable_count", 0)),
+            stat_card("unknown_age", data_health.get("unknown_age_count", 0)),
+            stat_card("worst_layer", data_health.get("worst_layer", "") or "なし"),
+            stat_card("attention_layers", ", ".join(data_health.get("attention_layers", []) or []) or "なし"),
+        ]
+    )
+    data_health_table = pd.DataFrame(data_health.get("layers", []) or [])
     eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
     signal_stats = "".join(stat_card(k, v) for k, v in signal_counts.items())
     mode_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else display_optional(str(v))) for k, v in mode.items())
@@ -884,6 +900,7 @@ def render_html(
     <main>
     <section class="card"><h2>システム状態</h2><div class="grid">{system_stats}</div></section>
     <section class="card"><h2>System Health</h2>{'<div class="empty">Datetime Audit未取得</div>' if not datetime_health.get('available') else f'<div class="grid">{datetime_stats}</div>'}</section>
+    <section class="card"><h2>Data Health / Freshness</h2><p class="notice">各分析レイヤーの最終生成時刻・行数・鮮度を一覧化します。古い(stale)・空(empty)・欠損(missing)・unavailableなデータを正常と誤読しないためのガードです。表示専用でweights.jsonは更新しません。</p>{'<div class="empty">Data Health未取得</div>' if not data_health.get('available') else f'<div class="grid">{data_health_stats}</div>'}<h3>レイヤー別 鮮度</h3>{table_html(data_health_table, ["layer","status","last_generated","age_hours","row_count","threshold_hours","cadence"], "レイヤー情報なし")}</section>
     <section class="card"><h2>本日のシグナル概要</h2><div class="grid">{signal_stats}</div>{table_html(signals, ["asset","side","rank","type","recommended_action","signal_strength","setup_quality_score","entry_quality_score","direction_confidence","reason_codes","no_trade_reason"])}</section>
     <section class="card"><h2>評価概要</h2><div class="grid">{eval_stats}</div></section>
     <section class="card"><h2>資産別成績</h2>{table_html(asset_table, ["asset","signals","evaluations","win_rate","total_r","average_r","missed_opportunity_count"])}</section>

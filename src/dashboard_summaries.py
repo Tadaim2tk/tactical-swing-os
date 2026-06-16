@@ -13,6 +13,184 @@ from dashboard_io import *  # noqa: F401,F403 - 低レベルヘルパーの再�
 from dashboard_io import latest_date, latest_file_date, normalize_headers, numeric_or
 
 
+# === Data Health / Freshness (古い・空のデータを正常と誤読しないためのガード) ===
+# 各レイヤーの想定更新間隔(時間)。これを超えたら stale とみなす。
+# daily=36h, weekly≈8.5日=204h, monthly≈35日=840h。
+LAYER_HEALTH_REGISTRY = [
+    {"label": "signals", "ts": ("date", "latest_signal_date"), "rows": "signals", "threshold_hours": 36, "cadence": "daily"},
+    {"label": "evaluations", "ts": ("date", "latest_evaluation_date"), "rows": "evaluations", "threshold_hours": 48, "cadence": "daily"},
+    {"label": "latest_evaluations", "ts": ("json", "latest_evaluations_summary_json", "generated_at_utc"), "rows": "latest_evaluations", "threshold_hours": 36, "cadence": "daily"},
+    {"label": "weekly_review", "ts": ("date", "latest_weekly_review_date"), "rows": "weekly_review", "threshold_hours": 204, "cadence": "weekly"},
+    {"label": "monthly_calibration", "ts": ("date", "latest_monthly_calibration_date"), "rows": "monthly_calibration", "threshold_hours": 840, "cadence": "monthly"},
+    {"label": "prediction_calibration", "ts": ("json", "prediction_calibration_json", "generated_at_utc"), "rows": "prediction_calibration", "threshold_hours": 36, "cadence": "daily"},
+    {"label": "narrative_reliability", "ts": ("json", "narrative_reliability_json", "generated_at_utc"), "rows": "narrative_reliability", "threshold_hours": 36, "cadence": "daily"},
+    {"label": "narrative_lookahead_audit", "ts": ("json", "narrative_lookahead_audit_summary_json", "generated_at_utc"), "rows": "narrative_lookahead_audit", "threshold_hours": 36, "cadence": "daily"},
+    {"label": "adversarial_review", "ts": ("json", "adversarial_review_summary_json", "generated_at_utc"), "rows": "adversarial_review", "threshold_hours": 36, "cadence": "daily", "allow_empty": True},
+    {"label": "news_narrative", "ts": ("json", "news_narrative_scores_json", "generated_at_utc"), "rows": "news_narrative_scores", "threshold_hours": 36, "cadence": "daily"},
+    {"label": "ai_feedback", "ts": ("json", "ai_feedback_json", "generated_at_utc"), "rows": "ai_feedback", "threshold_hours": 36, "cadence": "daily"},
+    {"label": "portfolio_layer", "ts": ("json", "portfolio_layer_summary_json", "generated_at_utc"), "rows": "portfolio_layer", "threshold_hours": 204, "cadence": "weekly"},
+    {"label": "datetime_audit", "ts": ("json", "datetime_audit_summary_json", "generated_at_utc"), "rows": "datetime_audit", "threshold_hours": 36, "cadence": "daily"},
+    {"label": "model_state_proposals", "ts": ("json", "model_state_update_summary_json", "generated_at_jst"), "rows": "model_state_update_proposals", "threshold_hours": 36, "cadence": "daily"},
+]
+
+# 健全性の重大度(高いほど悪い)
+_HEALTH_RANK = {"fresh": 0, "unknown_age": 1, "empty": 2, "stale": 3, "unavailable": 4, "missing": 5}
+
+
+def parse_generated_at(value):
+    """'YYYY-MM-DD HH:MM:SS UTC' / '... JST' / 'YYYY-MM-DD' を naive(UTC) Timestamp へ。"""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    s = str(value).strip()
+    if not s:
+        return None
+    is_jst = s.endswith("JST")
+    s2 = s.replace(" UTC", "").replace(" JST", "").strip()
+    ts = pd.to_datetime(s2, errors="coerce")
+    if pd.isna(ts):
+        return None
+    ts = pd.Timestamp(ts)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    if is_jst:
+        ts = ts - pd.Timedelta(hours=9)  # JST -> UTC
+    return ts
+
+
+def _now_naive_utc(now):
+    ts = pd.Timestamp(now)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts
+
+
+def assess_layer(label, ts_value, row_count, now, threshold_hours, unavailable=False, cadence="", allow_empty=False) -> dict:
+    """1レイヤーの鮮度・有無を判定する純粋関数。
+
+    status: fresh / stale / empty / missing / unavailable / unknown_age
+
+    allow_empty=True のレイヤー(監査系: 0件=「異常なし」が正常)では、
+    生成時刻があれば row_count=0 でも empty にせず鮮度で判定する。
+    """
+    ts = parse_generated_at(ts_value)
+    now_ts = _now_naive_utc(now)
+    raw_age = None
+    age_hours = None
+    if ts is not None:
+        raw_age = (now_ts - ts).total_seconds() / 3600.0
+        age_hours = round(raw_age, 1)  # 表示用のみ。判定は raw_age で行う(丸めによる false-fresh 防止)
+
+    if unavailable:
+        status = "unavailable"
+    elif ts is None and row_count <= 0:
+        status = "missing"
+    elif row_count <= 0 and not allow_empty:
+        status = "empty"
+    elif ts is None:
+        status = "unknown_age"
+    elif raw_age is not None and raw_age > threshold_hours:
+        status = "stale"
+    else:
+        status = "fresh"
+
+    return {
+        "layer": label,
+        "status": status,
+        "last_generated": ts.strftime("%Y-%m-%d %H:%M") if ts is not None else "",
+        "age_hours": age_hours if age_hours is not None else "",
+        "row_count": int(row_count),
+        "threshold_hours": threshold_hours,
+        "cadence": cadence,
+    }
+
+
+def _resolve_ts(spec, extras, latest_dates):
+    kind = spec[0]
+    if kind == "date":
+        return (latest_dates or {}).get(spec[1], "")
+    if kind == "json":
+        payload = (extras or {}).get(spec[1])
+        if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+            payload = payload[0]
+        if isinstance(payload, dict):
+            return payload.get(spec[2]) or payload.get("generated_at_jst")
+    return None
+
+
+def _layer_unavailable(label, extras) -> bool:
+    """summaryが明示的に unavailable を示す場合に True。"""
+    checks = {
+        "narrative_reliability": ("narrative_reliability_json", "narrative_reliability_status"),
+        "prediction_calibration": ("prediction_calibration_json", "calibration_status"),
+        "narrative_lookahead_audit": ("narrative_lookahead_audit_summary_json", "audit_status"),
+        "adversarial_review": ("adversarial_review_summary_json", "review_status"),
+    }
+    if label not in checks:
+        return False
+    key, field = checks[label]
+    payload = (extras or {}).get(key)
+    if isinstance(payload, dict):
+        return str(payload.get(field, "")).strip().lower() == "unavailable"
+    return False
+
+
+def data_health_summary(extras, row_counts, latest_dates, now) -> dict:
+    """全レイヤーの鮮度・有無を一覧化する (Phase 24)。
+
+    「古い/空のデータを正常と誤読しない」ためのDashboard freshness guard。
+    分析・表示専用であり、weights.json等は一切変更しない。
+    """
+    layers = []
+    for spec in LAYER_HEALTH_REGISTRY:
+        ts_value = _resolve_ts(spec["ts"], extras, latest_dates)
+        row_count = int((row_counts or {}).get(spec["rows"], 0)) if spec.get("rows") else 0
+        unavailable = _layer_unavailable(spec["label"], extras)
+        layers.append(assess_layer(
+            spec["label"], ts_value, row_count, now, spec["threshold_hours"],
+            unavailable=unavailable, cadence=spec.get("cadence", ""), allow_empty=spec.get("allow_empty", False),
+        ))
+
+    counts = {k: 0 for k in _HEALTH_RANK}
+    for layer in layers:
+        counts[layer["status"]] = counts.get(layer["status"], 0) + 1
+
+    if counts["missing"] > 0 or counts["unavailable"] > 0:
+        health_status = "critical"
+    elif counts["stale"] > 0 or counts["empty"] > 0:
+        health_status = "degraded"
+    elif counts["unknown_age"] > 0:
+        health_status = "watch"
+    else:
+        health_status = "healthy"
+
+    worst = max(layers, key=lambda x: _HEALTH_RANK.get(x["status"], 0)) if layers else None
+    attention = [l for l in layers if l["status"] in ("stale", "empty", "missing", "unavailable")]
+
+    return {
+        "available": True,
+        "health_status": health_status,
+        "total_layers": len(layers),
+        "fresh_count": counts["fresh"],
+        "stale_count": counts["stale"],
+        "empty_count": counts["empty"],
+        "missing_count": counts["missing"],
+        "unavailable_count": counts["unavailable"],
+        "unknown_age_count": counts["unknown_age"],
+        "worst_layer": worst["layer"] if worst else "",
+        "worst_status": worst["status"] if worst else "",
+        "attention_layers": [l["layer"] for l in attention],
+        "layers": layers,
+        "requires_human_approval": True,
+        "weights_json_updated": False,
+        "generate_signal_updated": False,
+    }
+
+
 def latest_signals(signals: pd.DataFrame) -> pd.DataFrame:
     date_col = "date" if "date" in signals.columns else "signal_date" if "signal_date" in signals.columns else ""
     if signals.empty or not date_col:

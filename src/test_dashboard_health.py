@@ -1,0 +1,245 @@
+"""Data Health / Freshness (Phase 24) の単体テスト。
+
+古い/空/欠損/unavailable なデータを正常と誤読しないことを検証する。
+表示専用であり weights.json 等は変更しないことも確認する。
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).parent))
+import dashboard_summaries as ds
+
+NOW = pd.Timestamp("2026-06-16 00:00:00")
+
+
+# === parse_generated_at ===
+
+def test_parse_utc_and_jst_and_dateonly():
+    assert ds.parse_generated_at("2026-06-15 23:00:00 UTC") == pd.Timestamp("2026-06-15 23:00:00")
+    # JST 08:00 == UTC 23:00 前日
+    assert ds.parse_generated_at("2026-06-16 08:00:00 JST") == pd.Timestamp("2026-06-15 23:00:00")
+    assert ds.parse_generated_at("2026-06-15") == pd.Timestamp("2026-06-15 00:00:00")
+
+
+def test_parse_bad_values():
+    assert ds.parse_generated_at(None) is None
+    assert ds.parse_generated_at("") is None
+    assert ds.parse_generated_at("not a date") is None
+    assert ds.parse_generated_at(float("nan")) is None
+
+
+# === assess_layer ステータス ===
+
+def test_fresh_when_recent_with_rows():
+    r = ds.assess_layer("x", "2026-06-15 20:00:00 UTC", 5, NOW, threshold_hours=36)
+    assert r["status"] == "fresh"
+    assert r["row_count"] == 5
+    assert r["age_hours"] == 4.0
+
+
+def test_stale_when_older_than_threshold():
+    r = ds.assess_layer("x", "2026-06-10 00:00:00 UTC", 5, NOW, threshold_hours=36)
+    assert r["status"] == "stale"
+    assert r["age_hours"] > 36
+
+
+def test_missing_when_no_ts_no_rows():
+    assert ds.assess_layer("x", None, 0, NOW, 36)["status"] == "missing"
+    assert ds.assess_layer("x", "", 0, NOW, 36)["status"] == "missing"
+
+
+def test_empty_when_rows_zero_but_ts_present():
+    assert ds.assess_layer("x", "2026-06-15 20:00:00 UTC", 0, NOW, 36)["status"] == "empty"
+
+
+def test_allow_empty_layer_is_fresh_with_zero_rows():
+    # 監査系(0件=異常なし)は row=0でも生成時刻が新しければ fresh
+    r = ds.assess_layer("adv", "2026-06-15 20:00:00 UTC", 0, NOW, 36, allow_empty=True)
+    assert r["status"] == "fresh"
+
+
+def test_unavailable_overrides():
+    r = ds.assess_layer("x", "2026-06-15 20:00:00 UTC", 5, NOW, 36, unavailable=True)
+    assert r["status"] == "unavailable"
+
+
+def test_unknown_age_when_rows_but_no_ts():
+    r = ds.assess_layer("x", None, 5, NOW, 36)
+    assert r["status"] == "unknown_age"
+
+
+# === data_health_summary 集計 ===
+
+def _extras_with(adv_status="passed", narr_status="passed"):
+    return {
+        "latest_evaluations_summary_json": {"generated_at_utc": "2026-06-15 20:00:00 UTC"},
+        "prediction_calibration_json": {"generated_at_utc": "2026-06-15 20:00:00 UTC", "calibration_status": "tracking"},
+        "narrative_reliability_json": {"generated_at_utc": "2026-06-15 20:00:00 UTC", "narrative_reliability_status": narr_status},
+        "narrative_lookahead_audit_summary_json": {"generated_at_utc": "2026-06-15 20:00:00 UTC", "audit_status": "passed"},
+        "adversarial_review_summary_json": {"generated_at_utc": "2026-06-15 20:00:00 UTC", "review_status": adv_status},
+        "news_narrative_scores_json": {"generated_at_utc": "2026-06-15 20:00:00 UTC"},
+        "ai_feedback_json": [{"generated_at_utc": "2026-06-15 20:00:00 UTC"}],
+        "portfolio_layer_summary_json": {"generated_at_utc": "2026-06-15 20:00:00 UTC"},
+        "datetime_audit_summary_json": {"generated_at_utc": "2026-06-15 20:00:00 UTC"},
+        "model_state_update_summary_json": {"generated_at_jst": "2026-06-16 05:00:00 JST"},
+    }
+
+
+def _row_counts_all(n=3):
+    return {k: n for k in [
+        "signals", "evaluations", "latest_evaluations", "weekly_review", "monthly_calibration",
+        "prediction_calibration", "narrative_reliability", "narrative_lookahead_audit", "adversarial_review",
+        "news_narrative_scores", "ai_feedback", "portfolio_layer", "datetime_audit", "model_state_update_proposals",
+    ]}
+
+
+def _latest_dates_fresh():
+    return {
+        "latest_signal_date": "2026-06-15", "latest_evaluation_date": "2026-06-15",
+        "latest_weekly_review_date": "2026-06-15", "latest_monthly_calibration_date": "2026-06-15",
+    }
+
+
+def test_health_summary_healthy_when_all_fresh():
+    h = ds.data_health_summary(_extras_with(), _row_counts_all(3), _latest_dates_fresh(), NOW)
+    assert h["available"] is True
+    assert h["health_status"] == "healthy"
+    assert h["stale_count"] == 0 and h["missing_count"] == 0 and h["empty_count"] == 0
+    assert h["attention_layers"] == []
+
+
+def test_health_summary_critical_when_core_missing():
+    # signals/evaluations が欠損 -> critical
+    rc = _row_counts_all(3)
+    rc["signals"] = 0
+    rc["evaluations"] = 0
+    ld = _latest_dates_fresh()
+    ld["latest_signal_date"] = ""
+    ld["latest_evaluation_date"] = ""
+    h = ds.data_health_summary(_extras_with(), rc, ld, NOW)
+    assert h["health_status"] == "critical"
+    assert "signals" in h["attention_layers"] and "evaluations" in h["attention_layers"]
+
+
+def test_health_summary_degraded_when_stale():
+    extras = _extras_with()
+    extras["portfolio_layer_summary_json"] = {"generated_at_utc": "2026-05-01 00:00:00 UTC"}  # 古い
+    h = ds.data_health_summary(extras, _row_counts_all(3), _latest_dates_fresh(), NOW)
+    assert h["health_status"] in ("degraded", "critical")
+    assert "portfolio_layer" in h["attention_layers"]
+
+
+def test_health_summary_unavailable_layer_flagged():
+    h = ds.data_health_summary(_extras_with(narr_status="unavailable"), _row_counts_all(3), _latest_dates_fresh(), NOW)
+    assert h["unavailable_count"] >= 1
+    assert "narrative_reliability" in h["attention_layers"]
+
+
+def test_adversarial_review_zero_rows_not_empty():
+    rc = _row_counts_all(3)
+    rc["adversarial_review"] = 0  # 0件=正常
+    h = ds.data_health_summary(_extras_with(), rc, _latest_dates_fresh(), NOW)
+    adv = [l for l in h["layers"] if l["layer"] == "adversarial_review"][0]
+    assert adv["status"] == "fresh"
+
+
+# === safety flags 固定 ===
+
+def test_safety_flags_fixed():
+    h = ds.data_health_summary(_extras_with(), _row_counts_all(3), _latest_dates_fresh(), NOW)
+    assert h["requires_human_approval"] is True
+    assert h["weights_json_updated"] is False
+    assert h["generate_signal_updated"] is False
+
+
+# === 空入力で落ちない ===
+
+def test_empty_inputs_do_not_crash():
+    h = ds.data_health_summary({}, {}, {}, NOW)
+    assert h["available"] is True
+    assert h["total_layers"] == len(ds.LAYER_HEALTH_REGISTRY)
+    # 全レイヤー missing 相当 -> critical
+    assert h["health_status"] == "critical"
+
+
+# === セルフ監査で指摘されたギャップの追補 ===
+
+def test_stale_boundary_minutes_past_is_stale_not_fresh():
+    # 丸めバグ回帰防止: しきい値を数分超えたら fresh ではなく stale
+    # ts = now - 36h - 90s -> raw_age 36.025h > 36 -> stale (旧実装は round で 36.0 になり fresh だった)
+    ts = (NOW - pd.Timedelta(hours=36, seconds=90)).strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+    assert ds.assess_layer("x", ts, 5, NOW, threshold_hours=36)["status"] == "stale"
+
+
+def test_stale_boundary_exactly_threshold_is_fresh():
+    # ちょうど閾値(age==36)は strict '>' なので fresh
+    ts = (NOW - pd.Timedelta(hours=36)).strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+    assert ds.assess_layer("x", ts, 5, NOW, threshold_hours=36)["status"] == "fresh"
+
+
+def test_future_timestamp_is_fresh_negative_age():
+    ts = (NOW + pd.Timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+    r = ds.assess_layer("x", ts, 5, NOW, threshold_hours=36)
+    assert r["status"] == "fresh"
+    assert r["age_hours"] < 0
+
+
+def test_health_summary_watch_when_only_unknown_age():
+    # 行はあるが全レイヤーの生成時刻が取れない -> watch
+    rc = _row_counts_all(3)
+    ld = {k: "" for k in ["latest_signal_date", "latest_evaluation_date", "latest_weekly_review_date", "latest_monthly_calibration_date"]}
+    h = ds.data_health_summary({}, rc, ld, NOW)
+    assert h["health_status"] == "watch"
+    assert h["unknown_age_count"] > 0
+    assert h["missing_count"] == 0 and h["stale_count"] == 0
+
+
+def test_rollup_precedence_unavailable_beats_stale_and_worst_layer():
+    extras = _extras_with(narr_status="unavailable")
+    extras["portfolio_layer_summary_json"] = {"generated_at_utc": "2026-05-01 00:00:00 UTC"}  # stale
+    h = ds.data_health_summary(extras, _row_counts_all(3), _latest_dates_fresh(), NOW)
+    assert h["health_status"] == "critical"          # unavailable が stale より優先
+    assert h["worst_status"] == "unavailable"        # _HEALTH_RANK 最大
+    assert h["worst_layer"] == "narrative_reliability"
+
+
+def test_resolve_ts_jst_fallback_for_utc_spec():
+    # _utc キーが無く generated_at_jst だけのレイヤー(model_state)が fresh になる
+    extras = _extras_with()
+    extras["model_state_update_summary_json"] = {"generated_at_jst": "2026-06-16 05:00:00 JST"}
+    h = ds.data_health_summary(extras, _row_counts_all(3), _latest_dates_fresh(), NOW)
+    ms = [l for l in h["layers"] if l["layer"] == "model_state_proposals"][0]
+    assert ms["status"] == "fresh"
+    assert ms["last_generated"]
+
+
+def test_parse_jst_dateonly_and_tz_offset():
+    # JST日付のみは -9h、tz-aware offset も正規化される
+    assert ds.parse_generated_at("2026-06-16 JST") == pd.Timestamp("2026-06-15 15:00:00")
+    assert ds.parse_generated_at("2026-06-16 08:00:00+09:00") == pd.Timestamp("2026-06-15 23:00:00")
+
+
+def test_allow_empty_does_not_mask_missing_or_stale():
+    # allow_empty でも、生成時刻が無ければ missing / 古ければ stale
+    assert ds.assess_layer("x", None, 0, NOW, 36, allow_empty=True)["status"] == "missing"
+    assert ds.assess_layer("x", "2026-05-01 00:00:00 UTC", 0, NOW, 36, allow_empty=True)["status"] == "stale"
+
+
+def test_resolve_ts_list_payload_unwrap():
+    # ai_feedback はリスト形式。先頭レコードの generated_at を使う
+    extras = _extras_with()
+    extras["ai_feedback_json"] = [{"generated_at_utc": "2026-06-15 20:00:00 UTC"}]
+    h = ds.data_health_summary(extras, _row_counts_all(3), _latest_dates_fresh(), NOW)
+    ai = [l for l in h["layers"] if l["layer"] == "ai_feedback"][0]
+    assert ai["status"] == "fresh"
+    # 空リストかつ行0 -> missing
+    extras["ai_feedback_json"] = []
+    rc = _row_counts_all(3); rc["ai_feedback"] = 0
+    h2 = ds.data_health_summary(extras, rc, _latest_dates_fresh(), NOW)
+    ai2 = [l for l in h2["layers"] if l["layer"] == "ai_feedback"][0]
+    assert ai2["status"] == "missing"
