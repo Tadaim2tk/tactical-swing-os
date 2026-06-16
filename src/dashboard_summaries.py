@@ -306,7 +306,7 @@ def evaluation_summary(evaluations: pd.DataFrame, as_of=None) -> dict:
     }
 
 
-def asset_performance(signals: pd.DataFrame, evaluations: pd.DataFrame) -> pd.DataFrame:
+def asset_performance(signals: pd.DataFrame, evaluations: pd.DataFrame, as_of=None) -> pd.DataFrame:
     assets = set()
     if not signals.empty and "asset" in signals.columns:
         assets |= set(signals["asset"].dropna().astype(str))
@@ -316,7 +316,7 @@ def asset_performance(signals: pd.DataFrame, evaluations: pd.DataFrame) -> pd.Da
     for asset in sorted(assets):
         sig = signals[signals["asset"].astype(str) == asset] if "asset" in signals.columns and not signals.empty else pd.DataFrame()
         ev = evaluations[evaluations["asset"].astype(str) == asset] if "asset" in evaluations.columns and not evaluations.empty else pd.DataFrame()
-        metrics = evaluation_summary(ev)
+        metrics = evaluation_summary(ev, as_of=as_of)
         rows.append(
             {
                 "asset": asset,

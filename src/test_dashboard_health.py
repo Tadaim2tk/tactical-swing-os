@@ -370,3 +370,19 @@ def test_evaluation_summary_malformed_as_of_falls_back_to_utc_now(monkeypatch):
     assert s["closed"] == 1  # fixed=2026-06-16 基準と一致
     # NaT 系も同様にフォールバック
     assert ds.evaluation_summary(_two_closed_around_cutoff(), as_of=float("nan"))["closed"] == 1
+
+
+def test_asset_performance_uses_same_injected_as_of_window():
+    # 資産別成績も dashboard 全体の as_of と同じ29日窓を使う。
+    # ここが default now_utc() 任せだと、日境界をまたぐ実行で上部summaryとズレ得る。
+    evaluations = _two_closed_around_cutoff()
+    evaluations["asset"] = "BTC"
+    signals = pd.DataFrame([{"asset": "BTC"}])
+
+    current = ds.asset_performance(signals, evaluations, as_of="2026-06-16")
+    next_day = ds.asset_performance(signals, evaluations, as_of="2026-06-17")
+
+    assert current.loc[0, "total_r"] == 1.0
+    assert current.loc[0, "win_rate"] == 1.0
+    assert next_day.loc[0, "total_r"] == 0.0
+    assert next_day.loc[0, "win_rate"] == 0.0
