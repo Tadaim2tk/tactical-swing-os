@@ -322,3 +322,51 @@ def test_evaluation_maturity_invalid_dates_not_active():
     assert s["evaluation_maturity"] != "active"
     assert s["evaluation_maturity"] == "accumulating"
     assert s["invalid_signal_date"] == 2
+
+
+# === evaluation_summary 29日窓の determinism (UTC as_of / local datetime.now() 非依存) ===
+
+def _two_closed_around_cutoff():
+    # as_of=2026-06-16 のとき cutoff=2026-05-18。境界(=29日前)は含み、その前日は除外。
+    return pd.DataFrame(
+        [
+            {"evaluation_status": "closed", "outcome": "win_tp1", "r_multiple": 1.0, "evaluation_date": "2026-05-18"},
+            {"evaluation_status": "closed", "outcome": "loss_sl", "r_multiple": -1.0, "evaluation_date": "2026-05-17"},
+        ]
+    )
+
+
+def test_evaluation_summary_29day_window_uses_injected_as_of():
+    s = ds.evaluation_summary(_two_closed_around_cutoff(), as_of="2026-06-16")
+    # 2026-05-18(=cutoff)のみ残り、2026-05-17 は除外される
+    assert s["closed"] == 1
+    assert s["total_evaluated"] == 1
+
+
+def test_evaluation_summary_window_is_tz_stable(monkeypatch):
+    # ローカル時計を動かしても、注入した as_of に対して結果は一定 (datetime.now() 非依存)
+    df = _two_closed_around_cutoff()
+    a = ds.evaluation_summary(df, as_of="2026-06-16")
+    b = ds.evaluation_summary(df, as_of="2026-06-16")
+    assert a["closed"] == b["closed"] == 1
+    # as_of を1日進めると窓も1日進み、2026-05-18 が脱落して closed=0
+    s_next = ds.evaluation_summary(df, as_of="2026-06-17")
+    assert s_next["closed"] == 0
+
+
+def test_evaluation_summary_default_as_of_uses_utc_now(monkeypatch):
+    # as_of 未指定なら ds.now_utc()(UTC) を基準にする。local datetime.now() を使わない
+    fixed = pd.Timestamp("2026-06-16 00:00:00", tz="UTC")
+    monkeypatch.setattr(ds, "now_utc", lambda: fixed)
+    s = ds.evaluation_summary(_two_closed_around_cutoff())
+    assert s["closed"] == 1
+
+
+def test_evaluation_summary_malformed_as_of_falls_back_to_utc_now(monkeypatch):
+    # 不正な as_of は窓を壊さず UTC today へフォールバック(例外で落ちない / 非決定にならない)
+    fixed = pd.Timestamp("2026-06-16 00:00:00", tz="UTC")
+    monkeypatch.setattr(ds, "now_utc", lambda: fixed)
+    s = ds.evaluation_summary(_two_closed_around_cutoff(), as_of="not-a-date")
+    assert s["closed"] == 1  # fixed=2026-06-16 基準と一致
+    # NaT 系も同様にフォールバック
+    assert ds.evaluation_summary(_two_closed_around_cutoff(), as_of=float("nan"))["closed"] == 1

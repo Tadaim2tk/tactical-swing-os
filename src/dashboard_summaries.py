@@ -9,6 +9,7 @@ import pandas as pd
 
 import analyze_reason_codes as arc
 import cost_model
+from time_utils import now_utc
 
 from dashboard_io import *  # noqa: F401,F403 - 低レベルヘルパーの再利用
 from dashboard_io import latest_date, latest_file_date, normalize_headers, numeric_or
@@ -221,7 +222,25 @@ def signal_summary(signals: pd.DataFrame) -> dict:
     }
 
 
-def evaluation_summary(evaluations: pd.DataFrame) -> dict:
+def _as_of_utc_naive(as_of=None) -> pd.Timestamp:
+    """as_of(UTC基準日: ISO文字列 / Timestamp / None)を naive(UTC) Timestamp へ。
+
+    None・不正値は now_utc()(UTC today)へフォールバックし、実行マシンのローカル時計・
+    タイムゾーンに依存しないようにする(Phase 26.1 と同じ非決定性排除の思想)。
+    """
+    raw = now_utc() if as_of is None else as_of
+    try:
+        ts = pd.Timestamp(raw)
+    except (ValueError, TypeError):
+        ts = pd.Timestamp(now_utc())
+    if ts is None or pd.isna(ts):
+        ts = pd.Timestamp(now_utc())
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts
+
+
+def evaluation_summary(evaluations: pd.DataFrame, as_of=None) -> dict:
     if evaluations.empty:
         return {
             "total_evaluated": 0,
@@ -244,7 +263,10 @@ def evaluation_summary(evaluations: pd.DataFrame) -> dict:
     out = evaluations.copy()
     if "evaluation_date" in out.columns:
         out["_date"] = pd.to_datetime(out["evaluation_date"], errors="coerce", utc=True).dt.tz_localize(None)
-        cutoff = pd.Timestamp(datetime.now().date()) - pd.Timedelta(days=29)
+        # as_of(UTC基準日)を起点にした29日窓。実行マシンのローカル日付/TZに依存しない
+        # ようにする(Phase 26.1 と同じ思想。local datetime.now() は使わない)。
+        # 不正な as_of は窓を壊さず UTC today へフォールバックする。
+        cutoff = _as_of_utc_naive(as_of).normalize() - pd.Timedelta(days=29)
         if not out["_date"].dropna().empty:
             out = out[(out["_date"].isna()) | (out["_date"] >= cutoff)]
     status = out.get("evaluation_status", out.get("status", pd.Series(index=out.index, dtype=str))).fillna("").astype(str).str.lower()

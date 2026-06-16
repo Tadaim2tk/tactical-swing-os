@@ -110,7 +110,7 @@ def build_dashboard() -> tuple[dict, str]:
     )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
-    eval_summary = evaluation_summary(evaluations)
+    eval_summary = evaluation_summary(evaluations, as_of=now_utc().date().isoformat())
     asset_table = asset_performance(signals, evaluations)
     mode = weekly_monthly_mode(weekly, monthly)
     reason_tops = top_reason_codes(reason_table)
