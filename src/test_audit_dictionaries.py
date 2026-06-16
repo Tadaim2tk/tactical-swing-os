@@ -245,3 +245,14 @@ def test_list_of_non_strings_coerced(tmp_path):
     p.write_text(json.dumps({"narrative_lookahead": {"outcome_terms": [123, "abc"]}}), encoding="utf-8")
     m = ad.load_dictionaries(p)
     assert ad.outcome_terms(m) == ["123", "abc"]
+
+
+def test_news_keywords_ignores_unknown_categories(tmp_path):
+    # 未知カテゴリを混ぜても news_keywords は既知カテゴリのみ返す(下流KeyError防止)
+    ad.reset_cache()
+    p = tmp_path / "extra.json"
+    p.write_text(json.dumps({"news_narrative": {"bogus_category": ["x"], "risk_on_news_score": ["rally"]}}), encoding="utf-8")
+    m = ad.load_dictionaries(p)
+    nk = ad.news_keywords(m)
+    assert "bogus_category" not in nk
+    assert set(nk.keys()) == set(ad.DEFAULTS["news_narrative"].keys())

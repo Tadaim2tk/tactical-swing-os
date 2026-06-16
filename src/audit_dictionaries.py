@@ -130,9 +130,15 @@ def overconfidence_terms(model: dict[str, Any] | None = None) -> list[str]:
 
 
 def news_keywords(model: dict[str, Any] | None = None) -> dict[str, list[str]]:
+    """テーマ別キーワードを返す。
+
+    DEFAULTS の既知カテゴリのみ返す(未知カテゴリは無視)。下流の classify が
+    counts[score_col] で未知キーに落ちるのを防ぐ(防御的)。
+    """
     model = model or load_dictionaries()
     section = model.get("news_narrative") or {}
-    return {k: [str(x) for x in v] for k, v in section.items() if isinstance(v, list)}
+    known = DEFAULTS["news_narrative"].keys()
+    return {k: [str(x) for x in section[k]] for k in known if isinstance(section.get(k), list)}
 
 
 # === マッチャー (英語=語境界 / 日本語=部分一致) ===
