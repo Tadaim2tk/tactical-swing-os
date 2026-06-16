@@ -55,6 +55,11 @@ GitHub Actions による自動デイリーサイクルとして稼働済み:
 
 ## 今後の候補（未着手）
 
+- **Cross Asset Regime Engine（Phase 28.0: SPEC 先行起草済 / 本体未実装）**: 資産横断の市場
+  環境（レジーム）を分類する将来レイヤー。評価データ不足での「それっぽい判断器」化を避けるため
+  本体はデータ蓄積後に実装し、それまでは非活性ゲート（closed評価>=30・複数資産分散・監査非blocked等）
+  で `insufficient_data` を出す前提。設計は [SPEC_CROSS_ASSET_REGIME.md](SPEC_CROSS_ASSET_REGIME.md)
+  （SPEC-CAR-001, draft / deferred）。前提仕様 SPEC-RD-001。
 - **実コスト設定**: `config/cost_model.json` に XMTrading の実測スプレッド/手数料/スワップを
   source付きで記入 → ネットR が有効化（現状 status=unconfigured）
 - **辞書拡充**: Narrative Lookahead / Adversarial Review のキーワード・過信表現辞書を
