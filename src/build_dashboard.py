@@ -168,6 +168,8 @@ def build_dashboard() -> tuple[dict, str]:
         "high_priority": int((rule_updates.get("proposal_strength", pd.Series(dtype=str)).astype(str) == "HIGH").sum()) if not rule_updates.empty else 0,
         "apply_automatically_all_false": bool(apply_false),
     }
+    # Phase 24: Data Health / Freshness (古い・空のデータを正常と誤読しないガード)
+    data_health = data_health_summary(extras, row_counts, latest_dates, generated_dt_utc)
     summary = json_safe({
         "generated_at": generated,
         "generated_at_jst": generated_at_jst,
@@ -201,6 +203,7 @@ def build_dashboard() -> tuple[dict, str]:
         "audit_report_summary": audit_report,
         "narrative_lookahead_summary": narrative_lookahead,
         "adversarial_review_summary": adversarial_review,
+        "data_health_summary": data_health,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -246,6 +249,7 @@ def build_dashboard() -> tuple[dict, str]:
         narrative_lookahead_table=extras["narrative_lookahead_audit"],
         adversarial_review=adversarial_review,
         adversarial_review_table=extras["adversarial_review"],
+        data_health=data_health,
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,

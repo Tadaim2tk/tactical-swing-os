@@ -65,6 +65,7 @@ GitHub Actions runner はUTC基準で動くため、そのまま表示すると�
 ## 表示セクション
 
 - `System Status`: 読み込んだ行数、最新レポート日付、データソース
+- `Data Health / Freshness` (Phase 24): 各分析レイヤーの最終生成時刻・行数・鮮度を一覧化。health_status(healthy/watch/degraded/critical)とレイヤー別status(fresh/stale/empty/missing/unavailable/unknown_age)を表示。「古い/空/欠損のデータを正常と誤読しない」ためのガード。監査系(adversarial_review等)は0件でも正常(allow_empty)。表示専用でweights.jsonは更新しません
 - `Daily Signal Overview`: 最新日のA/B/NO_TRADE件数とシグナル一覧
 - `Evaluation Overview`: 勝率、R損益、missed opportunityなどの評価要約
 - `Asset Performance`: 資産別のsignal数、評価数、R損益
