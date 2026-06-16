@@ -489,6 +489,8 @@ def render_html(
     audit_report: dict,
     narrative_lookahead: dict,
     narrative_lookahead_table: pd.DataFrame,
+    adversarial_review: dict,
+    adversarial_review_table: pd.DataFrame,
     mode: dict,
     ai_summary: dict,
     news_summary: dict,
@@ -595,6 +597,22 @@ def render_html(
             stat_card("max_lookahead_score", narrative_lookahead.get("max_lookahead_score", 0)),
             stat_card("recommended_next_action", narrative_lookahead.get("recommended_next_action", "continue_monitoring")),
             stat_card("requires_human_approval", str(narrative_lookahead.get("requires_human_approval", True)).lower()),
+        ]
+    )
+    adversarial_review_stats = "".join(
+        [
+            stat_card("review_status", adversarial_review.get("review_status", "unavailable")),
+            stat_card("total_sources_checked", adversarial_review.get("total_sources_checked", 0)),
+            stat_card("total_findings", adversarial_review.get("total_findings", 0)),
+            stat_card("warning", adversarial_review.get("warning_count", 0)),
+            stat_card("high_risk", adversarial_review.get("high_risk_count", 0)),
+            stat_card("blocked", adversarial_review.get("blocked_count", 0)),
+            stat_card("auto_apply_violations", adversarial_review.get("auto_apply_violation_count", 0)),
+            stat_card("weights_update_violations", adversarial_review.get("weights_update_violation_count", 0)),
+            stat_card("contradictions", adversarial_review.get("contradiction_count", 0)),
+            stat_card("max_severity", adversarial_review.get("max_severity", "none")),
+            stat_card("recommended_next_action", adversarial_review.get("recommended_next_action", "continue_monitoring")),
+            stat_card("requires_human_approval", str(adversarial_review.get("requires_human_approval", True)).lower()),
         ]
     )
     eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
@@ -886,6 +904,7 @@ def render_html(
     <section class="card"><h2>Transaction Cost Model</h2><p class="notice">ネットR評価のための分析専用モデルです。実売買・発注は行いません。</p>{transaction_cost_warning_html}<div class="grid">{transaction_cost_stats}</div></section>
     <section class="card"><h2>Audit Report</h2><p class="notice">統合状態確認用のシステム監査です。</p><div class="grid">{audit_report_stats}</div></section>
     <section class="card"><h2>Narrative Lookahead Audit</h2><p class="notice">ニュース/AI要約への未来情報・評価結果の混入を検出する研究プロセス監査です。自動売買判断ではなく、weights.jsonも更新しません。</p>{'<div class="empty">Narrative Lookahead Audit未取得</div>' if not narrative_lookahead.get('available') else f'<div class="grid">{narrative_lookahead_stats}</div>'}<h3>warning / high_risk / blocked 詳細</h3>{table_html(narrative_lookahead_table[narrative_lookahead_table['lookahead_risk_level'].isin(['warning','high_risk','blocked'])] if (not narrative_lookahead_table.empty and 'lookahead_risk_level' in narrative_lookahead_table.columns) else narrative_lookahead_table, ["source_type","source_timing_class","lookahead_risk_level","lookahead_score","issue_type","detected_terms","recommended_action","text_excerpt"], "混入検出なし(または未取得)")}</section>
+    <section class="card"><h2>Adversarial Review</h2><p class="notice">提案レイヤー(Rule/Model State/Weights Patch/Auto Calibration/AI Feedback)を横断レビューし、自動適用違反・サンプル不足・過剰最適化・矛盾・過信表現を検出する敵対的監査です。自動適用せず警告のみ。weights.jsonも更新しません。</p>{'<div class="empty">Adversarial Review未取得</div>' if not adversarial_review.get('available') else f'<div class="grid">{adversarial_review_stats}</div>'}<h3>blocked / high_risk / warning 詳細</h3>{table_html(adversarial_review_table[adversarial_review_table['severity'].isin(['warning','high_risk','blocked'])] if (not adversarial_review_table.empty and 'severity' in adversarial_review_table.columns) else adversarial_review_table, ["source_type","target","finding_category","severity","evidence","recommended_action"], "危険兆候の検出なし(または未取得)")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
     <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>

@@ -104,6 +104,10 @@ def build_dashboard() -> tuple[dict, str]:
         extras["narrative_lookahead_audit_summary_json"],
         extras["narrative_lookahead_audit"],
     )
+    adversarial_review = adversarial_review_summary(
+        extras["adversarial_review_summary_json"],
+        extras["adversarial_review"],
+    )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
     eval_summary = evaluation_summary(evaluations)
@@ -137,6 +141,7 @@ def build_dashboard() -> tuple[dict, str]:
         "prediction_calibration": len(extras["prediction_calibration"]),
         "narrative_reliability": len(extras["narrative_reliability"]),
         "narrative_lookahead_audit": len(extras["narrative_lookahead_audit"]),
+        "adversarial_review": len(extras["adversarial_review"]),
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
@@ -195,6 +200,7 @@ def build_dashboard() -> tuple[dict, str]:
         "transaction_cost_summary": transaction_cost,
         "audit_report_summary": audit_report,
         "narrative_lookahead_summary": narrative_lookahead,
+        "adversarial_review_summary": adversarial_review,
         "ai_feedback_summary": ai_summary,
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
@@ -238,6 +244,8 @@ def build_dashboard() -> tuple[dict, str]:
         audit_report=audit_report,
         narrative_lookahead=narrative_lookahead,
         narrative_lookahead_table=extras["narrative_lookahead_audit"],
+        adversarial_review=adversarial_review,
+        adversarial_review_table=extras["adversarial_review"],
         mode=mode,
         ai_summary=ai_summary,
         news_summary=news_summary,

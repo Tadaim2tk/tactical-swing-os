@@ -163,3 +163,36 @@ def test_narrative_lookahead_summary_unavailable():
     s = bd.narrative_lookahead_summary(None, pd.DataFrame())
     assert s["available"] is False
     assert s["audit_status"] == "unavailable"
+
+
+# === Adversarial Review ===
+
+def test_adversarial_review_summary_from_json():
+    payload = {
+        "review_status": "high_risk",
+        "total_sources_checked": 5,
+        "total_findings": 3,
+        "warning_count": 1,
+        "high_risk_count": 2,
+        "blocked_count": 0,
+        "contradiction_count": 1,
+        "auto_apply_violation_count": 2,
+        "weights_update_violation_count": 0,
+        "max_severity": "high_risk",
+        "recommended_next_action": "高リスク提案あり",
+        "requires_human_approval": True,
+        "weights_json_updated": False,
+        "generate_signal_updated": False,
+    }
+    s = bd.adversarial_review_summary(payload, pd.DataFrame())
+    assert s["available"] is True
+    assert s["review_status"] == "high_risk"
+    assert s["auto_apply_violation_count"] == 2
+    assert s["weights_json_updated"] is False
+    assert s["generate_signal_updated"] is False
+
+
+def test_adversarial_review_summary_unavailable():
+    s = bd.adversarial_review_summary(None, pd.DataFrame())
+    assert s["available"] is False
+    assert s["review_status"] == "unavailable"
