@@ -98,7 +98,9 @@ def build_dashboard() -> tuple[dict, str]:
         extras["narrative_reliability_json"],
         extras["narrative_reliability"],
     )
-    transaction_cost = transaction_cost_summary(evaluations, extras["cost_model_json"], as_of=now_utc().date().isoformat())
+    generated_dt_utc = now_utc()
+    dashboard_as_of = generated_dt_utc.date().isoformat()
+    transaction_cost = transaction_cost_summary(evaluations, extras["cost_model_json"], as_of=dashboard_as_of)
     audit_report = audit_report_summary(extras["latest_audit_status"])
     narrative_lookahead = narrative_lookahead_summary(
         extras["narrative_lookahead_audit_summary_json"],
@@ -110,11 +112,10 @@ def build_dashboard() -> tuple[dict, str]:
     )
     latest_sig = latest_signals(signals)
     sig_summary = signal_summary(latest_sig)
-    eval_summary = evaluation_summary(evaluations)
-    asset_table = asset_performance(signals, evaluations)
+    eval_summary = evaluation_summary(evaluations, as_of=dashboard_as_of)
+    asset_table = asset_performance(signals, evaluations, as_of=dashboard_as_of)
     mode = weekly_monthly_mode(weekly, monthly)
     reason_tops = top_reason_codes(reason_table)
-    generated_dt_utc = now_utc()
     generated_at_jst = format_jst(generated_dt_utc)
     generated_at_utc = format_utc(generated_dt_utc)
     generated = generated_at_jst
