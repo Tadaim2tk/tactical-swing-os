@@ -1,7 +1,7 @@
 # Tactical Swing OS — Phase Status
 
-> 本体repo側のフェーズ進捗ミラー。spec repo の Phase Status はこれと同期する。
-> 最終更新: 2026-06-16（Phase 24 完了時点）
+> 本体repo側のフェーズ進捗ミラー。spec repo の Phase Status は後でまとめて同期する。
+> 最終更新: 2026-06-17（Phase 28.0 SPEC まで反映 / 既定路線は評価データ蓄積待ち）
 
 ## サマリー
 
@@ -15,6 +15,8 @@
 - **計器の健全性**: Data Health / Freshness
 
 KPI は EVALUATIONS 蓄積件数（目標: 100 → 300 → 1000）。
+
+**現在地（2026-06-17）**: 観測装置側（評価ループの maturity / 状態分類、Dashboard の UTC 基準日統一）まで硬化済み。Cross Asset Regime Engine は **SPEC-only（本体未実装）**。能動的な大物実装は止め、既定路線は **評価データ蓄積待ち**（第1コホートの成熟を待つ）。
 
 ---
 
@@ -36,7 +38,7 @@ GitHub Actions による自動デイリーサイクルとして稼働済み:
 
 ---
 
-## 本セッションで追加・完了したフェーズ
+## 追加・完了したフェーズ（Phase 22〜28.0）
 
 | Phase | 内容 | Spec | PR | 状態 |
 |---|---|---|---|---|
@@ -49,24 +51,35 @@ GitHub Actions による自動デイリーサイクルとして稼働済み:
 | 22 | Narrative Lookahead Audit（未来情報混入監査） | — | [#54](https://github.com/Tadaim2tk/tactical-swing-os/pull/54) | ✅ |
 | 23 | Adversarial Review Agent（提案の横断敵対監査） | — | [#55](https://github.com/Tadaim2tk/tactical-swing-os/pull/55) | ✅ |
 | 24 | Data Health / Freshness（計器の鮮度ガード） | — | [#56](https://github.com/Tadaim2tk/tactical-swing-os/pull/56) | ✅ |
-| 25 | Operational Runbook & Spec Sync | — | （本PR） | 🔄 |
+| 25 | Operational Runbook & Spec Sync | — | [#57](https://github.com/Tadaim2tk/tactical-swing-os/pull/57) | ✅ |
+| — | Runbook: 人間ロールから実発注/broker操作を除外する文言修正 | — | [#58](https://github.com/Tadaim2tk/tactical-swing-os/pull/58) | ✅ |
+| 26 | Transaction Cost Evidence Framework（証拠メタ / 未sourced非ゼロコストを net-R で無視） | SPEC-TC-001 | [#59](https://github.com/Tadaim2tk/tactical-swing-os/pull/59) | ✅ |
+| 26.1 | Transaction Cost Evidence Validation Hardening（source_type / source_date 検証） | SPEC-TC-001 | [#60](https://github.com/Tadaim2tk/tactical-swing-os/pull/60) | ✅ |
+| 27 | JP One-Share Swing Ledger（research-only 仮想台帳 / 4日付分離） | — | [#61](https://github.com/Tadaim2tk/tactical-swing-os/pull/61) | ✅ |
+| — | Audit Dictionary Externalization（辞書を config 外部化・語境界マッチャー） | — | [#62](https://github.com/Tadaim2tk/tactical-swing-os/pull/62) | ✅ |
+| 27.1 | JP Swing Ledger Operational Guide / 読み取り専用 validator CLI | — | [#63](https://github.com/Tadaim2tk/tactical-swing-os/pull/63) | ✅ |
+| 27.2 | Evaluation Cohort Closure（awaiting_horizon / data_missing / invalid_signal_date / evaluation_maturity） | — | [#64](https://github.com/Tadaim2tk/tactical-swing-os/pull/64) | ✅ |
+| 28.0 | Cross Asset Regime Engine **SPEC-only**（本体未実装 / deferred / inactive） | SPEC-CAR-001 | [#65](https://github.com/Tadaim2tk/tactical-swing-os/pull/65) | ✅ (SPEC) |
+| — | Determinism cleanup（evaluation_summary / asset_performance が共有 UTC as_of） | — | [#66](https://github.com/Tadaim2tk/tactical-swing-os/pull/66) | ✅ |
 
 ---
 
 ## 今後の候補・未実装
 
-- **Cross Asset Regime Engine（Phase 28.0: SPEC 先行起草済 / 本体未実装）**: 資産横断の市場
-  環境（レジーム）を分類する将来レイヤー。評価データ不足での「それっぽい判断器」化を避けるため
-  本体はデータ蓄積後に実装し、それまでは非活性ゲート（closed評価>=30・複数資産分散・監査passed/許容warning等）
-  で `insufficient_data` を出す前提。設計は [SPEC_CROSS_ASSET_REGIME.md](SPEC_CROSS_ASSET_REGIME.md)
-  （SPEC-CAR-001, draft / deferred）。前提仕様 SPEC-RD-001。
-- **実コスト設定**: `config/cost_model.json` に XMTrading の実測スプレッド/手数料/スワップを
-  source付きで記入 → ネットR が有効化（現状 status=unconfigured）
-- **辞書拡充**: Narrative Lookahead / Adversarial Review のキーワード・過信表現辞書を
-  運用しながら調整
-- **LLMベース敵対エージェント**: 現在ルールベースの Adversarial Review に、LLMによる
-  反証エージェントを後フェーズで追加（要 API キー・課金、要 lookahead 監査の前段）
-- **EVALUATIONS 蓄積**: 実データが溜まると Data Health が healthy へ、各統計ゲートが本格稼働
+- **評価データ蓄積待ち（現在の既定路線）**: 第1コホートが Sheets 上で成熟し clean closed
+  evaluations が積み上がるのを待つ。KPI 100 → 300 → 1000。データが溜まると Data Health が
+  healthy へ向かい、各統計ゲート（SG / DSR 等）が本格稼働する。「待つ」も正規の工程。
+- **Phase 28.1+ Cross Asset Regime Engine 本体**: SPEC-CAR-001（[SPEC_CROSS_ASSET_REGIME.md](SPEC_CROSS_ASSET_REGIME.md)）
+  に基づく本体実装。**非活性ゲート（closed評価>=30・複数資産分散>=4・観測>=20日・Data Health
+  非critical非degraded・必須入力 fresh・監査 passed/許容warning・cost未設定なら net-R 不使用）
+  達成後**に着手する。それまでは `insufficient_data` を出す（false-green を作らない）。
+- **Phase 26.2 Evidence-backed Cost Configuration**: `config/cost_model.json` に XMTrading 実測
+  コストを source / source_type / source_date / responsibility 付きで記入 → ネットR が有効化。
+  **人間による出典付きコスト値入力待ち**（AI は値を捏造しない）。
+- **spec repo 同期（後続候補）**: 本体 repo を正としてから、`tactical-swing-os-spec` の
+  PHASE_STATUS / ROADMAP 等へ Phase 26〜28.0 をまとめて反映（二重更新のズレ回避のため後で一括）。
+- **辞書拡充 / LLMベース敵対エージェント（更に後続）**: 運用しながらの辞書調整、ルールベース
+  Adversarial Review への LLM 反証エージェント追加（要 API キー・課金、要 lookahead 監査の前段）。
 
 ---
 
