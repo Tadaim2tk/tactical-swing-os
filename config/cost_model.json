@@ -1,31 +1,40 @@
 {
   "_meta": {
     "spec": "SPEC-TC-001",
+    "phase": "Phase 26 evidence framework",
     "status": "unconfigured",
-    "source": "PLACEHOLDER - 全コストは0(=ネットR=グロスR)。XMTradingの実測スプレッド・手数料・スワップを source 付きで記入するまで採用しない(証拠主義)。",
+    "source": "PLACEHOLDER - 全コストは0(=ネットR=グロスR)。XMTradingの実測値または公開仕様を source 付きで記入するまで採用しない(証拠主義)。",
+    "evidence_rule": "source が空/unconfigured のコストは、値が非ゼロでも net R 計算に採用しない(機械的に無視)。docs/transaction_cost_evidence.md を参照。",
     "units": "price: 各アセットの建値と同じ価格単位(USDJPYなら円、BTCなら米ドル、指数ならポイント)。bars: 営業日バー。",
     "fields": {
       "spread": "往復スプレッド(price)。Entry/Exitの不利約定の合計。",
       "commission_round_turn": "1往復あたりの手数料(price換算)。",
-      "swap_per_bar": "1バー保有あたりのスワップ/金利コスト(price、正でコスト)。"
+      "swap_per_bar": "1バー保有あたりのスワップ/金利コスト(price、正でコスト)。",
+      "source": "出典。実測ログ名 or 公開仕様URL等。空/unconfigured は未出典(採用されない)。",
+      "source_date": "出典の取得日(YYYY-MM-DD)。",
+      "source_type": "measured(実測) | published_spec(公開仕様) | unconfigured。",
+      "responsibility": "この数値の更新責任者。"
     }
   },
   "default": {
     "spread": 0.0,
     "commission_round_turn": 0.0,
     "swap_per_bar": 0.0,
-    "source": "unconfigured"
+    "source": "unconfigured",
+    "source_date": "",
+    "source_type": "unconfigured",
+    "responsibility": ""
   },
   "assets": {
-    "BTC": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
-    "ETH": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
-    "GOLD": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
-    "WTI": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
-    "USDJPY": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
-    "SPX": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
-    "NASDAQ": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
-    "DXY": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
-    "VIX": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
-    "US10Y": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"}
+    "BTC": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""},
+    "ETH": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""},
+    "GOLD": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""},
+    "WTI": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""},
+    "USDJPY": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""},
+    "SPX": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""},
+    "NASDAQ": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""},
+    "DXY": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""},
+    "VIX": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""},
+    "US10Y": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured", "source_date": "", "source_type": "unconfigured", "responsibility": ""}
   }
 }

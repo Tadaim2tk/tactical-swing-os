@@ -196,3 +196,92 @@ def test_adversarial_review_summary_unavailable():
     s = bd.adversarial_review_summary(None, pd.DataFrame())
     assert s["available"] is False
     assert s["review_status"] == "unavailable"
+
+
+# === Phase 26: Transaction Cost 証拠フレーム表示 ===
+
+def test_transaction_cost_summary_unsourced_nonzero_flagged():
+    cost_model_json = {
+        "_meta": {"status": "unconfigured"},
+        "default": {"source": "unconfigured"},
+        "assets": {
+            "BTC": {"spread": 200.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},  # unsourced non-zero
+            "GOLD": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},
+        },
+    }
+    s = bd.transaction_cost_summary(pd.DataFrame(), cost_model_json)
+    assert s["unsourced_nonzero_count"] == 1
+    assert "証拠主義違反" in s["warning"]
+    assert s["configured_asset_count"] == 0
+
+
+def test_transaction_cost_summary_configured_sources_listed():
+    cost_model_json = {
+        "_meta": {"status": "configured"},
+        "default": {"source": "unconfigured"},
+        "assets": {
+            "BTC": {"spread": 200.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0,
+                    "source": "XM spec", "source_date": "2026-06-16", "responsibility": "maru"},
+        },
+    }
+    s = bd.transaction_cost_summary(pd.DataFrame(), cost_model_json)
+    assert s["configured_asset_count"] == 1
+    assert s["unsourced_nonzero_count"] == 0
+    assert s["missing_provenance_count"] == 0
+    assert any("XM spec" in src and "2026-06-16" in src for src in s["configured_sources"])
+
+
+def test_transaction_cost_summary_missing_provenance_counted():
+    cost_model_json = {
+        "_meta": {"status": "configured"},
+        "default": {"source": "unconfigured"},
+        "assets": {
+            "BTC": {"spread": 1.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "XM spec"},  # no date/responsibility
+        },
+    }
+    s = bd.transaction_cost_summary(pd.DataFrame(), cost_model_json)
+    assert s["configured_asset_count"] == 1
+    assert s["missing_provenance_count"] == 1
+
+
+# === セルフ監査(major/minor)の追補: 語彙一致・provenance ===
+
+def test_transaction_cost_summary_placeholder_source_is_unsourced():
+    j = {"_meta": {"status": "unconfigured"}, "default": {"source": "unconfigured"},
+         "assets": {"BTC": {"spread": 5.0, "source": "placeholder"}}}  # placeholder=未出典
+    s = bd.transaction_cost_summary(pd.DataFrame(), j)
+    assert s["configured_asset_count"] == 0
+    assert s["unsourced_nonzero_count"] == 1
+
+
+def test_transaction_cost_summary_whitespace_mixedcase_source_is_configured():
+    j = {"_meta": {"status": "configured"}, "default": {"source": "unconfigured"},
+         "assets": {"BTC": {"spread": 5.0, "source": "  XM Spec  ", "source_date": "2026-06-16", "responsibility": "tk"}}}
+    s = bd.transaction_cost_summary(pd.DataFrame(), j)
+    assert s["configured_asset_count"] == 1
+    assert s["unsourced_nonzero_count"] == 0
+    assert s["missing_provenance_count"] == 0
+
+
+def test_transaction_cost_summary_missing_responsibility_only_counts():
+    j = {"_meta": {"status": "configured"}, "default": {"source": "unconfigured"},
+         "assets": {"BTC": {"spread": 1.0, "source": "XM spec", "source_date": "2026-06-16", "responsibility": ""}}}
+    s = bd.transaction_cost_summary(pd.DataFrame(), j)
+    assert s["missing_provenance_count"] == 1
+
+
+def test_transaction_cost_summary_default_source_normalized():
+    # 未出典の default(placeholder)は "unconfigured" として表示
+    j = {"_meta": {"status": "unconfigured"}, "default": {"source": "placeholder"}, "assets": {}}
+    s = bd.transaction_cost_summary(pd.DataFrame(), j)
+    assert s["default_source"] == "unconfigured"
+
+
+def test_transaction_cost_summary_unsourced_asset_not_counted_as_configured():
+    # ダッシュボードも cost_model と同じく、自前sourceの無いアセットは configured にしない
+    j = {"_meta": {"status": "configured"},
+         "default": {"source": "XM_house", "source_date": "2026-01-01", "responsibility": "tk"},
+         "assets": {"USDJPY": {"spread": 0.015}}}  # 自前sourceなし
+    s = bd.transaction_cost_summary(pd.DataFrame(), j)
+    assert s["configured_asset_count"] == 0
+    assert s["unsourced_nonzero_count"] == 1

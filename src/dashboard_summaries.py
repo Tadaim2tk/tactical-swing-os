@@ -8,6 +8,7 @@ DataFrame/JSON/textを受け取りdictを返す純粋関数。数値・分類ロ
 import pandas as pd
 
 import analyze_reason_codes as arc
+import cost_model
 
 from dashboard_io import *  # noqa: F401,F403 - 低レベルヘルパーの再利用
 from dashboard_io import latest_date, latest_file_date, normalize_headers, numeric_or
@@ -1075,11 +1076,27 @@ def transaction_cost_summary(evaluations: pd.DataFrame, cost_model_json) -> dict
     """
     meta = (cost_model_json or {}).get("_meta", {}) if isinstance(cost_model_json, dict) else {}
     assets = (cost_model_json or {}).get("assets", {}) if isinstance(cost_model_json, dict) else {}
-    default_source = ((cost_model_json or {}).get("default", {}) or {}).get("source", "unconfigured") if isinstance(cost_model_json, dict) else "unconfigured"
+    default_source_raw = ((cost_model_json or {}).get("default", {}) or {}).get("source", "unconfigured") if isinstance(cost_model_json, dict) else "unconfigured"
+    # 表示も cost_model の判定語彙に一致させる(未出典の default は "unconfigured" 表示)
+    default_source = str(default_source_raw) if cost_model.is_sourced(default_source_raw) else "unconfigured"
     configured_assets = 0
-    for cfg in (assets.values() if isinstance(assets, dict) else []):
-        if isinstance(cfg, dict) and str(cfg.get("source", "unconfigured")) not in ("", "unconfigured"):
+    configured_sources: list[str] = []
+    unsourced_nonzero = 0  # 非ゼロコストだが出典なし(=net Rへ採用されず無視される)
+    missing_provenance = 0  # 出典はあるが取得日/責任者が欠落
+    for asset_name in (assets.keys() if isinstance(assets, dict) else []):
+        # cost_model を単一情報源として実行時と同一の解決を使う(語彙ドリフト防止)
+        c = cost_model.asset_cost(asset_name, model=cost_model_json if isinstance(cost_model_json, dict) else {})
+        raw_nonzero = any(c[k] != 0.0 for k in ("spread", "commission_round_turn", "swap_per_bar"))
+        if c["sourced"]:
             configured_assets += 1
+            label = f"{asset_name}: {c['source']}"
+            if c["source_date"].strip():
+                label += f" ({c['source_date']})"
+            configured_sources.append(label)
+            if not c["source_date"].strip() or not c["responsibility"].strip():
+                missing_provenance += 1
+        elif raw_nonzero:
+            unsourced_nonzero += 1
 
     cols = set(evaluations.columns) if not evaluations.empty else set()
     net_available = "r_result_net" in cols
@@ -1098,12 +1115,17 @@ def transaction_cost_summary(evaluations: pd.DataFrame, cost_model_json) -> dict
 
     status = str(meta.get("status", "unconfigured")) if meta else "unconfigured"
     warning = ""
-    if status == "unconfigured" or (all_costs_zero and cost_source_unconfigured):
-        warning = "コスト未設定: 全コスト0のためネットR=グロスR。XMTrading実測値をsource付きで記入するまで分析は理論値です。"
+    if unsourced_nonzero > 0:
+        warning = f"証拠主義違反: {unsourced_nonzero}アセットに出典なしの非ゼロコスト。net Rへ採用されず無視されています。docs/transaction_cost_evidence.md 参照。"
+    elif status == "unconfigured" or (all_costs_zero and cost_source_unconfigured):
+        warning = "コスト未設定: 全コスト0のためネットR=グロスR。XMTrading実測値/公開仕様をsource付きで記入するまで分析は理論値です。"
     return {
         "available": True,
         "cost_model_status": status,
         "configured_asset_count": int(configured_assets),
+        "configured_sources": configured_sources,
+        "unsourced_nonzero_count": int(unsourced_nonzero),
+        "missing_provenance_count": int(missing_provenance),
         "default_source": str(default_source),
         "net_r_available": bool(net_available),
         "gross_r_available": bool(gross_available),

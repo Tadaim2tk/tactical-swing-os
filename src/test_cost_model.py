@@ -123,3 +123,102 @@ def test_evaluate_trade_zero_cost_net_equals_gross(monkeypatch):
     assert res["hit_level"] in {"TP1", "TP2"}
     assert res["cost_r"] == 0.0
     assert res["r_result_net"] == res["r_result"]
+
+
+# === Phase 26: 証拠フレーム ===
+
+def test_is_sourced():
+    assert cost_model.is_sourced("XM published spec") is True
+    for v in ["", "unconfigured", "UNCONFIGURED", "placeholder", "none", "tbd", " "]:
+        assert cost_model.is_sourced(v) is False
+
+
+def test_unsourced_nonzero_cost_is_ignored():
+    # 証拠主義の機械的強制: 非ゼロでも source未設定なら net R へ採用しない
+    model = _model({"BTC": {"spread": 200.0, "commission_round_turn": 50.0, "swap_per_bar": 10.0, "source": "unconfigured"}})
+    assert cost_model.cost_in_price("BTC", 5, model=model) == 0.0
+    assert cost_model.cost_r("BTC", 1000.0, 5, model=model) == 0.0
+    assert cost_model.net_r(1.0, "BTC", 1000.0, 5, model=model) == 1.0  # ネット=グロス
+
+
+def test_sourced_nonzero_cost_is_applied():
+    model = _model({"BTC": {"spread": 200.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0,
+                            "source": "XM spec", "source_date": "2026-06-16", "source_type": "published_spec", "responsibility": "maru"}})
+    assert cost_model.cost_in_price("BTC", 1, model=model) == 200.0
+    assert abs(cost_model.cost_r("BTC", 1000.0, 1, model=model) - 0.2) < 1e-9
+
+
+def test_asset_cost_exposes_provenance():
+    model = _model({"BTC": {"spread": 1.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0,
+                            "source": "XM spec", "source_date": "2026-06-16", "source_type": "published_spec", "responsibility": "maru"}})
+    c = cost_model.asset_cost("BTC", model=model)
+    assert c["source"] == "XM spec"
+    assert c["source_date"] == "2026-06-16"
+    assert c["source_type"] == "published_spec"
+    assert c["responsibility"] == "maru"
+    assert c["sourced"] is True
+
+
+def test_validate_cost_model_flags_issues():
+    model = _model({
+        "BTC": {"spread": 200.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},  # unsourced non-zero
+        "GOLD": {"spread": 1.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "XM spec", "source_date": "", "responsibility": ""},  # missing date + responsibility
+        "WTI": {"spread": 0.0, "commission_round_turn": 0.0, "swap_per_bar": 0.0, "source": "unconfigured"},  # fine (zero, unsourced)
+    })
+    issues = cost_model.validate_cost_model(model)
+    kinds = {(i["asset"], i["issue"]) for i in issues}
+    assert ("BTC", "unsourced_nonzero_cost") in kinds
+    assert ("GOLD", "missing_source_date") in kinds
+    assert ("GOLD", "missing_responsibility") in kinds
+    assert not any(i["asset"] == "WTI" for i in issues)
+
+
+def test_shipped_config_has_provenance_fields():
+    cost_model.reset_cache()
+    model = cost_model.load_cost_model()
+    btc = model["assets"]["BTC"]
+    for k in ("source", "source_date", "source_type", "responsibility"):
+        assert k in btc
+    # 初期は未設定で違反なし(全ゼロ)
+    assert cost_model.validate_cost_model(model) == []
+
+
+# === セルフ監査(blocker/minor)の追補 ===
+
+def test_unsourced_asset_does_not_inherit_sourced_default():
+    # BLOCKER回帰防止: 自前sourceの無いアセットは default の source を継承しない
+    model = {
+        "default": {"spread": 0.0, "source": "XM_house", "source_date": "2026-01-01", "source_type": "published_spec", "responsibility": "tk"},
+        "assets": {"USDJPY": {"spread": 0.015}},  # 自前コストあり・自前sourceなし
+    }
+    assert cost_model.cost_in_price("USDJPY", 0, model=model) == 0.0
+    assert cost_model.net_r(1.0, "USDJPY", 0.015, 0, model=model) == 1.0
+    # validate と実行時が一致(矛盾しない)
+    issues = {(i["asset"], i["issue"]) for i in cost_model.validate_cost_model(model)}
+    assert ("USDJPY", "unsourced_nonzero_cost") in issues
+
+
+def test_absent_asset_uses_house_wide_sourced_default():
+    # config に存在しないアセットは house-wide な sourced default を採用(意図通り)
+    model = {"default": {"spread": 2.0, "source": "XM_house", "source_date": "2026-01-01", "source_type": "published_spec", "responsibility": "tk"}, "assets": {}}
+    c = cost_model.asset_cost("GOLD", model=model)
+    assert c["sourced"] is True
+    assert cost_model.cost_in_price("GOLD", 0, model=model) == 2.0
+
+
+def test_validate_missing_source_date_only():
+    model = _model({"BTC": {"spread": 1.0, "source": "XM spec", "source_date": "", "responsibility": "tk"}})
+    issues = {i["issue"] for i in cost_model.validate_cost_model(model) if i["asset"] == "BTC"}
+    assert issues == {"missing_source_date"}
+
+
+def test_validate_missing_responsibility_only():
+    model = _model({"BTC": {"spread": 1.0, "source": "XM spec", "source_date": "2026-06-16", "responsibility": ""}})
+    issues = {i["issue"] for i in cost_model.validate_cost_model(model) if i["asset"] == "BTC"}
+    assert issues == {"missing_responsibility"}
+
+
+def test_is_sourced_whitespace_and_mixed_case():
+    assert cost_model.is_sourced("  XM Spec  ") is True
+    assert cost_model.is_sourced("  UNCONFIGURED  ") is False
+    assert cost_model.is_sourced("Placeholder") is False
