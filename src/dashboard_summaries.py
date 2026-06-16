@@ -941,6 +941,33 @@ def audit_report_summary(audit_status_text: str) -> dict:
     }
 
 
+def narrative_lookahead_summary(audit_json, audit_csv: pd.DataFrame) -> dict:
+    """Narrative Lookahead Audit の表示用サマリー (SPEC)。分析・警告専用。
+
+    ニュース/AIフィードバックへの未来情報・評価結果混入を監査する。
+    weights.json/generate_signal.py は一切変更しない。
+    """
+    payload = audit_json if isinstance(audit_json, dict) and audit_json else {}
+    if not payload:
+        return {"available": False, "audit_status": "unavailable"}
+    return {
+        "available": True,
+        "audit_status": payload.get("audit_status", "unavailable"),
+        "total_checked": int(numeric_or(payload.get("total_checked", 0), 0)),
+        "passed_count": int(numeric_or(payload.get("passed_count", 0), 0)),
+        "warning_count": int(numeric_or(payload.get("warning_count", 0), 0)),
+        "high_risk_count": int(numeric_or(payload.get("high_risk_count", 0), 0)),
+        "blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+        "unavailable_count": int(numeric_or(payload.get("unavailable_count", 0), 0)),
+        "unknown_timing_count": int(numeric_or(payload.get("unknown_timing_count", 0), 0)),
+        "max_lookahead_score": int(numeric_or(payload.get("max_lookahead_score", 0), 0)),
+        "recommended_next_action": payload.get("recommended_next_action", "continue_monitoring"),
+        "requires_human_approval": bool(payload.get("requires_human_approval", True)),
+        "weights_json_updated": bool(payload.get("weights_json_updated", False)),
+        "generate_signal_updated": bool(payload.get("generate_signal_updated", False)),
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {

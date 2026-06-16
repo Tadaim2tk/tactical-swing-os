@@ -52,6 +52,7 @@ jobs:
           python src/build_prediction_calibration.py
           python src/build_narrative_reliability.py
           python src/build_audit_report.py
+          python src/audit_narrative_lookahead.py
           python src/build_dashboard.py
 
       - name: Write validation summary
@@ -89,6 +90,7 @@ jobs:
           check_file "narrative reliability" "results/narrative_reliability.json"
           check_file "transaction cost model" "config/cost_model.json"
           check_file "audit report status" "results/latest_audit_status.txt"
+          check_file "narrative lookahead audit" "results/narrative_lookahead_audit_summary.json"
           check_file "dashboard" "reports/dashboard/index.html"
 
       - name: Upload validation artifacts
@@ -152,3 +154,7 @@ jobs:
             reports/narrative/*_narrative_reliability.md
             results/latest_audit_status.txt
             reports/audit/*_audit_report.md
+            results/narrative_lookahead_audit.csv
+            results/narrative_lookahead_audit.json
+            results/narrative_lookahead_audit_summary.json
+            reports/narrative/*_narrative_lookahead_audit.md

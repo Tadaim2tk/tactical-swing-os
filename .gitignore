@@ -78,3 +78,7 @@ reports/calibration/*_prediction_calibration.md
 reports/narrative/*_narrative_reliability.md
 reports/audit/*_audit_report.md
 results/latest_audit_status.txt
+results/narrative_lookahead_audit.csv
+results/narrative_lookahead_audit.json
+results/narrative_lookahead_audit_summary.json
+reports/narrative/*_narrative_lookahead_audit.md

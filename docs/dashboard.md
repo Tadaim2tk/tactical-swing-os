@@ -75,6 +75,7 @@ GitHub Actions runner はUTC基準で動くため、そのまま表示すると�
 - `Narrative Reliability`: ナラティブの統計的信頼性を検定する分析専用層 (SPEC-NQ-001)。ナラティブ別のwin_rate/average_r/p値/信頼性ラベルを表示。weights.jsonは更新しません
 - `Transaction Cost Model`: ネットR評価のための分析専用モデル (SPEC-TC-001)。コスト設定状態(status/configured assets/net R available等)を表示。実売買・発注は行いません。コスト未設定時は「ネットR=グロスR」の警告を表示します
 - `Audit Report`: 統合状態確認用のシステム監査ステータス(latest_audit_status)を表示
+- `Narrative Lookahead Audit`: ニュース/AI要約への未来情報・評価結果の混入を検出する研究プロセス監査。audit_status/件数/max scoreと、warning/high_risk/blockedの詳細を表示。自動売買判断ではなく、weights.jsonも更新しません
 - `News Narrative Summary`: RSS/公開見出しから推定したニュースナラティブ要約
 - `Pending Re-evaluation Summary`: 未決着シグナルの継続再評価要約
 - `Latest Evaluation View Summary`: append-only履歴から選んだ最新評価ビュー要約

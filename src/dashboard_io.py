@@ -180,6 +180,8 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "narrative_reliability_json": read_json(RESULTS_DIR / "narrative_reliability.json"),
         "cost_model_json": read_json(Path("config/cost_model.json")),
         "latest_audit_status": read_text(RESULTS_DIR / "latest_audit_status.txt"),
+        "narrative_lookahead_audit": read_csv(RESULTS_DIR / "narrative_lookahead_audit.csv"),
+        "narrative_lookahead_audit_summary_json": read_json(RESULTS_DIR / "narrative_lookahead_audit_summary.json"),
     }
     return data, extras, source
 

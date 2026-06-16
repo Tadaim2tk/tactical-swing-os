@@ -46,6 +46,7 @@ Step Summaryには、主要なCSV/JSON/HTMLが生成されたかどうかが表�
 - **Narrative Reliability** (SPEC-NQ-001): ナラティブの統計的信頼性検定。`results/narrative_reliability.json` を生成
 - **Transaction Cost** (SPEC-TC-001): ネットR評価のための分析モデル。`evaluate_signal.py` に組み込まれ、`config/cost_model.json` の設定状態を Dashboard で要約。実売買ではありません
 - **Audit Report**: 統合状態確認用のシステム監査。`results/latest_audit_status.txt` と `reports/audit/*_audit_report.md` を生成
+- **Narrative Lookahead Audit**: ニュース/AI要約への未来情報・評価結果の混入を監査。`results/narrative_lookahead_audit_summary.json` を生成し Step Summary で存在確認。LLM API新規利用なし・分析専用
 
 ## 安全条件
 

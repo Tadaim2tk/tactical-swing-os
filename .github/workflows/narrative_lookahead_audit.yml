@@ -1,0 +1,56 @@
+name: Tactical Swing OS narrative lookahead audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 22:20 UTC is 07:20 JST.
+    - cron: "20 22 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  narrative-lookahead-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch news for audit
+        run: |
+          python src/fetch_news.py --hours 24 --max-items 30 --timeout-seconds 5 --global-timeout-seconds 45 || echo "warning: news fetch failed; continuing audit"
+
+      - name: Classify news narratives for audit
+        run: |
+          python src/classify_news_narratives.py || echo "warning: news classification failed; continuing audit"
+
+      - name: Build AI feedback for audit
+        run: |
+          python src/build_ai_feedback.py || echo "warning: AI feedback failed; continuing audit"
+
+      - name: Run narrative lookahead audit
+        run: python src/audit_narrative_lookahead.py
+
+      - name: Upload narrative lookahead audit artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-narrative-lookahead-audit-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            results/narrative_lookahead_audit.csv
+            results/narrative_lookahead_audit.json
+            results/narrative_lookahead_audit_summary.json
+            reports/narrative/*_narrative_lookahead_audit.md

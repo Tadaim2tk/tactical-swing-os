@@ -134,6 +134,10 @@ jobs:
         run: |
           python src/build_audit_report.py || echo "warning: audit report failed; continuing dashboard"
 
+      - name: Run narrative lookahead audit for dashboard
+        run: |
+          python src/audit_narrative_lookahead.py || echo "warning: narrative lookahead audit failed; continuing dashboard"
+
       - name: Build dashboard
         run: python src/build_dashboard.py
         env:
@@ -209,6 +213,10 @@ jobs:
             reports/narrative/*_narrative_reliability.md
             results/latest_audit_status.txt
             reports/audit/*_audit_report.md
+            results/narrative_lookahead_audit.csv
+            results/narrative_lookahead_audit.json
+            results/narrative_lookahead_audit_summary.json
+            reports/narrative/*_narrative_lookahead_audit.md
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
