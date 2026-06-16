@@ -34,6 +34,12 @@
 
 `attention_layers` に stale/empty/missing/unavailable/future_timestamp のレイヤー名を列挙する。
 
+> **鮮度 ≠ 成熟度**: Data Health はレイヤーの**鮮度**を見る。評価が「新しいが、まだ決着0件
+> （蓄積中）」という状態は鮮度の劣化ではなく**成熟度**の問題であり、`evaluation_summary` の
+> `evaluation_maturity`（no_signals / accumulating / active）として別途・正直に併記する。
+> `fresh` を「結果が出ている」と誤読しないこと。詳細は
+> [evaluation_cohort_maturity.md](evaluation_cohort_maturity.md)。
+
 ## タイムスタンプの扱い
 
 `parse_generated_at` が `... UTC` / `... JST` / `YYYY-MM-DD` を naive UTC に正規化する（JSTは-9時間してUTC化）。`now` は `now_utc()` を渡し、両者を naive UTC で比較する。

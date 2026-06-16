@@ -219,14 +219,25 @@ def range_touches_entry(bar: pd.Series, entry_low: float, entry_high: float) -> 
 def no_trade_result(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
     result = base_result(signal)
     signal_date = safe_date(signal.get("date"))
+    if signal_date is None:
+        # 日付が不正/欠損 = 評価位置を決められない入力不正。若さ(awaiting_horizon)ではない。
+        result["r_multiple"] = 0.0
+        result["r_result"] = 0.0
+        return finish(result, status="invalid", evaluation_status="skipped", outcome="invalid", error_type="invalid_signal_date", note="Invalid or missing signal date")
     future = future_bars(df, signal_date, horizon)
     result["bars_checked"] = len(future)
     if not future.empty:
         result["evaluation_date"] = date_str(future.iloc[-1]["date"])
-    if df.empty or future.empty:
+    if df.empty:
         result["r_multiple"] = 0.0
         result["r_result"] = 0.0
         return finish(result, status="no_trade", evaluation_status="skipped", outcome="no_trade", error_type="data_missing", note="No OHLC data for no-trade evaluation")
+    if future.empty:
+        # OHLCはあるが signal_date 以降のバーがまだ無い = ホライズン未到達。
+        # no_trade の正否(correct/missed)はまだ判定不能。欠損(data_missing)とは区別する。
+        result["r_multiple"] = 0.0
+        result["r_result"] = 0.0
+        return finish(result, status="no_trade", evaluation_status="skipped", outcome="no_trade", error_type="awaiting_horizon", note="No-trade signal newer than latest OHLC bar; correctness not yet assessable")
 
     price_range = float(future["high"].max() - future["low"].min())
     atr_series = df[df["date"] <= future.iloc[0]["date"]]["atr14"].dropna()
@@ -253,13 +264,20 @@ def evaluate_trade(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
     result = base_result(signal)
     side = result["side"]
     signal_date = safe_date(signal.get("date"))
+    if signal_date is None:
+        # 日付が不正/欠損 = 評価位置を決められない入力不正。若さ(awaiting_horizon)ではない。
+        return finish(result, status="invalid", evaluation_status="skipped", outcome="invalid", error_type="invalid_signal_date", note="Invalid or missing signal date")
     future = future_bars(df, signal_date, horizon)
     result["bars_checked"] = len(future)
     if not future.empty:
         result["evaluation_date"] = date_str(future.iloc[-1]["date"])
 
-    if df.empty or future.empty:
-        return finish(result, status="pending", evaluation_status="pending", outcome="open_unresolved", error_type="data_missing", note="No future OHLC data")
+    if df.empty:
+        return finish(result, status="pending", evaluation_status="pending", outcome="open_unresolved", error_type="data_missing", note="No OHLC data available for asset")
+    if future.empty:
+        # OHLCはあるが signal_date 以降のバーがまだ無い = ホライズン未到達(若い/蓄積中)。
+        # 「価格データが本当に無い(data_missing)」と区別し、誤った赤(欠損)を出さない。
+        return finish(result, status="pending", evaluation_status="pending", outcome="open_unresolved", error_type="awaiting_horizon", note="Signal newer than latest OHLC bar; horizon not yet elapsed")
 
     entry_low = safe_float(signal.get("entry_low"))
     entry_high = safe_float(signal.get("entry_high"))
