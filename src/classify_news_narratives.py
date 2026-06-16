@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import audit_dictionaries
 from time_utils import JST, format_jst, format_utc, now_utc
 
 
@@ -75,21 +76,8 @@ TAG_PRIORITY = [
     "central_bank_hawkish",
     "central_bank_dovish",
 ]
-KEYWORDS = {
-    "risk_on_news_score": ["rally", "rebound", "risk-on", "optimism", "soft landing", "rate cut hopes", "earnings beat", "tech gains", "stocks rise"],
-    "risk_off_news_score": ["selloff", "slump", "risk-off", "fear", "uncertainty", "recession", "crisis", "safe haven", "stocks fall"],
-    "dollar_strength_news_score": ["dollar rises", "dollar strengthens", "greenback gains", "yen weakens", "usd/jpy rises", "stronger dollar"],
-    "rate_pressure_news_score": ["yields rise", "treasury yields climb", "hawkish fed", "sticky inflation", "higher for longer", "rate hike", "bond yields"],
-    "gold_safe_haven_news_score": ["gold rises", "safe haven", "geopolitical tensions", "war", "conflict", "central bank buying", "inflation hedge"],
-    "oil_supply_risk_news_score": ["oil rises", "crude jumps", "supply disruption", "opec", "middle east", "sanctions", "tanker", "inventory draw", "refinery outage"],
-    "crypto_liquidity_news_score": ["bitcoin rises", "crypto rally", "etf inflows", "risk appetite", "liquidity", "rate cut", "dollar falls", "bitcoin etf"],
-    "equity_momentum_news_score": ["stocks rise", "s&p gains", "nasdaq climbs", "tech gains", "earnings beat", "wall street rises"],
-    "geopolitical_risk_news_score": ["war", "missile", "attack", "sanctions", "middle east", "russia", "ukraine", "taiwan", "china tensions", "geopolitical tensions"],
-    "inflation_pressure_news_score": ["inflation", "cpi", "pce", "prices rise", "tariff", "wages", "energy prices"],
-    "recession_risk_news_score": ["recession", "slowdown", "contraction", "jobless", "defaults", "weak demand"],
-    "central_bank_hawkish_score": ["fed hawkish", "rate hike", "higher for longer", "boj hike", "ecb hawkish", "powell warns"],
-    "central_bank_dovish_score": ["rate cut", "dovish", "easing", "stimulus", "pivot", "fed cuts"],
-}
+# テーマ別キーワードは config/audit_dictionaries.json へ外部化 (欠損時は DEFAULTS へfallback)
+KEYWORDS = audit_dictionaries.news_keywords()
 
 
 def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
@@ -126,8 +114,8 @@ def read_headline_metadata(path: Path = RESULTS_DIR / "news_headlines.json") -> 
 
 
 def keyword_hits(text: str, keywords: list[str]) -> list[str]:
-    lower = text.lower()
-    return [keyword for keyword in keywords if keyword in lower]
+    # 英語は語境界マッチ("war" は "warning"/"reward" に当たらない)で false positive を低減
+    return audit_dictionaries.match_terms(text, keywords)
 
 
 def score_from_hits(count: int, total_rows: int) -> float:

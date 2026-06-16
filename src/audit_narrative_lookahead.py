@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import audit_dictionaries
 from time_utils import format_jst, format_utc, now_utc
 
 RESULTS_DIR = Path("results")
@@ -46,43 +47,9 @@ AUDIT_COLUMNS = [
     "notes",
 ]
 
-# --- 未来情報キーワード (結果判明後でないと書けない表現) ---
-FUTURE_KEYWORDS_EN = [
-    "after the close",
-    "later today",
-    "following the release",
-    "confirmed after",
-    "earnings beat after",
-    "post-market",
-    "tomorrow's data showed",
-    "revised higher after",
-    "the market reacted after",
-]
-FUTURE_KEYWORDS_JA = [
-    "引け後",
-    "発表後",
-    "後に判明",
-    "翌日に",
-    "その後",
-    "結果を受けて",
-    "確定後",
-    "改定後",
-    "市場は反応した",
-]
-FUTURE_KEYWORDS = FUTURE_KEYWORDS_EN + FUTURE_KEYWORDS_JA
-
-# --- 評価結果を示す語 (事前ナラティブに混入していないか検査) ---
-OUTCOME_TERMS = [
-    "outcome",
-    "r_multiple",
-    "net_r",
-    "gross_r",
-    "win_tp1",
-    "win_tp2",
-    "loss_sl",
-    "missed_opportunity",
-    "evaluation_status",
-]
+# --- 辞書は config/audit_dictionaries.json へ外部化 (欠損時は DEFAULTS へ安全fallback) ---
+FUTURE_KEYWORDS = audit_dictionaries.future_keywords()
+OUTCOME_TERMS = audit_dictionaries.outcome_terms()
 
 # 事前材料として扱うソース (ここに評価結果や未来日付が混入すると危険)
 PRE_SIGNAL_SOURCES = {"news_headline", "news_narrative"}
@@ -101,12 +68,8 @@ RISK_LEVELS = {"passed", "warning", "high_risk", "blocked", "unavailable"}
 # === 純粋関数 (単体テスト対象) ===
 
 def detect_terms(text: str | None, terms: list[str]) -> list[str]:
-    """text に含まれる terms を返す (大文字小文字無視・部分一致)。"""
-    if not text:
-        return []
-    low = str(text).lower()
-    found = [t for t in terms if t.lower() in low]
-    return sorted(set(found))
+    """text に含まれる terms を返す (大文字小文字無視・英語は語境界マッチ)。"""
+    return audit_dictionaries.match_terms(text, terms)
 
 
 def parse_ts(value) -> pd.Timestamp | None:
