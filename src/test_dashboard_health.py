@@ -259,3 +259,52 @@ def test_resolve_ts_list_payload_unwrap():
     h2 = ds.data_health_summary(extras, rc, _latest_dates_fresh(), NOW)
     ai2 = [l for l in h2["layers"] if l["layer"] == "ai_feedback"][0]
     assert ai2["status"] == "missing"
+
+
+# === evaluation_summary 評価成熟度: 「評価0件/未決着だけ」を false healthy にしない (Phase 27.2) ===
+
+def test_evaluation_maturity_no_signals_when_empty():
+    s = ds.evaluation_summary(pd.DataFrame())
+    assert s["evaluation_maturity"] == "no_signals"
+    assert s["closed"] == 0
+    assert s["awaiting_horizon"] == 0
+    assert s["data_missing"] == 0
+
+
+def test_evaluation_maturity_accumulating_when_no_finalized():
+    # 全件 pending / awaiting_horizon -> 決着0 -> accumulating(active にしない)
+    df = pd.DataFrame(
+        [
+            {"evaluation_status": "pending", "outcome": "open_unresolved", "error_type": "awaiting_horizon", "r_multiple": None},
+            {"evaluation_status": "pending", "outcome": "open_unresolved", "error_type": "data_missing", "r_multiple": None},
+        ]
+    )
+    s = ds.evaluation_summary(df)
+    assert s["evaluation_maturity"] == "accumulating"
+    assert s["closed"] == 0
+    assert s["awaiting_horizon"] == 1
+    assert s["data_missing"] == 1
+
+
+def test_evaluation_maturity_active_only_when_finalized_exists():
+    df = pd.DataFrame(
+        [
+            {"evaluation_status": "closed", "outcome": "win_tp1", "error_type": "target_reached", "r_multiple": 2.0},
+            {"evaluation_status": "pending", "outcome": "open_unresolved", "error_type": "awaiting_horizon", "r_multiple": None},
+        ]
+    )
+    s = ds.evaluation_summary(df)
+    assert s["evaluation_maturity"] == "active"
+    assert s["closed"] == 1
+    assert s["awaiting_horizon"] == 1
+
+
+def test_evaluation_maturity_accumulating_when_only_no_trade_unassessed():
+    # no_trade だが正否未確定(awaiting_horizon)のみ -> finalized=0 -> accumulating
+    df = pd.DataFrame(
+        [
+            {"evaluation_status": "skipped", "outcome": "no_trade", "error_type": "awaiting_horizon", "r_multiple": 0.0},
+        ]
+    )
+    s = ds.evaluation_summary(df)
+    assert s["evaluation_maturity"] == "accumulating"

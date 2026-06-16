@@ -228,6 +228,8 @@ def evaluation_summary(evaluations: pd.DataFrame) -> dict:
             "closed": 0,
             "pending": 0,
             "skipped": 0,
+            "awaiting_horizon": 0,
+            "data_missing": 0,
             "no_entry": 0,
             "no_trade": 0,
             "win_rate": 0.0,
@@ -236,6 +238,7 @@ def evaluation_summary(evaluations: pd.DataFrame) -> dict:
             "best_r": 0.0,
             "worst_r": 0.0,
             "missed_opportunity_count": 0,
+            "evaluation_maturity": "no_signals",
         }
     out = evaluations.copy()
     if "evaluation_date" in out.columns:
@@ -245,14 +248,28 @@ def evaluation_summary(evaluations: pd.DataFrame) -> dict:
             out = out[(out["_date"].isna()) | (out["_date"] >= cutoff)]
     status = out.get("evaluation_status", out.get("status", pd.Series(index=out.index, dtype=str))).fillna("").astype(str).str.lower()
     outcome = out.get("outcome", pd.Series(index=out.index, dtype=str)).fillna("").astype(str)
+    outcome_lower = outcome.str.lower()
+    error_type = out.get("error_type", pd.Series(index=out.index, dtype=str)).fillna("").astype(str).str.lower()
     r = pd.to_numeric(out.get("r_multiple", out.get("r_result", pd.Series(index=out.index, dtype=float))), errors="coerce")
     wins = outcome.isin(["win_tp1", "win_tp2"]) | (r > 0)
     evaluated_count = int(r.notna().sum())
+    # 評価成熟度: 「評価0件/未決着だけ」を健全(fresh)と誤読しないための正直な状態。
+    # finalized = 決着した判断(SL/TP到達 or no_trade正否確定)。0なら accumulating(蓄積中)。
+    final_outcomes = {"win_tp1", "win_tp2", "loss_sl", "no_trade_correct", "no_trade_missed"}
+    finalized = int(outcome_lower.isin(final_outcomes).sum())
+    if len(out) == 0:
+        maturity = "no_signals"
+    elif finalized == 0:
+        maturity = "accumulating"
+    else:
+        maturity = "active"
     return {
         "total_evaluated": evaluated_count,
         "closed": int((status == "closed").sum()),
         "pending": int((status == "pending").sum()),
         "skipped": int((status == "skipped").sum()),
+        "awaiting_horizon": int((error_type == "awaiting_horizon").sum()),
+        "data_missing": int((error_type == "data_missing").sum()),
         "no_entry": int((outcome == "no_entry").sum()),
         "no_trade": int((outcome.astype(str).str.startswith("no_trade")).sum()),
         "win_rate": float(wins.sum() / evaluated_count) if evaluated_count else 0.0,
@@ -261,6 +278,7 @@ def evaluation_summary(evaluations: pd.DataFrame) -> dict:
         "best_r": float(r.dropna().max()) if evaluated_count else 0.0,
         "worst_r": float(r.dropna().min()) if evaluated_count else 0.0,
         "missed_opportunity_count": int(out.get("missed_opportunity", pd.Series(index=out.index, dtype=str)).fillna("").astype(str).str.lower().isin(["true", "1", "yes"]).sum()),
+        "evaluation_maturity": maturity,
     }
 
 

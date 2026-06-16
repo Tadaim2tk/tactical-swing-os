@@ -223,10 +223,16 @@ def no_trade_result(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
     result["bars_checked"] = len(future)
     if not future.empty:
         result["evaluation_date"] = date_str(future.iloc[-1]["date"])
-    if df.empty or future.empty:
+    if df.empty:
         result["r_multiple"] = 0.0
         result["r_result"] = 0.0
         return finish(result, status="no_trade", evaluation_status="skipped", outcome="no_trade", error_type="data_missing", note="No OHLC data for no-trade evaluation")
+    if future.empty:
+        # OHLCはあるが signal_date 以降のバーがまだ無い = ホライズン未到達。
+        # no_trade の正否(correct/missed)はまだ判定不能。欠損(data_missing)とは区別する。
+        result["r_multiple"] = 0.0
+        result["r_result"] = 0.0
+        return finish(result, status="no_trade", evaluation_status="skipped", outcome="no_trade", error_type="awaiting_horizon", note="No-trade signal newer than latest OHLC bar; correctness not yet assessable")
 
     price_range = float(future["high"].max() - future["low"].min())
     atr_series = df[df["date"] <= future.iloc[0]["date"]]["atr14"].dropna()
@@ -258,8 +264,12 @@ def evaluate_trade(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
     if not future.empty:
         result["evaluation_date"] = date_str(future.iloc[-1]["date"])
 
-    if df.empty or future.empty:
-        return finish(result, status="pending", evaluation_status="pending", outcome="open_unresolved", error_type="data_missing", note="No future OHLC data")
+    if df.empty:
+        return finish(result, status="pending", evaluation_status="pending", outcome="open_unresolved", error_type="data_missing", note="No OHLC data available for asset")
+    if future.empty:
+        # OHLCはあるが signal_date 以降のバーがまだ無い = ホライズン未到達(若い/蓄積中)。
+        # 「価格データが本当に無い(data_missing)」と区別し、誤った赤(欠損)を出さない。
+        return finish(result, status="pending", evaluation_status="pending", outcome="open_unresolved", error_type="awaiting_horizon", note="Signal newer than latest OHLC bar; horizon not yet elapsed")
 
     entry_low = safe_float(signal.get("entry_low"))
     entry_high = safe_float(signal.get("entry_high"))
