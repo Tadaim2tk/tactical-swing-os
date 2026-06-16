@@ -214,6 +214,21 @@ def lag_adjusted_edge(
     }
 
 
+def execution_lag_cost_jpy(expected_price: float, actual_price: float, shares: int) -> float:
+    """1日ラグによる価格劣化コスト（円）。
+
+    ロングポジションでは、実際の約定価格が想定より高いほどコストが増える。
+    execution_lag_cost = (actual_price - expected_price) * shares
+    正なら不利（ラグでコスト増）、負なら有利（ラグで得）。
+
+    手数料とは別に、台帳の execution_lag_cost_jpy フィールドへ記録する。
+    """
+    ep = _coerce(expected_price)
+    ap = _coerce(actual_price)
+    sh = max(0, int(shares))
+    return (ap - ep) * sh
+
+
 def validate_jp_cost_model(model: dict[str, Any] | None = None) -> list[dict[str, str]]:
     """証拠主義の機械的検証。問題のあるフィールドを列挙する。"""
     m = model if model is not None else load_jp_cost_model()

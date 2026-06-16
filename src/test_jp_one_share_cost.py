@@ -201,6 +201,23 @@ def test_validate_no_issues_when_all_zero_unsourced():
     issues = cost.validate_jp_cost_model(model)
     assert issues == []
 
+# ── execution_lag_cost_jpy ───────────────────────────────────────
+
+def test_execution_lag_cost_adverse():
+    # 想定5000 → 実際5100、10株 → コスト = 1000円
+    assert cost.execution_lag_cost_jpy(5000.0, 5100.0, 10) == 1000.0
+
+def test_execution_lag_cost_favorable():
+    # 想定5000 → 実際4950、10株 → -500円（有利方向）
+    assert cost.execution_lag_cost_jpy(5000.0, 4950.0, 10) == -500.0
+
+def test_execution_lag_cost_no_lag():
+    assert cost.execution_lag_cost_jpy(5000.0, 5000.0, 10) == 0.0
+
+def test_execution_lag_cost_zero_shares():
+    assert cost.execution_lag_cost_jpy(5000.0, 5100.0, 0) == 0.0
+
+
 def test_validate_flags_unsourced_nonzero():
     model = {
         "monex_wankabu": {

@@ -18,7 +18,9 @@ import jp_adversarial_checklist as adv
 def _minimal_signal() -> dict:
     return {
         "hypothesis_id": "JP-20260616-001",
-        "hypothesis_date": "2026-06-16",
+        "decision_date": "2026-06-16",
+        "intended_order_date": "2026-06-17",
+        "assumed_execution_date": "2026-06-18",
         "ticker": "7203.T",
         "company_name": "トヨタ自動車",
         "sector": "輸送用機器",
@@ -98,6 +100,35 @@ def test_validate_signal_valid_catalyst_types():
         row["catalyst_type"] = ct
         errors = ledger.validate_signal_row(row)
         assert not any("catalyst_type" in e for e in errors), f"Failed for {ct}"
+
+
+def test_validate_signal_date_order_violation_intended_before_decision():
+    row = _minimal_signal()
+    row["intended_order_date"] = "2026-06-15"  # decision_date(6/16)より前
+    errors = ledger.validate_signal_row(row)
+    assert any("intended_order_date" in e for e in errors)
+
+
+def test_validate_signal_date_order_violation_assumed_before_intended():
+    row = _minimal_signal()
+    row["assumed_execution_date"] = "2026-06-16"  # intended(6/17)より前
+    errors = ledger.validate_signal_row(row)
+    assert any("assumed_execution_date" in e for e in errors)
+
+
+def test_validate_signal_valid_falsifier_type():
+    for ft in ledger.VALID_FALSIFIER_TYPES:
+        row = _minimal_signal()
+        row["falsifier_type"] = ft
+        errors = ledger.validate_signal_row(row)
+        assert not any("falsifier_type" in e for e in errors), f"Failed for {ft}"
+
+
+def test_validate_signal_invalid_falsifier_type():
+    row = _minimal_signal()
+    row["falsifier_type"] = "unknown_type"
+    errors = ledger.validate_signal_row(row)
+    assert any("falsifier_type" in e for e in errors)
 
 
 def test_validate_signal_invalid_outcome_type():
