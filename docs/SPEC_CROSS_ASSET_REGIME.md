@@ -71,8 +71,9 @@ Cross Asset Regime Engine は、**単一資産シグナルではなく、資産�
 | clean closed evaluations | `minimum_closed_evaluations: 30` | 統計的に意味のある分類に最低限必要（SPEC-SG-001 の n>=30 と整合） |
 | 評価が複数資産に分散 | `minimum_assets_with_closed_evaluations: 4` | 単一資産偏重での「クロスアセット」分類を防ぐ |
 | 観測期間 | `minimum_days_observed: 20` | レジームは時間軸の概念。短すぎる窓での断定を防ぐ |
-| Data Health | `critical` でない | 入力が欠損/古い状態での分類を出さない |
-| lookahead / adversarial audit | `blocked` でない | 未来情報混入が疑われる状態で分類を出さない |
+| Data Health（全体） | `critical` でも `degraded` でもない | `degraded`（stale/empty を含む）でも分類を出すと劣化データを正常分類と誤読する |
+| regime 必須入力レイヤーの鮮度 | どの必須入力レイヤーも `stale` / `missing` / `unavailable` / `unknown_age` / `future_timestamp` でない（`fresh` のみ通過） | 監視対象（MARKET_SNAPSHOT / SIGNALS / EVALUATIONS / LATEST_EVALUATIONS 等）が1つでも劣化していたら分類しない |
+| lookahead / adversarial audit | 監査 artifact が**存在**し、`audit_status` が `passed`（または明示的に許容する `warning`）のときのみ通過 | 「何も見ていないのに passed にしない」（Phase 23/24 の思想）。`unavailable`（未生成/未取得）・`high_risk`・`blocked` はすべて非活性 |
 | transaction cost | `unconfigured` のとき net-R 依存の判定を**使わない** | 証拠の無いコストで net 成績を語らない（SPEC-TC-001 / 証拠主義） |
 
 - どれか1つでも未達なら `engine_status=inactive`、レジームは `insufficient_data`。
@@ -123,10 +124,10 @@ Cross Asset Regime Engine は、**単一資産シグナルではなく、資産�
 
 - **空データ**: 入力が空 → `engine_status=inactive` / `insufficient_data`、例外で落ちない。
 - **評価不足**: closed evaluations < N → `insufficient_data`、ゲート未達理由を併記。
-- **監査 blocked**: lookahead / adversarial が blocked → 分類を出さない。
+- **監査 blocked / unavailable / high_risk**: lookahead / adversarial が `passed`（許容 `warning`）以外 → 分類を出さない。**監査未生成・未取得の `unavailable` も非活性**（何も見ていないのに passed にしない）。
 - **mixed regime**: 優勢レジームが無いとき `mixed` を返し、無理に1つへ断定しない。
-- **stale data**: Data Health stale/critical → 非活性。
-- **future timestamp**: 時刻が未来（クロックスキュー超）→ 非活性（既存 Data Health と整合）。
+- **stale / degraded data**: Data Health が `critical` または `degraded`、もしくは必須入力レイヤーが `stale` / `missing` / `unavailable` / `unknown_age` → 非活性。
+- **future timestamp**: 必須入力の時刻が未来（クロックスキュー超）→ 非活性（既存 Data Health と整合）。
 - **asset concentration**: 評価が単一資産に偏る → `minimum_assets_with_closed_evaluations` 未達で非活性。
 - **no transaction cost evidence**: cost `unconfigured` → net-R 依存判定を使わない経路を検証。
 
