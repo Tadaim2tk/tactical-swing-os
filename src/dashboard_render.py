@@ -626,6 +626,7 @@ def render_html(
             stat_card("missing", data_health.get("missing_count", 0)),
             stat_card("unavailable", data_health.get("unavailable_count", 0)),
             stat_card("unknown_age", data_health.get("unknown_age_count", 0)),
+            stat_card("future_timestamp", data_health.get("future_timestamp_count", 0)),
             stat_card("worst_layer", data_health.get("worst_layer", "") or "なし"),
             stat_card("attention_layers", ", ".join(data_health.get("attention_layers", []) or []) or "なし"),
         ]

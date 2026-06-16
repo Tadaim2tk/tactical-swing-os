@@ -182,11 +182,27 @@ def test_stale_boundary_exactly_threshold_is_fresh():
     assert ds.assess_layer("x", ts, 5, NOW, threshold_hours=36)["status"] == "fresh"
 
 
-def test_future_timestamp_is_fresh_negative_age():
+def test_future_timestamp_flagged_as_anomaly():
+    # 明確に未来(>1h)の生成時刻は時計異常として future_timestamp
     ts = (NOW + pd.Timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S") + " UTC"
     r = ds.assess_layer("x", ts, 5, NOW, threshold_hours=36)
-    assert r["status"] == "fresh"
+    assert r["status"] == "future_timestamp"
     assert r["age_hours"] < 0
+
+
+def test_small_future_skew_tolerated_as_fresh():
+    # 軽微なクロックスキュー(<1h)は許容して fresh
+    ts = (NOW + pd.Timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+    assert ds.assess_layer("x", ts, 5, NOW, threshold_hours=36)["status"] == "fresh"
+
+
+def test_health_summary_watch_on_future_timestamp():
+    extras = _extras_with()
+    extras["portfolio_layer_summary_json"] = {"generated_at_utc": (NOW + pd.Timedelta(hours=10)).strftime("%Y-%m-%d %H:%M:%S") + " UTC"}
+    h = ds.data_health_summary(extras, _row_counts_all(3), _latest_dates_fresh(), NOW)
+    assert h["future_timestamp_count"] >= 1
+    assert h["health_status"] == "watch"
+    assert "portfolio_layer" in h["attention_layers"]
 
 
 def test_health_summary_watch_when_only_unknown_age():

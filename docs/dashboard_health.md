@@ -20,6 +20,7 @@
 | `missing` | 生成時刻も行数も無い（一度も生成されていない） |
 | `unavailable` | summary が明示的に unavailable（対象データ不足） |
 | `unknown_age` | 行はあるが生成時刻が取れず鮮度判定不能 |
+| `future_timestamp` | 生成時刻が明確に未来(> 1h)。時計/タイムゾーン異常の検知。軽微なクロックスキュー(<1h)は許容して fresh |
 
 - 想定更新間隔: daily=36h / 評価=48h / weekly≈204h / monthly≈840h
 - **`allow_empty`**: 監査系レイヤー（`adversarial_review` 等、0件=「異常なし」が正常）は行数0でも生成時刻が新しければ `fresh` とする。0件を `empty`(degraded) と誤判定しない
@@ -28,10 +29,10 @@
 
 - `critical`: missing または unavailable が1つでもある（core データ欠損）
 - `degraded`: stale または empty がある
-- `watch`: unknown_age がある
+- `watch`: unknown_age または future_timestamp がある
 - `healthy`: 全レイヤー fresh
 
-`attention_layers` に stale/empty/missing/unavailable のレイヤー名を列挙する。
+`attention_layers` に stale/empty/missing/unavailable/future_timestamp のレイヤー名を列挙する。
 
 ## タイムスタンプの扱い
 

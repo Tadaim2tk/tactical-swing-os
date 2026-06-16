@@ -34,7 +34,9 @@ LAYER_HEALTH_REGISTRY = [
 ]
 
 # 健全性の重大度(高いほど悪い)
-_HEALTH_RANK = {"fresh": 0, "unknown_age": 1, "empty": 2, "stale": 3, "unavailable": 4, "missing": 5}
+_HEALTH_RANK = {"fresh": 0, "unknown_age": 1, "future_timestamp": 2, "empty": 3, "stale": 4, "unavailable": 5, "missing": 6}
+# 生成時刻がこれ以上「未来」なら時計/タイムゾーン異常とみなす(軽微なクロックスキューは許容)
+FUTURE_TOLERANCE_HOURS = 1.0
 
 
 def parse_generated_at(value):
@@ -72,10 +74,11 @@ def _now_naive_utc(now):
 def assess_layer(label, ts_value, row_count, now, threshold_hours, unavailable=False, cadence="", allow_empty=False) -> dict:
     """1レイヤーの鮮度・有無を判定する純粋関数。
 
-    status: fresh / stale / empty / missing / unavailable / unknown_age
+    status: fresh / stale / empty / missing / unavailable / unknown_age / future_timestamp
 
     allow_empty=True のレイヤー(監査系: 0件=「異常なし」が正常)では、
     生成時刻があれば row_count=0 でも empty にせず鮮度で判定する。
+    生成時刻が明確に未来(> FUTURE_TOLERANCE_HOURS)なら future_timestamp(時計異常)。
     """
     ts = parse_generated_at(ts_value)
     now_ts = _now_naive_utc(now)
@@ -93,6 +96,8 @@ def assess_layer(label, ts_value, row_count, now, threshold_hours, unavailable=F
         status = "empty"
     elif ts is None:
         status = "unknown_age"
+    elif raw_age is not None and raw_age < -FUTURE_TOLERANCE_HOURS:
+        status = "future_timestamp"
     elif raw_age is not None and raw_age > threshold_hours:
         status = "stale"
     else:
@@ -163,13 +168,13 @@ def data_health_summary(extras, row_counts, latest_dates, now) -> dict:
         health_status = "critical"
     elif counts["stale"] > 0 or counts["empty"] > 0:
         health_status = "degraded"
-    elif counts["unknown_age"] > 0:
+    elif counts["unknown_age"] > 0 or counts["future_timestamp"] > 0:
         health_status = "watch"
     else:
         health_status = "healthy"
 
     worst = max(layers, key=lambda x: _HEALTH_RANK.get(x["status"], 0)) if layers else None
-    attention = [l for l in layers if l["status"] in ("stale", "empty", "missing", "unavailable")]
+    attention = [l for l in layers if l["status"] in ("stale", "empty", "missing", "unavailable", "future_timestamp")]
 
     return {
         "available": True,
@@ -181,6 +186,7 @@ def data_health_summary(extras, row_counts, latest_dates, now) -> dict:
         "missing_count": counts["missing"],
         "unavailable_count": counts["unavailable"],
         "unknown_age_count": counts["unknown_age"],
+        "future_timestamp_count": counts["future_timestamp"],
         "worst_layer": worst["layer"] if worst else "",
         "worst_status": worst["status"] if worst else "",
         "attention_layers": [l["layer"] for l in attention],
