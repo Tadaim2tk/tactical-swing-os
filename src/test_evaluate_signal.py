@@ -105,6 +105,39 @@ def test_no_trade_data_missing_when_no_ohlc():
     assert res["outcome"] == "no_trade"
 
 
+# === 入力不正: signal_date が不正/欠損は awaiting_horizon ではなく invalid_signal_date ===
+# (Codex review P2: future_bars は signal_date=None でも空になり、誤って「若い」に分類されていた)
+
+def test_trade_invalid_signal_date_not_awaiting_horizon():
+    df = _ohlcv([(100, 101, 99, 100), (105, 111, 100, 110)])
+    for bad in ["not-a-date", "", None]:
+        res = ev.evaluate_trade(_trade_signal(bad), df, horizon=10)
+        assert res["error_type"] == "invalid_signal_date", bad
+        assert res["error_type"] != "awaiting_horizon"
+        assert res["status"] == "invalid"
+        assert res["evaluation_status"] == "skipped"
+        assert res["outcome"] == "invalid"
+
+
+def test_no_trade_invalid_signal_date_not_awaiting_horizon():
+    df = _ohlcv([(100, 101, 99, 100), (105, 106, 100, 104)])
+    for bad in ["not-a-date", "", None]:
+        res = ev.no_trade_result(_no_trade_signal(bad), df, horizon=10)
+        assert res["error_type"] == "invalid_signal_date", bad
+        assert res["error_type"] != "awaiting_horizon"
+        assert res["status"] == "invalid"
+        assert res["evaluation_status"] == "skipped"
+        assert res["outcome"] == "invalid"
+
+
+def test_evaluate_one_invalid_signal_date_for_both_paths(monkeypatch):
+    # evaluate_one 経由(trade / no_trade)でも、OHLCがあっても invalid_signal_date になる
+    df = _ohlcv([(100, 101, 99, 100), (105, 111, 100, 110)])
+    monkeypatch.setattr(ev, "load_ohlcv", lambda asset: df)
+    assert ev.evaluate_one(_trade_signal("bad"), horizon=10)["error_type"] == "invalid_signal_date"
+    assert ev.evaluate_one(_no_trade_signal(""), horizon=10)["error_type"] == "invalid_signal_date"
+
+
 # === コホート(複数件)が混在しても各状態が正しく付く ===
 
 def test_cohort_mixed_states_via_dataframe(monkeypatch):

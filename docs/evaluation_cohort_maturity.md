@@ -35,9 +35,13 @@ data/raw/*.csv (fetch_market.py)
 |---|---|---|---|
 | `data_missing` | 価格データが本当に無い（asset未取得・空ファイル等） | 無し | — |
 | `awaiting_horizon` | OHLCはあるが signal_date 以降のバーがまだ無い＝**ホライズン未到達（若い/蓄積中）** | 有り | 無し |
+| `invalid_signal_date` | `signal_date` が不正/欠損で**評価位置を決められない入力不正**（若さではない） | — | — |
 
-- trade: いずれも `status=pending` / `outcome=open_unresolved`（決着させない）。
-- no_trade: いずれも `evaluation_status=skipped` / `outcome=no_trade`（正否は未確定）。
+- trade(data_missing/awaiting_horizon): `status=pending` / `outcome=open_unresolved`（決着させない）。
+- no_trade(data_missing/awaiting_horizon): `evaluation_status=skipped` / `outcome=no_trade`（正否は未確定）。
+- **invalid_signal_date**: trade/no_trade とも `status=invalid` / `evaluation_status=skipped` /
+  `outcome=invalid`。`signal_date is None`（パース不能/空）のとき future_bars が空になるが、これを
+  `awaiting_horizon`（若い）と誤分類しないよう、ホライズン判定**より前**に弾く。
 - ホライズン到達後にバーが揃えば、通常どおり `closed`（win_tp1/win_tp2/loss_sl）等へ進む。
 
 ## 評価成熟度（evaluation_maturity）
@@ -53,7 +57,8 @@ data/raw/*.csv (fetch_market.py)
 | `active` | finalized が1件以上 | 決着した判断がある |
 
 - finalized = `win_tp1 / win_tp2 / loss_sl / no_trade_correct / no_trade_missed`。
-- 併記される `awaiting_horizon` / `data_missing` 件数で「なぜまだ蓄積中か」を切り分けられる。
+- 併記される `awaiting_horizon` / `data_missing` / `invalid_signal_date` 件数で「なぜまだ蓄積中か」を切り分けられる。
+- `invalid_signal_date`（入力不正）は finalized ではないため `active` を過剰に立てない。件数として可視化し、入力品質の問題を隠さない。
 
 ### Data Health（鮮度）との関係
 

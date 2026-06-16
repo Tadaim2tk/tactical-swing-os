@@ -97,6 +97,7 @@ DISPLAY_LABELS = {
     "skipped": "スキップ",
     "awaiting_horizon": "ホライズン未到達",
     "data_missing": "価格データ欠損",
+    "invalid_signal_date": "日付不正",
     "no_entry": "未約定",
     "no_trade": "見送り",
     "win_rate": "勝率",

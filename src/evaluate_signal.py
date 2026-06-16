@@ -219,6 +219,11 @@ def range_touches_entry(bar: pd.Series, entry_low: float, entry_high: float) -> 
 def no_trade_result(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
     result = base_result(signal)
     signal_date = safe_date(signal.get("date"))
+    if signal_date is None:
+        # 日付が不正/欠損 = 評価位置を決められない入力不正。若さ(awaiting_horizon)ではない。
+        result["r_multiple"] = 0.0
+        result["r_result"] = 0.0
+        return finish(result, status="invalid", evaluation_status="skipped", outcome="invalid", error_type="invalid_signal_date", note="Invalid or missing signal date")
     future = future_bars(df, signal_date, horizon)
     result["bars_checked"] = len(future)
     if not future.empty:
@@ -259,6 +264,9 @@ def evaluate_trade(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
     result = base_result(signal)
     side = result["side"]
     signal_date = safe_date(signal.get("date"))
+    if signal_date is None:
+        # 日付が不正/欠損 = 評価位置を決められない入力不正。若さ(awaiting_horizon)ではない。
+        return finish(result, status="invalid", evaluation_status="skipped", outcome="invalid", error_type="invalid_signal_date", note="Invalid or missing signal date")
     future = future_bars(df, signal_date, horizon)
     result["bars_checked"] = len(future)
     if not future.empty:

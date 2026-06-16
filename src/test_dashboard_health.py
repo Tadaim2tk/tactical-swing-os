@@ -308,3 +308,17 @@ def test_evaluation_maturity_accumulating_when_only_no_trade_unassessed():
     )
     s = ds.evaluation_summary(df)
     assert s["evaluation_maturity"] == "accumulating"
+
+
+def test_evaluation_maturity_invalid_dates_not_active():
+    # 入力不正(invalid_signal_date)だけでは active 化しない。件数として可視化される (Codex P2)
+    df = pd.DataFrame(
+        [
+            {"evaluation_status": "skipped", "outcome": "invalid", "error_type": "invalid_signal_date", "r_multiple": None},
+            {"evaluation_status": "skipped", "outcome": "invalid", "error_type": "invalid_signal_date", "r_multiple": None},
+        ]
+    )
+    s = ds.evaluation_summary(df)
+    assert s["evaluation_maturity"] != "active"
+    assert s["evaluation_maturity"] == "accumulating"
+    assert s["invalid_signal_date"] == 2
