@@ -108,7 +108,7 @@ result = ev.evaluate_signal(signal_row, ohlcv=None)  # ohlcv=None なら yfinanc
 summary = ev.summarize(signals_df)
 ```
 
-`outcome_type` (A〜F) は補助的な自動推定で、最終的な `thesis_correct / timing_correct / execution_degraded` は**人間が判断して記入**（機械的に決定できない領域は人間に残す）。
+`outcome_type` (A〜F) は補助的な自動推定で、最終的な `thesis_hit / timing_hit / execution_hurt` は**人間が判断して記入**（機械的に決定できない領域は人間に残す）。
 
 ## 安全条件（全フェーズ不変）
 
