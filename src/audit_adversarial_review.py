@@ -27,6 +27,8 @@ import json
 import math
 from pathlib import Path
 
+import audit_dictionaries
+
 import pandas as pd
 
 import stat_guards
@@ -55,12 +57,8 @@ SEVERITY_ORDER = {"info": 0, "warning": 1, "high_risk": 2, "blocked": 3}
 STRONG_VALUES = {"high", "strong", "adopt", "increase_strong"}
 LOW_CONFIDENCE = {"low", "insufficient_data", "none", "weak"}
 
-OVERCONFIDENCE_TERMS = [
-    # 日本語
-    "確実", "必ず", "絶対", "間違いない", "リスクなし", "リスクゼロ", "鉄板", "100%", "確実に儲か",
-    # 英語
-    "guaranteed", "certain win", "no risk", "risk-free", "riskless", "always wins", "surefire", "can't lose", "100% sure",
-]
+# 辞書は config/audit_dictionaries.json へ外部化 (欠損時は DEFAULTS へ安全fallback)
+OVERCONFIDENCE_TERMS = audit_dictionaries.overconfidence_terms()
 
 MIN_SAMPLES = stat_guards.MIN_SAMPLES_WEIGHT_CHANGE  # 30
 
@@ -105,11 +103,8 @@ def is_low_confidence(value) -> bool:
 
 
 def detect_overconfidence(text) -> list[str]:
-    if text is None:
-        return []
-    low = str(text).lower()
-    found = [t for t in OVERCONFIDENCE_TERMS if t.lower() in low]
-    return sorted(set(found))
+    """過信表現を検出 (英語は語境界マッチで false positive を低減)。"""
+    return audit_dictionaries.match_terms(text, OVERCONFIDENCE_TERMS)
 
 
 def _finding(
