@@ -215,13 +215,20 @@ def lag_adjusted_edge(
 
 
 def execution_lag_cost_jpy(expected_price: float, actual_price: float, shares: int) -> float:
-    """1日ラグによる価格劣化コスト（円）。
+    """1日ラグによる価格劣化コスト（円）。符号付き値。
 
-    ロングポジションでは、実際の約定価格が想定より高いほどコストが増える。
-    execution_lag_cost = (actual_price - expected_price) * shares
-    正なら不利（ラグでコスト増）、負なら有利（ラグで得）。
+    【符号の定義: signed value】
+      正 → 不利（actual > expected: 想定より高く買わされた）
+      負 → 有利（actual < expected: 想定より安く買えた）
+      0  → ラグなし
 
-    手数料とは別に、台帳の execution_lag_cost_jpy フィールドへ記録する。
+    signed value を採用する理由:
+      有利方向（寄付が下落して安く入れた）も記録価値がある。
+      「ラグは常に不利」という思い込みを測定データで検証するため。
+      台帳の execution_lag_cost_jpy フィールドへそのまま記録する。
+
+    手数料（buy_fee_jpy / sell_fee_jpy）とは別フィールドで管理すること。
+    net_pnl = gross_pnl - buy_fee - sell_fee - execution_lag_cost（正の場合）。
     """
     ep = _coerce(expected_price)
     ap = _coerce(actual_price)

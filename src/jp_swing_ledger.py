@@ -15,10 +15,21 @@ JP個別株スイング仮説の記録・検証・振り返り台帳。
   assumed_execution_date 想定約定日（= intended_order_date の翌営業日）
   actual_execution_date  実際の約定日（約定後に記入）
 
+  【前提: 標準ケース】
+  「引け後に分析 → 翌営業日の寄付前に注文 → さらに翌営業日の寄付で約定」
+  = decision_date + 2営業日 = assumed_execution_date を標準とする。
+  これより早く約定できるケース（当日注文可等）は assumed_execution_date を
+  1営業日に変更し、actual_execution_date で実績を記録する。
+
+  【予測日付と実績日付の分離】
+  intended_order_date / assumed_execution_date は「事前の計画値」。
+  actual_execution_date は「事後の実績値」。両者は混ぜない。
+  ラグのズレは (actual_execution_date - assumed_execution_date) で測定できる。
+
 コスト分離:
   buy_fee_jpy            買い手数料（率ベース or 最低手数料）
   sell_fee_jpy           売り手数料（率ベース or 最低手数料）
-  execution_lag_cost_jpy 1日ラグによる価格劣化コスト（想定価格 vs 実際の差）
+  execution_lag_cost_jpy 1日ラグによる価格劣化コスト（符号付き、下記参照）
 """
 
 from __future__ import annotations
