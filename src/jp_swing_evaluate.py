@@ -9,6 +9,8 @@
   チェックすると「約定直後に即 SL 判定」という論理矛盾が起きる。
   同日チェックを外すことで「約定後の値動き」のみを評価対象にする。
   これは意図的な除外であり、ドキュメントとテストで明示する。
+・SL/TP 未達かつ len(future) < horizon の場合は status=open のまま返す。
+  False-confidence rule: horizon 到達前のデータ不足を早仕舞いと混同しない。
 
 ─── コスト計算の分離方針 ────────────────────────────────────────────
 net_pnl_jpy = gross_pnl - buy_fee - sell_fee
@@ -21,10 +23,13 @@ execution_lag_cost_jpy = (actual_entry_price - expected_entry_price) × shares
   正 → 想定より高く買わされた（ラグが不利に働いた）
   負 → 想定より安く買えた（ラグが有利に働いた）
 
-─── 補助フラグ（人間入力） ──────────────────────────────────────────
-thesis_hit / timing_hit / execution_hurt / market_regime_hurt / lucky_flag
-は機械的に決定できない。評価エンジンは補助推定 _suggest_outcome() を
-提供するが、最終確定は人間が記入する（false-confidence ルール）。
+─── 補助フラグと outcome 推定の順序 ─────────────────────────────────
+evaluation_hurt は機械的に推定できる唯一のフラグ（fee率 or ラグ率が閾値超）。
+_suggest_outcome() がこの値を使って outcome C を判定できるよう、
+execution_hurt の自動補完は必ず _suggest_outcome() より先に行う。
+
+thesis_hit / timing_hit は機械判定できない。人間が記入する。
+最終確定は人間が記入する（false-confidence ルール）。
 """
 
 from __future__ import annotations
@@ -143,6 +148,14 @@ def evaluate_signal(
     if future.empty:
         return result
 
+    # execution_lag_cost_jpy はデータ不足でも記録する（帰因専用）
+    lag_cost = (
+        cost_lib.execution_lag_cost_jpy(expected_price, entry_price, shares)
+        if not math.isnan(expected_price) and not math.isnan(entry_price)
+        else 0.0
+    )
+    result["execution_lag_cost_jpy"] = round(lag_cost, 0)
+
     risk_per_share = entry_price - sl_price
     risk_jpy = risk_per_share * shares if risk_per_share > 0.0 else 0.0
 
@@ -175,8 +188,16 @@ def evaluate_signal(
             exit_date_eval = bar_date
             break
 
-    # horizon 満了 → 最終足の終値で評価
-    time_exit = not sl_hit and not tp2_hit
+    # tp1 が唯一の利確目標（tp2 未定義）の場合はそこで閉じる
+    tp1_is_final = tp1_hit and math.isnan(tp2_price)
+
+    # time_exit は horizon 本数に到達したときだけ（データ不足は open のまま）
+    time_exit = not sl_hit and not tp2_hit and not tp1_is_final and len(future) >= horizon
+
+    if not (sl_hit or tp2_hit or tp1_is_final or time_exit):
+        # SL/TP 未達かつ horizon 未満 → データ不足、閉じない
+        return result
+
     if time_exit and not exit_date_eval:
         last_bar = future.iloc[-1]
         exit_price_eval = float(last_bar["close"])
@@ -193,13 +214,6 @@ def evaluate_signal(
 
     holding_days = len(future[future["date"] <= exit_date_eval]) if exit_date_eval else len(future)
 
-    # execution_lag_cost_jpy ─ 帰因専用・net_pnl には含めない
-    lag_cost = (
-        cost_lib.execution_lag_cost_jpy(expected_price, entry_price, shares)
-        if not math.isnan(expected_price) and not math.isnan(entry_price)
-        else 0.0
-    )
-
     result["exit_date"] = str(exit_date_eval.date()) if exit_date_eval else result["exit_date"]
     result["exit_price"] = round(exit_price_eval, 2)
     result["exit_reason"] = (
@@ -211,17 +225,15 @@ def evaluate_signal(
     result["holding_days"] = holding_days
     result["buy_fee_jpy"] = round(buy_fee, 0)
     result["sell_fee_jpy"] = round(sell_fee, 0)
-    result["execution_lag_cost_jpy"] = round(lag_cost, 0)
     result["gross_pnl_jpy"] = round(gross_pnl, 0)
     result["net_pnl_jpy"] = round(net_pnl, 0)
     result["risk_jpy"] = round(risk_jpy, 0)
     result["gross_r"] = round(g_r, 3)
     result["net_r"] = round(n_r, 3)
-    result["status"] = "closed" if (sl_hit or tp2_hit or time_exit) else "open"
-
-    result["outcome_type"] = _suggest_outcome(result, row)
+    result["status"] = "closed"
 
     # execution_hurt 自動フラグ（人間未記入の場合のみ）
+    # ★ _suggest_outcome() より前に設定すること（outcome C 判定に使われるため）
     raw_hurt = str(row.get("execution_hurt", "")).strip().lower()
     if raw_hurt not in {"true", "false", "1", "0", "yes", "no"}:
         effective_rate = cost_lib.effective_fee_rate(entry_price, shares, cfg)
@@ -229,14 +241,18 @@ def evaluate_signal(
             effective_rate > 0.02 or abs(lag_cost) / (entry_price * shares) > 0.01
         )
 
+    # outcome_type 補助推定（execution_hurt 自動フラグ設定後に呼ぶ）
+    result["outcome_type"] = _suggest_outcome(result, row)
+
     return result
 
 
 def _suggest_outcome(result: dict[str, Any], original_row: dict[str, Any]) -> str:
     """outcome_type を補助推定する（確定は人間の記入が優先）。
 
-    読む人間フラグ名（rev2）:
-      thesis_hit / timing_hit / execution_hurt / lucky_flag
+    フラグ名（rev2）:
+      thesis_hit / timing_hit → 人間入力のみ（original_row から読む）
+      execution_hurt → 人間入力 or 自動補完（result からフォールバック）
     """
     existing = str(original_row.get("outcome_type", "")).strip()
     if existing and existing in ledger.OUTCOME_TYPES:
@@ -245,17 +261,23 @@ def _suggest_outcome(result: dict[str, Any], original_row: dict[str, Any]) -> st
     def _bool(key: str) -> str:
         return str(original_row.get(key, "")).strip().lower()
 
+    def _bool_with_auto(key: str) -> str:
+        """人間未記入のとき result（自動補完値）を使う。"""
+        v = str(original_row.get(key, "")).strip().lower()
+        if v not in {"true", "false", "1", "0", "yes", "no"}:
+            v = str(result.get(key, "")).strip().lower()
+        return v
+
     thesis_hit = _bool("thesis_hit")
     timing_hit = _bool("timing_hit")
-    execution_hurt = _bool("execution_hurt")
+    execution_hurt = _bool_with_auto("execution_hurt")  # 自動補完フォールバック
     exit_reason = str(result.get("exit_reason", ""))
     net_r_val = _coerce(result.get("net_r", float("nan")))
 
     win = exit_reason in {"tp1_hit", "tp2_hit"} or (not math.isnan(net_r_val) and net_r_val > 0.0)
     loss = exit_reason == "sl_hit" or (not math.isnan(net_r_val) and net_r_val < 0.0)
 
-    if execution_hurt in {"true", "1", "yes"} and loss:
-        return "C"
+    # 人間が thesis/timing を明示した場合は優先（A/B/F/D を先に決める）
     if thesis_hit == "true" and timing_hit == "true" and win:
         return "A"
     if thesis_hit == "true" and timing_hit == "false":
@@ -264,6 +286,9 @@ def _suggest_outcome(result: dict[str, Any], original_row: dict[str, Any]) -> st
         return "F"
     if thesis_hit == "false" and loss:
         return "D"
+    # C は thesis/timing 未設定かつ execution_hurt かつ loss のとき（実行コスト主因）
+    if execution_hurt in {"true", "1", "yes"} and loss:
+        return "C"
     return ""  # false-confidence: 判定不能は強制しない
 
 

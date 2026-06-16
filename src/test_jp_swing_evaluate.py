@@ -6,8 +6,9 @@
   3. net_pnl = gross_pnl - fees のみ（execution_lag_cost は含まない）
   4. execution_lag_cost_jpy は attribution 専用フィールドとして別途計算
   5. 評価開始は actual_execution_date の翌日（同日バーは除外）
-  6. ohlcv 空 → status=open のまま返す（エラーにならない）
-  7. source=unconfigured でもコスト計算は動く（fee=0 でなく unconfigured 扱い）
+  6. SL/TP 未達かつ len(future) < horizon → status=open（データ不足の静かな早仕舞い禁止）
+  7. execution_hurt 自動フラグは _suggest_outcome() より前に設定（outcome C 判定に使われる）
+  8. ohlcv 空 → status=open のまま返す（エラーにならない）
 """
 
 from __future__ import annotations
@@ -66,9 +67,13 @@ def _base_row(**kwargs) -> dict:
 
 
 def _cfg_sourced() -> dict:
-    """ソース付きコスト設定（テスト用）。"""
+    """ソース付きコスト設定（テスト用）。
+    sourced=True を明示しないと buy/sell_commission が 0 を返す（証拠主義の設計）。
+    """
     return {
         "source": "test",
+        "sourced": True,
+        "tax_rate": 0.0,
         "buy_rate": 0.005,
         "sell_rate": 0.005,
         "buy_min_fee": 52.0,
@@ -86,25 +91,23 @@ def test_evaluate_uses_actual_execution_date_not_old_names():
         lows=[1950.0, 1950.0, 1950.0],
         closes=[2300.0, 2300.0, 2300.0],
     )
-    # actual_execution_date を省略し、旧名フィールドのみ提供 → 評価されない
     row = _base_row()
     row.pop("actual_execution_date", None)
     row["actual_entry_date"] = "2026-06-12"  # 旧フィールド名
     row["order_date"] = "2026-06-11"          # 旧フィールド名
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
-    # 旧フィールドが評価に使われないので pending or open だが closed にはならない
     assert result["status"] != "closed"
 
 
 def test_evaluate_reads_actual_execution_date():
-    """actual_execution_date が正しく使われる → closed になる。"""
+    """actual_execution_date が正しく使われる → tp ヒットで closed になる。"""
     ohlcv = _make_ohlcv(
         ["2026-06-13", "2026-06-14", "2026-06-15"],
         highs=[2500.0, 2500.0, 2500.0],
         lows=[1800.0, 1800.0, 1800.0],
         closes=[2300.0, 2300.0, 2300.0],
     )
-    row = _base_row()  # actual_execution_date="2026-06-12" を含む
+    row = _base_row()
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
     assert result["status"] == "closed"
 
@@ -122,7 +125,6 @@ def test_evaluation_excludes_execution_date_bar():
     )
     row = _base_row()
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
-    # 約定日バーが除外されているので sl_hit にならない
     assert result.get("exit_reason") != "sl_hit"
 
 
@@ -131,7 +133,7 @@ def test_execution_date_bar_included_would_hit_sl():
     ohlcv = _make_ohlcv(
         ["2026-06-13", "2026-06-14", "2026-06-15"],
         highs=[2500.0, 2500.0, 2500.0],
-        lows=[1800.0, 1800.0, 1800.0],  # SL(1900) を全日下回る → SL ヒット
+        lows=[1800.0, 1800.0, 1800.0],
         closes=[1850.0, 1850.0, 1850.0],
     )
     row = _base_row()
@@ -139,18 +141,44 @@ def test_execution_date_bar_included_would_hit_sl():
     assert result.get("exit_reason") == "sl_hit"
 
 
+# ── データ不足の早仕舞い禁止 ──────────────────────────────────────
+
+def test_insufficient_data_not_closed():
+    """horizon=20 でも ohlcv が1本かつ SL/TP 未達 → open のまま（time_exit しない）。"""
+    ohlcv = _make_ohlcv(
+        ["2026-06-13"],
+        highs=[2100.0],
+        lows=[1950.0],  # SL(1900)/TP(2200/2400) いずれも未達
+        closes=[2050.0],
+    )
+    row = _base_row(horizon_days=20)
+    result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
+    assert result["status"] == "open"
+    assert result.get("exit_reason") != "time_exit"
+
+
+def test_time_exit_exactly_at_horizon():
+    """horizon=10 + future 10本 + SL/TP 未達 → time_exit で closed。"""
+    dates = [f"2026-06-{13+i:02d}" for i in range(10)]
+    ohlcv = _make_ohlcv(dates, highs=[2100.0] * 10, lows=[1950.0] * 10, closes=[2050.0] * 10)
+    row = _base_row(horizon_days=10)
+    result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
+    assert result["status"] == "closed"
+    assert result["exit_reason"] == "time_exit"
+
+
 # ── コスト分離: net_pnl と execution_lag_cost ─────────────────────
 
 def test_net_pnl_excludes_lag_cost():
     """net_pnl = gross_pnl - buy_fee - sell_fee（ラグコスト含まない）。"""
+    # horizon=1 でちょうど1本のバーで time_exit にする
     ohlcv = _make_ohlcv(
         ["2026-06-13"],
-        highs=[2200.0],
+        highs=[2100.0],
         lows=[1950.0],
         closes=[2100.0],
     )
-    # horizon=20 でも ohlcv に1本しかないので time_exit
-    row = _base_row(horizon_days=20)
+    row = _base_row(horizon_days=1)
     cfg = _cfg_sourced()
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=cfg)
     assert result["status"] == "closed"
@@ -171,6 +199,7 @@ def test_execution_lag_cost_is_separate_attribution():
         actual_entry_price=2000.0,
         expected_entry_price=1980.0,  # ラグで 20 円不利
         shares=2,
+        horizon_days=1,
     )
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
     assert "execution_lag_cost_jpy" in result
@@ -184,7 +213,9 @@ def test_execution_lag_cost_negative_when_favorable():
     row = _base_row(
         actual_entry_price=1960.0,   # 想定より安く約定
         expected_entry_price=1980.0,
+        sl_price=1850.0,  # SL を下げてエントリーでも有効範囲内に保つ
         shares=1,
+        horizon_days=1,
     )
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
     # (1960 - 1980) × 1 = -20
@@ -199,16 +230,29 @@ def test_lag_cost_not_in_net_pnl():
         actual_entry_price=2000.0,
         expected_entry_price=1980.0,
         shares=1,
+        horizon_days=1,
     )
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=cfg)
     exit_p = result["exit_price"]
     buy_fee = cost_lib.buy_commission(2000.0, 1, cfg)
     sell_fee = cost_lib.sell_commission(exit_p, 1, cfg)
     expected_net = (exit_p - 2000.0) - buy_fee - sell_fee
-    lag_cost = result["execution_lag_cost_jpy"]
-    # net_pnl が lag_cost を含まないことを確認（含むと値がずれる）
     assert abs(result["net_pnl_jpy"] - round(expected_net, 0)) < 1
-    assert result["net_pnl_jpy"] != round(expected_net - lag_cost, 0) or lag_cost == 0
+
+
+def test_lag_cost_recorded_even_when_insufficient_data():
+    """SL/TP 未達かつデータ不足 → status=open でも execution_lag_cost_jpy は記録される。"""
+    ohlcv = _make_ohlcv(["2026-06-13"], highs=[2100.0], lows=[1950.0], closes=[2050.0])
+    row = _base_row(
+        actual_entry_price=2000.0,
+        expected_entry_price=1970.0,
+        shares=1,
+        horizon_days=20,  # 1本 < 20本 → データ不足
+    )
+    result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
+    assert result["status"] == "open"
+    # ラグコストは帰因専用なのでデータ不足でも記録する
+    assert result.get("execution_lag_cost_jpy") == 30.0  # (2000-1970)×1
 
 
 # ── SL / TP / time_exit ───────────────────────────────────────────
@@ -255,7 +299,6 @@ def test_tp2_exit():
 
 def test_time_exit():
     """horizon 満了 → 最終足の終値で time_exit。"""
-    # horizon=10、10本のバーを用意（SL/TP 到達なし）
     dates = [f"2026-06-{13+i:02d}" for i in range(10)]
     ohlcv = _make_ohlcv(dates, highs=[2100.0] * 10, lows=[1950.0] * 10, closes=[2050.0] * 10)
     row = _base_row(horizon_days=10)
@@ -315,7 +358,44 @@ def test_zero_shares_returns_pending():
     assert result["status"] in {"pending", "open"}
 
 
-# ── _suggest_outcome と execution_hurt フラグ ──────────────────────
+# ── execution_hurt 自動フラグと outcome C ─────────────────────────
+
+def test_outcome_C_auto_execution_hurt_high_fee_loss():
+    """人間未記入 + effective_fee_rate > 0.02 + SL ヒット → outcome_type == C。
+
+    entry=2000, shares=1, min_fee=52 → effective_rate = 52/2000 = 2.6% > 2%.
+    auto execution_hurt = True かつ loss → C。
+    execution_hurt の自動補完が _suggest_outcome() より前に走ることで機能する。
+    """
+    ohlcv = _make_ohlcv(
+        ["2026-06-13"],
+        highs=[2100.0],
+        lows=[1800.0],  # SL=1900 ヒット
+        closes=[1850.0],
+    )
+    row = _base_row()
+    # execution_hurt を未設定にする
+    row.pop("execution_hurt", None)
+    result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
+    assert result["exit_reason"] == "sl_hit"
+    assert result.get("execution_hurt") is True  # 自動補完で True
+    assert result["outcome_type"] == "C"          # _suggest_outcome が C を返す
+
+
+def test_execution_hurt_auto_true_but_win_is_not_C():
+    """execution_hurt=True でも win の場合は C にならない（C は hurt かつ loss）。"""
+    ohlcv = _make_ohlcv(
+        ["2026-06-13"],
+        highs=[2500.0],  # tp2=2400 ヒット
+        lows=[1950.0],
+        closes=[2450.0],
+    )
+    row = _base_row(thesis_hit="true", timing_hit="true")
+    row.pop("execution_hurt", None)
+    result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
+    # execution_hurt が True でも勝ちなので C にはならない
+    assert result["outcome_type"] != "C"
+
 
 def test_suggest_outcome_A_when_thesis_timing_win():
     """thesis_hit=true, timing_hit=true, tp ヒット → outcome A。"""
@@ -333,7 +413,8 @@ def test_suggest_outcome_D_when_thesis_false_loss():
         lows=[1800.0],  # SL ヒット
         closes=[1850.0],
     )
-    row = _base_row(thesis_hit="false")
+    # execution_hurt=false を明示（C より D を優先させる）
+    row = _base_row(thesis_hit="false", execution_hurt="false")
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
     assert result["outcome_type"] == "D"
 
@@ -341,7 +422,7 @@ def test_suggest_outcome_D_when_thesis_false_loss():
 def test_suggest_outcome_B_timing_miss():
     """thesis_hit=true, timing_hit=false → outcome B。"""
     ohlcv = _make_ohlcv(["2026-06-13"], highs=[2100.0], lows=[1950.0], closes=[2050.0])
-    row = _base_row(thesis_hit="true", timing_hit="false")
+    row = _base_row(thesis_hit="true", timing_hit="false", horizon_days=1)
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
     assert result["outcome_type"] == "B"
 
@@ -365,10 +446,10 @@ def test_human_input_outcome_type_takes_precedence():
 def test_execution_hurt_not_overwritten_when_human_provided():
     """人間が execution_hurt=false と記入済み → 自動フラグで上書きしない。"""
     ohlcv = _make_ohlcv(["2026-06-13"], highs=[2100.0], lows=[1950.0], closes=[2050.0])
-    row = _base_row(execution_hurt="false")
+    row = _base_row(execution_hurt="false", horizon_days=1)
     result = ev.evaluate_signal(row, ohlcv=ohlcv, cost_cfg=_cfg_sourced())
-    # 人間入力を尊重（自動計算が true でも false が残る）
-    assert str(result.get("execution_hurt", "")).strip().lower() in {"false", "0", "no", False}
+    raw = str(result.get("execution_hurt", "")).strip().lower()
+    assert raw in {"false", "0", "no"}
 
 
 # ── summarize() ─────────────────────────────────────────────────
@@ -406,7 +487,6 @@ def test_summarize_win_rate():
         rows.append(row)
     df = pd.DataFrame(rows)
     summary = ev.summarize(df)
-    # 2勝1敗 → 0.667
     assert abs(summary["win_rate"] - 2 / 3) < 0.01
 
 
