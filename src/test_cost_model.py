@@ -207,13 +207,13 @@ def test_absent_asset_uses_house_wide_sourced_default():
 
 
 def test_validate_missing_source_date_only():
-    model = _model({"BTC": {"spread": 1.0, "source": "XM spec", "source_date": "", "responsibility": "tk"}})
+    model = _model({"BTC": {"spread": 1.0, "source": "XM spec", "source_type": "published_spec", "source_date": "", "responsibility": "tk"}})
     issues = {i["issue"] for i in cost_model.validate_cost_model(model) if i["asset"] == "BTC"}
     assert issues == {"missing_source_date"}
 
 
 def test_validate_missing_responsibility_only():
-    model = _model({"BTC": {"spread": 1.0, "source": "XM spec", "source_date": "2026-06-16", "responsibility": ""}})
+    model = _model({"BTC": {"spread": 1.0, "source": "XM spec", "source_type": "published_spec", "source_date": "2026-01-01", "responsibility": ""}})
     issues = {i["issue"] for i in cost_model.validate_cost_model(model) if i["asset"] == "BTC"}
     assert issues == {"missing_responsibility"}
 
@@ -222,3 +222,82 @@ def test_is_sourced_whitespace_and_mixed_case():
     assert cost_model.is_sourced("  XM Spec  ") is True
     assert cost_model.is_sourced("  UNCONFIGURED  ") is False
     assert cost_model.is_sourced("Placeholder") is False
+
+
+# === Phase 26.1: 出典メタの型検証 ===
+
+TODAY = "2026-06-16"
+
+
+def test_parse_iso_date():
+    assert cost_model.parse_iso_date("2026-06-16") is not None
+    assert cost_model.parse_iso_date("2026/06/16") is None  # 形式違い
+    assert cost_model.parse_iso_date("2026-13-40") is None  # 実在しない
+    assert cost_model.parse_iso_date("") is None
+    assert cost_model.parse_iso_date(None) is None
+
+
+def _sourced(**over):
+    base = {"spread": 1.0, "source": "XM spec", "source_type": "published_spec", "source_date": "2026-01-01", "responsibility": "tk"}
+    base.update(over)
+    return _model({"BTC": base})
+
+
+def test_invalid_source_type_flagged():
+    issues = {i["issue"] for i in cost_model.validate_cost_model(_sourced(source_type="unconfigured"), today=TODAY) if i["asset"] == "BTC"}
+    assert "invalid_source_type" in issues
+    issues2 = {i["issue"] for i in cost_model.validate_cost_model(_sourced(source_type="guess"), today=TODAY) if i["asset"] == "BTC"}
+    assert "invalid_source_type" in issues2
+
+
+def test_valid_source_types_pass():
+    for st in ["measured", "published_spec", "MEASURED", "Published_Spec"]:
+        issues = {i["issue"] for i in cost_model.validate_cost_model(_sourced(source_type=st), today=TODAY) if i["asset"] == "BTC"}
+        assert "invalid_source_type" not in issues
+
+
+def test_invalid_source_date_format_flagged():
+    issues = {i["issue"] for i in cost_model.validate_cost_model(_sourced(source_date="2026/06/16"), today=TODAY) if i["asset"] == "BTC"}
+    assert "invalid_source_date" in issues
+    assert "missing_source_date" not in issues  # 空ではない
+
+
+def test_future_source_date_flagged():
+    issues = {i["issue"] for i in cost_model.validate_cost_model(_sourced(source_date="2999-01-01"), today=TODAY) if i["asset"] == "BTC"}
+    assert "future_source_date" in issues
+
+
+def test_fully_valid_sourced_asset_has_no_issues():
+    assert cost_model.validate_cost_model(_sourced(), today=TODAY) == []
+
+
+def test_shipped_config_clean_under_date_checks():
+    cost_model.reset_cache()
+    assert cost_model.validate_cost_model(cost_model.load_cost_model(), today=TODAY) == []
+
+
+# === セルフ監査(Phase 26.1)の追補 ===
+
+def test_parse_iso_date_strict_zero_padding():
+    # 非ゼロ埋めは不正(文書化した厳格YYYY-MM-DD)
+    assert cost_model.parse_iso_date("2026-6-6") is None
+    assert cost_model.parse_iso_date("2026-06-06") is not None
+    # 前後空白は許容
+    assert cost_model.parse_iso_date("  2026-06-16  ") is not None
+
+
+def test_non_zero_padded_date_flagged_invalid():
+    issues = {i["issue"] for i in cost_model.validate_cost_model(_sourced(source_date="2026-6-6"), today=TODAY) if i["asset"] == "BTC"}
+    assert "invalid_source_date" in issues
+
+
+def test_malformed_today_falls_back_not_disabling_future_check():
+    # 不正な today を渡しても future チェックは無効化されない(UTC todayへフォールバック)
+    issues = {i["issue"] for i in cost_model.validate_cost_model(_sourced(source_date="2999-01-01"), today="garbage") if i["asset"] == "BTC"}
+    assert "future_source_date" in issues
+
+
+def test_default_today_is_utc_deterministic_boundary():
+    # today未指定でも UTC基準。過去日付は決して future にならない
+    issues = {i["issue"] for i in cost_model.validate_cost_model(_sourced(source_date="2020-01-01")) if i["asset"] == "BTC"}
+    assert "future_source_date" not in issues

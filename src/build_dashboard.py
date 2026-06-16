@@ -98,7 +98,7 @@ def build_dashboard() -> tuple[dict, str]:
         extras["narrative_reliability_json"],
         extras["narrative_reliability"],
     )
-    transaction_cost = transaction_cost_summary(evaluations, extras["cost_model_json"])
+    transaction_cost = transaction_cost_summary(evaluations, extras["cost_model_json"], as_of=now_utc().date().isoformat())
     audit_report = audit_report_summary(extras["latest_audit_status"])
     narrative_lookahead = narrative_lookahead_summary(
         extras["narrative_lookahead_audit_summary_json"],

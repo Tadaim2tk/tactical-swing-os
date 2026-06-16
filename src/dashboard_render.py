@@ -572,6 +572,8 @@ def render_html(
             stat_card("configured_assets", transaction_cost.get("configured_asset_count", 0)),
             stat_card("unsourced_nonzero", transaction_cost.get("unsourced_nonzero_count", 0)),
             stat_card("missing_provenance", transaction_cost.get("missing_provenance_count", 0)),
+            stat_card("invalid_source_type", transaction_cost.get("invalid_source_type_count", 0)),
+            stat_card("invalid_source_date", transaction_cost.get("invalid_source_date_count", 0)),
             stat_card("default_source", transaction_cost.get("default_source", "unconfigured")),
             stat_card("configured_sources", ", ".join(transaction_cost.get("configured_sources", []) or []) or "なし"),
             stat_card("net_r_available", str(transaction_cost.get("net_r_available", False)).lower()),

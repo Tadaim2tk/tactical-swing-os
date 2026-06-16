@@ -98,7 +98,7 @@ def test_transaction_cost_summary_configured():
     cost_model_json = {
         "_meta": {"status": "configured"},
         "default": {"source": "broker_x"},
-        "assets": {"BTC": {"source": "broker_x"}, "WTI": {"source": "unconfigured"}},
+        "assets": {"BTC": {"source": "broker_x", "source_type": "published_spec", "source_date": "2026-01-01", "responsibility": "tk"}, "WTI": {"source": "unconfigured"}},
     }
     evals = pd.DataFrame({
         "r_result": [1.0, -1.0],
@@ -285,3 +285,47 @@ def test_transaction_cost_summary_unsourced_asset_not_counted_as_configured():
     s = bd.transaction_cost_summary(pd.DataFrame(), j)
     assert s["configured_asset_count"] == 0
     assert s["unsourced_nonzero_count"] == 1
+
+
+# === Phase 26.1: Dashboard 出典メタ型検証カウント ===
+
+def test_transaction_cost_summary_invalid_source_type_counted():
+    j = {"_meta": {"status": "configured"}, "default": {"source": "unconfigured"},
+         "assets": {"BTC": {"spread": 1.0, "source": "XM spec", "source_type": "unconfigured", "source_date": "2026-01-01", "responsibility": "tk"}}}
+    s = bd.transaction_cost_summary(pd.DataFrame(), j)
+    assert s["invalid_source_type_count"] == 1
+    assert "証拠メタ不正" in s["warning"]
+
+
+def test_transaction_cost_summary_invalid_and_future_date_counted():
+    j = {"_meta": {"status": "configured"}, "default": {"source": "unconfigured"},
+         "assets": {
+             "BTC": {"spread": 1.0, "source": "XM", "source_type": "measured", "source_date": "2026/06/16", "responsibility": "tk"},  # bad format
+             "ETH": {"spread": 1.0, "source": "XM", "source_type": "measured", "source_date": "2999-01-01", "responsibility": "tk"},  # future
+         }}
+    s = bd.transaction_cost_summary(pd.DataFrame(), j)
+    assert s["invalid_source_date_count"] == 2  # 形式不正 + 未来 を合算
+
+
+# === Phase 26.1 セルフ監査の追補: as_of で決定論化 ===
+
+def test_transaction_cost_summary_as_of_makes_future_check_deterministic():
+    j = {"_meta": {"status": "configured"}, "default": {"source": "unconfigured"},
+         "assets": {"BTC": {"spread": 1.0, "source": "X", "source_type": "measured", "source_date": "2026-06-16", "responsibility": "tk"}}}
+    # as_of == source_date -> not future -> clean
+    s_same = bd.transaction_cost_summary(pd.DataFrame(), j, as_of="2026-06-16")
+    assert s_same["invalid_source_date_count"] == 0
+    # as_of one day before -> source_date is future -> flagged
+    s_before = bd.transaction_cost_summary(pd.DataFrame(), j, as_of="2026-06-15")
+    assert s_before["invalid_source_date_count"] == 1
+
+
+def test_transaction_cost_summary_warning_composes_multiple():
+    j = {"_meta": {"status": "configured"}, "default": {"source": "unconfigured"},
+         "assets": {
+             "BTC": {"spread": 200.0, "source": "unconfigured"},  # unsourced non-zero
+             "ETH": {"spread": 1.0, "source": "X", "source_type": "unconfigured", "source_date": "2026-01-01", "responsibility": "tk"},  # invalid type
+         }}
+    s = bd.transaction_cost_summary(pd.DataFrame(), j, as_of="2026-06-16")
+    assert "証拠主義違反" in s["warning"]
+    assert "証拠メタ不正" in s["warning"]  # 両方が合成される
