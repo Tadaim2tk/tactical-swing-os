@@ -41,6 +41,10 @@ jobs:
         run: |
           python src/propose_model_state_updates.py || echo "warning: model state proposals failed; continuing review"
 
+      - name: Audit model state proposals for review
+        run: |
+          python src/audit_model_state_proposals.py || echo "warning: model state proposal audit failed; continuing review"
+
       - name: Build weights patch for review
         run: |
           python src/build_weights_patch.py || echo "warning: weights patch failed; continuing review"
@@ -48,6 +52,18 @@ jobs:
       - name: Review weights patch for review
         run: |
           python src/review_weights_patch.py || echo "warning: weights patch review failed; continuing review"
+
+      - name: Track proposal adoption for review
+        run: |
+          python src/track_proposal_adoption.py || echo "warning: proposal adoption tracking failed; continuing review"
+
+      - name: Build weight version history for review
+        run: |
+          python src/build_weight_version_history.py || echo "warning: weight version history failed; continuing review"
+
+      - name: Build meta learning for review
+        run: |
+          python src/build_meta_learning.py || echo "warning: meta learning failed; continuing review"
 
       - name: Build auto calibration candidates for review
         run: |

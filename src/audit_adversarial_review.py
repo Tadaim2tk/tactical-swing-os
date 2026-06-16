@@ -300,6 +300,48 @@ def check_cross_layer_contradiction(model_state: pd.DataFrame, auto_calib: pd.Da
     return out
 
 
+# === ソース有効性 (偽passed防止) ===
+# 提案系CSVソースのキー (sources_present のカウント対象)。
+CSV_SOURCE_KEYS = [
+    "rule_update_proposals",
+    "model_state_update_proposals",
+    "weights_patch_proposal",
+    "weights_patch_review",
+    "auto_calibration_candidates",
+    "ai_feedback",
+]
+# Narrative Lookahead summary を「実際に監査した」とみなす audit_status。
+# unavailable / 欠損 は対象が無かったとみなし、有効ソースに数えない。
+CHECKED_LOOKAHEAD_STATUSES = {"passed", "warning", "high_risk", "blocked"}
+
+
+def lookahead_counts_as_source(summary) -> bool:
+    """Narrative Lookahead summary を有効ソースに数えるか。
+
+    audit_status が実チェック済み状態(passed/warning/high_risk/blocked)のときだけ True。
+    unavailable / missing / "" / None は False (= 何もレビューしていない)。
+    """
+    if not isinstance(summary, dict) or not summary:
+        return False
+    return str(summary.get("audit_status", "")).strip().lower() in CHECKED_LOOKAHEAD_STATUSES
+
+
+def count_sources_present(sources: dict) -> int:
+    """実際に中身のある(=レビュー対象になった)ソース数を数える。
+
+    空のCSV / unavailableなlookaheadは数えない。これにより「対象が無いのに
+    findings=0でpassed」という偽の安心(false confidence)を防ぐ。
+    """
+    n = 0
+    for key in CSV_SOURCE_KEYS:
+        df = sources.get(key)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            n += 1
+    if lookahead_counts_as_source(sources.get("narrative_lookahead_audit_summary")):
+        n += 1
+    return n
+
+
 # === I/O ===
 
 def read_csv(path: Path) -> pd.DataFrame:
@@ -496,15 +538,11 @@ def main() -> int:
         "ai_feedback": "ai_feedback.csv",
     }
     sources: dict = {}
-    sources_present = 0
     for key, fname in csv_sources.items():
-        df = read_csv(RESULTS_DIR / fname)
-        sources[key] = df
-        if not df.empty:
-            sources_present += 1
+        sources[key] = read_csv(RESULTS_DIR / fname)
     sources["narrative_lookahead_audit_summary"] = read_json(RESULTS_DIR / "narrative_lookahead_audit_summary.json")
-    if sources["narrative_lookahead_audit_summary"]:
-        sources_present += 1
+    # 空CSV / unavailable lookahead は数えない (偽passed防止)
+    sources_present = count_sources_present(sources)
 
     findings = build_findings(sources)
     for i, f in enumerate(findings):

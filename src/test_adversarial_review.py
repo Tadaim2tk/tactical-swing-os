@@ -290,3 +290,58 @@ def test_cross_layer_netting_no_false_contradiction():
     model = pd.DataFrame([{"target": "BTC", "proposed_delta": 0.05}, {"target": "BTC", "proposed_delta": -0.05}])  # nets to 0
     auto = pd.DataFrame([{"target": "BTC", "suggested_delta": -0.04}])
     assert ar.check_cross_layer_contradiction(model, auto) == []
+
+
+# === Codex P2: 偽passed防止 (sources有効性) ===
+
+def test_lookahead_unavailable_not_counted_as_source():
+    # lookahead が unavailable のときは有効ソースに数えない
+    assert ar.lookahead_counts_as_source({"audit_status": "unavailable"}) is False
+    assert ar.lookahead_counts_as_source({}) is False
+    assert ar.lookahead_counts_as_source(None) is False
+    assert ar.lookahead_counts_as_source({"audit_status": ""}) is False
+
+
+def test_lookahead_checked_statuses_counted_as_source():
+    for st in ["passed", "warning", "high_risk", "blocked", "PASSED", "Blocked"]:
+        assert ar.lookahead_counts_as_source({"audit_status": st}) is True
+
+
+def test_count_sources_present_ignores_empty_and_unavailable():
+    sources = {
+        "rule_update_proposals": pd.DataFrame(),
+        "model_state_update_proposals": pd.DataFrame(),
+        "weights_patch_proposal": pd.DataFrame(),
+        "weights_patch_review": pd.DataFrame(),
+        "auto_calibration_candidates": pd.DataFrame(),
+        "ai_feedback": pd.DataFrame(),
+        "narrative_lookahead_audit_summary": {"audit_status": "unavailable"},
+    }
+    # 全CSV空 + lookahead unavailable -> 0
+    assert ar.count_sources_present(sources) == 0
+
+
+def test_count_sources_present_counts_real_sources():
+    sources = {
+        "rule_update_proposals": pd.DataFrame([{"x": 1}]),
+        "narrative_lookahead_audit_summary": {"audit_status": "passed"},
+    }
+    # 中身のあるCSV1件 + 実チェック済みlookahead1件 -> 2
+    assert ar.count_sources_present(sources) == 2
+
+
+def test_no_false_passed_when_nothing_reviewed():
+    # 提案CSVが全部空、lookaheadもunavailable -> review_status は unavailable (passedではない)
+    sources = {k: pd.DataFrame() for k in ar.CSV_SOURCE_KEYS}
+    sources["narrative_lookahead_audit_summary"] = {"audit_status": "unavailable"}
+    findings = ar.build_findings(sources)
+    s = ar.summarize(findings, ar.count_sources_present(sources), JST, JST)
+    assert findings == []
+    assert s["review_status"] == "unavailable"  # 偽passedにしない
+
+
+def test_passed_only_when_real_sources_present():
+    sources = {k: pd.DataFrame() for k in ar.CSV_SOURCE_KEYS}
+    sources["narrative_lookahead_audit_summary"] = {"audit_status": "passed"}  # 実チェック済み
+    s = ar.summarize(ar.build_findings(sources), ar.count_sources_present(sources), JST, JST)
+    assert s["review_status"] == "passed"
