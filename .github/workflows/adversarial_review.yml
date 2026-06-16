@@ -1,0 +1,76 @@
+name: Tactical Swing OS adversarial review
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 22:30 UTC is 07:30 JST.
+    - cron: "30 22 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  adversarial-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build latest evaluations for review
+        run: |
+          python src/build_latest_evaluations.py || echo "warning: latest evaluations failed; continuing review"
+
+      - name: Propose rule updates for review
+        run: |
+          python src/propose_rule_updates.py || echo "warning: rule update proposals failed; continuing review"
+
+      - name: Propose model state updates for review
+        run: |
+          python src/propose_model_state_updates.py || echo "warning: model state proposals failed; continuing review"
+
+      - name: Build weights patch for review
+        run: |
+          python src/build_weights_patch.py || echo "warning: weights patch failed; continuing review"
+
+      - name: Review weights patch for review
+        run: |
+          python src/review_weights_patch.py || echo "warning: weights patch review failed; continuing review"
+
+      - name: Build auto calibration candidates for review
+        run: |
+          python src/build_auto_calibration_candidates.py || echo "warning: auto calibration failed; continuing review"
+
+      - name: Build AI feedback for review
+        run: |
+          python src/build_ai_feedback.py || echo "warning: AI feedback failed; continuing review"
+
+      - name: Run narrative lookahead audit for review
+        run: |
+          python src/audit_narrative_lookahead.py || echo "warning: narrative lookahead audit failed; continuing review"
+
+      - name: Run adversarial review
+        run: python src/audit_adversarial_review.py
+
+      - name: Upload adversarial review artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tactical-swing-os-adversarial-review-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            results/adversarial_review.csv
+            results/adversarial_review.json
+            results/adversarial_review_summary.json
+            reports/audit/*_adversarial_review.md

@@ -968,6 +968,34 @@ def narrative_lookahead_summary(audit_json, audit_csv: pd.DataFrame) -> dict:
     }
 
 
+def adversarial_review_summary(review_json, review_csv: pd.DataFrame) -> dict:
+    """Adversarial Review Agent (Phase 23) の表示用サマリー。分析・警告専用。
+
+    提案レイヤーを横断レビューし危険兆候を検出する。weights.json/generate_signal.py
+    は一切変更しない。
+    """
+    payload = review_json if isinstance(review_json, dict) and review_json else {}
+    if not payload:
+        return {"available": False, "review_status": "unavailable"}
+    return {
+        "available": True,
+        "review_status": payload.get("review_status", "unavailable"),
+        "total_sources_checked": int(numeric_or(payload.get("total_sources_checked", 0), 0)),
+        "total_findings": int(numeric_or(payload.get("total_findings", 0), 0)),
+        "warning_count": int(numeric_or(payload.get("warning_count", 0), 0)),
+        "high_risk_count": int(numeric_or(payload.get("high_risk_count", 0), 0)),
+        "blocked_count": int(numeric_or(payload.get("blocked_count", 0), 0)),
+        "contradiction_count": int(numeric_or(payload.get("contradiction_count", 0), 0)),
+        "auto_apply_violation_count": int(numeric_or(payload.get("auto_apply_violation_count", 0), 0)),
+        "weights_update_violation_count": int(numeric_or(payload.get("weights_update_violation_count", 0), 0)),
+        "max_severity": payload.get("max_severity", "none"),
+        "recommended_next_action": payload.get("recommended_next_action", "continue_monitoring"),
+        "requires_human_approval": bool(payload.get("requires_human_approval", True)),
+        "weights_json_updated": bool(payload.get("weights_json_updated", False)),
+        "generate_signal_updated": bool(payload.get("generate_signal_updated", False)),
+    }
+
+
 def pending_reevaluation_summary(pending: pd.DataFrame) -> dict:
     if pending.empty:
         return {

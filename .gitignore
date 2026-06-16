@@ -82,3 +82,7 @@ results/narrative_lookahead_audit.csv
 results/narrative_lookahead_audit.json
 results/narrative_lookahead_audit_summary.json
 reports/narrative/*_narrative_lookahead_audit.md
+results/adversarial_review.csv
+results/adversarial_review.json
+results/adversarial_review_summary.json
+reports/audit/*_adversarial_review.md

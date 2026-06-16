@@ -76,6 +76,7 @@ GitHub Actions runner はUTC基準で動くため、そのまま表示すると�
 - `Transaction Cost Model`: ネットR評価のための分析専用モデル (SPEC-TC-001)。コスト設定状態(status/configured assets/net R available等)を表示。実売買・発注は行いません。コスト未設定時は「ネットR=グロスR」の警告を表示します
 - `Audit Report`: 統合状態確認用のシステム監査ステータス(latest_audit_status)を表示
 - `Narrative Lookahead Audit`: ニュース/AI要約への未来情報・評価結果の混入を検出する研究プロセス監査。audit_status/件数/max scoreと、warning/high_risk/blockedの詳細を表示。自動売買判断ではなく、weights.jsonも更新しません
+- `Adversarial Review`: 提案レイヤー(Rule/Model State/Weights Patch/Auto Calibration/AI Feedback)を横断レビューし、自動適用違反・サンプル不足・過剰最適化・矛盾・過信表現を検出。review_status/件数/違反数と詳細を表示。警告のみで自動適用・weights更新はしません
 - `News Narrative Summary`: RSS/公開見出しから推定したニュースナラティブ要約
 - `Pending Re-evaluation Summary`: 未決着シグナルの継続再評価要約
 - `Latest Evaluation View Summary`: append-only履歴から選んだ最新評価ビュー要約
