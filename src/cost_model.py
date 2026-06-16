@@ -19,10 +19,15 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 CONFIG_PATH = Path("config/cost_model.json")
+
+# 出典付き(sourced)アセットが宣言すべき source_type。
+# unconfigured は未宣言の状態であり、sourced なら不正(Phase 26.1)。
+VALID_SOURCE_TYPES = {"measured", "published_spec"}
 
 _ZERO_COST = {
     "spread": 0.0,
@@ -77,6 +82,26 @@ def _coerce(value: Any, fallback: float = 0.0) -> float:
 def is_sourced(source: Any) -> bool:
     """source が実出典(非空・未設定値でない)か。証拠主義の判定の単一情報源。"""
     return str(source).strip().lower() not in UNSOURCED_VALUES
+
+
+def parse_iso_date(value):
+    """厳格な YYYY-MM-DD 文字列を date へ。形式不正/実在しない日付なら None。
+
+    前後空白は許容(strip)するが、ゼロ埋め必須("2026-6-6"は不正)。"""
+    s = str(value).strip()
+    try:
+        parsed = datetime.strptime(s, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+    # strptime は "2026-6-6" 等の非ゼロ埋めを許容するため、再シリアライズ一致で厳格化
+    if parsed.strftime("%Y-%m-%d") != s:
+        return None
+    return parsed
+
+
+def _today_utc():
+    """境界が明確な「今日」。host のローカル日付(date.today())ではなく UTC を用いる。"""
+    return datetime.now(timezone.utc).date()
 
 
 def _resolve_entry(asset: str, model: dict[str, Any]) -> dict[str, Any]:
@@ -142,14 +167,23 @@ def net_r(gross_r: float, asset: str, risk_per_unit: float, bars_held: float, mo
     return _coerce(gross_r) - cost_r(asset, risk_per_unit, bars_held, model)
 
 
-def validate_cost_model(model: dict[str, Any] | None = None) -> list[dict[str, str]]:
+def validate_cost_model(model: dict[str, Any] | None = None, today: Any = None) -> list[dict[str, str]]:
     """証拠主義の機械的検証。問題のあるアセットを列挙する。
 
     - unsourced_nonzero_cost: 非ゼロコストだが出典が無い → net R に採用されず無視される
     - missing_source_date: 出典はあるが取得日が無い
+    - invalid_source_date: 取得日が YYYY-MM-DD でない/実在しない (Phase 26.1)
+    - future_source_date: 取得日が未来 (Phase 26.1)
+    - invalid_source_type: sourced だが source_type が measured/published_spec でない (Phase 26.1)
     - missing_responsibility: 出典はあるが更新責任者が無い
+
+    today: 未来日付判定の基準日(YYYY-MM-DD)。None なら実行日(date.today())。
     """
     model = model or load_cost_model()
+    # today 未指定/不正なら UTC の今日へフォールバック(future チェックを黙って無効化しない)
+    today_date = parse_iso_date(today) if today is not None else None
+    if today_date is None:
+        today_date = _today_utc()
     issues: list[dict[str, str]] = []
     assets = model.get("assets") or {}
     for asset, entry in assets.items():
@@ -157,15 +191,26 @@ def validate_cost_model(model: dict[str, Any] | None = None) -> list[dict[str, s
             continue
         # 実行時(asset_cost/cost_in_price)と同一の解決を使い、検証と実挙動を一致させる
         r = _resolve_entry(str(asset), model)
+        a = str(asset)
         raw_nonzero = any(r[k] != 0.0 for k in ("spread", "commission_round_turn", "swap_per_bar"))
         if raw_nonzero and not r["sourced"]:
-            issues.append({
-                "asset": str(asset),
-                "issue": "unsourced_nonzero_cost",
-                "detail": "非ゼロコストだが出典なし。証拠主義によりnet Rへ採用されず無視されます。",
-            })
-        if r["sourced"] and not r["source_date"].strip():
-            issues.append({"asset": str(asset), "issue": "missing_source_date", "detail": "出典の取得日が未記入。"})
-        if r["sourced"] and not r["responsibility"].strip():
-            issues.append({"asset": str(asset), "issue": "missing_responsibility", "detail": "更新責任者が未記入。"})
+            issues.append({"asset": a, "issue": "unsourced_nonzero_cost",
+                           "detail": "非ゼロコストだが出典なし。証拠主義によりnet Rへ採用されず無視されます。"})
+        if not r["sourced"]:
+            continue
+        # --- 以下は sourced アセットのみ ---
+        date_str = r["source_date"].strip()
+        if not date_str:
+            issues.append({"asset": a, "issue": "missing_source_date", "detail": "出典の取得日が未記入。"})
+        else:
+            parsed = parse_iso_date(date_str)
+            if parsed is None:
+                issues.append({"asset": a, "issue": "invalid_source_date", "detail": "取得日が YYYY-MM-DD 形式でない/実在しません。"})
+            elif parsed > today_date:
+                issues.append({"asset": a, "issue": "future_source_date", "detail": "取得日が未来です。"})
+        if r["source_type"].strip().lower() not in VALID_SOURCE_TYPES:
+            issues.append({"asset": a, "issue": "invalid_source_type",
+                           "detail": "source_type は measured / published_spec のいずれかにしてください。"})
+        if not r["responsibility"].strip():
+            issues.append({"asset": a, "issue": "missing_responsibility", "detail": "更新責任者が未記入。"})
     return issues

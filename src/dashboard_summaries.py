@@ -1069,7 +1069,7 @@ def narrative_reliability_summary(reliability_json, reliability_csv: pd.DataFram
     }
 
 
-def transaction_cost_summary(evaluations: pd.DataFrame, cost_model_json) -> dict:
+def transaction_cost_summary(evaluations: pd.DataFrame, cost_model_json, as_of=None) -> dict:
     """取引コストモデル (SPEC-TC-001) の表示用サマリー。分析専用・実売買なし。
 
     evaluations の net R / cost R 列の有無と、config/cost_model.json の設定状態を要約する。
@@ -1113,12 +1113,22 @@ def transaction_cost_summary(evaluations: pd.DataFrame, cost_model_json) -> dict
         sources = evaluations["cost_source"].fillna("unconfigured").astype(str)
         cost_source_unconfigured = bool((sources.isin(["", "unconfigured"])).all())
 
+    # Phase 26.1: 出典メタの型検証(source_type / 日付形式 / 未来日付)を cost_model に委譲。
+    # as_of(UTC基準日)を渡し、実行日依存の非決定性を排除する。
+    issues = cost_model.validate_cost_model(model=cost_model_json, today=as_of) if isinstance(cost_model_json, dict) else []
+    invalid_source_type = sum(1 for i in issues if i.get("issue") == "invalid_source_type")
+    invalid_source_date = sum(1 for i in issues if i.get("issue") in ("invalid_source_date", "future_source_date"))
+
     status = str(meta.get("status", "unconfigured")) if meta else "unconfigured"
-    warning = ""
+    # 警告は該当カテゴリを全て合成する(高優先の1件だけで他を隠さない)
+    warning_parts: list[str] = []
     if unsourced_nonzero > 0:
-        warning = f"証拠主義違反: {unsourced_nonzero}アセットに出典なしの非ゼロコスト。net Rへ採用されず無視されています。docs/transaction_cost_evidence.md 参照。"
-    elif status == "unconfigured" or (all_costs_zero and cost_source_unconfigured):
-        warning = "コスト未設定: 全コスト0のためネットR=グロスR。XMTrading実測値/公開仕様をsource付きで記入するまで分析は理論値です。"
+        warning_parts.append(f"証拠主義違反: {unsourced_nonzero}アセットに出典なしの非ゼロコスト(net Rへ採用されず無視)。")
+    if invalid_source_type > 0 or invalid_source_date > 0:
+        warning_parts.append(f"証拠メタ不正: source_type不正 {invalid_source_type}件 / 取得日不正 {invalid_source_date}件。")
+    if not warning_parts and (status == "unconfigured" or (all_costs_zero and cost_source_unconfigured)):
+        warning_parts.append("コスト未設定: 全コスト0のためネットR=グロスR。XMTrading実測値/公開仕様をsource付きで記入するまで分析は理論値です。")
+    warning = (" ".join(warning_parts) + " docs/transaction_cost_evidence.md 参照。") if warning_parts else ""
     return {
         "available": True,
         "cost_model_status": status,
@@ -1126,6 +1136,8 @@ def transaction_cost_summary(evaluations: pd.DataFrame, cost_model_json) -> dict
         "configured_sources": configured_sources,
         "unsourced_nonzero_count": int(unsourced_nonzero),
         "missing_provenance_count": int(missing_provenance),
+        "invalid_source_type_count": int(invalid_source_type),
+        "invalid_source_date_count": int(invalid_source_date),
         "default_source": str(default_source),
         "net_r_available": bool(net_available),
         "gross_r_available": bool(gross_available),

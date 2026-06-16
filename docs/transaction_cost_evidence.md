@@ -33,9 +33,19 @@ Dashboard はこの状態を可視化する:
 | `commission_round_turn` | 1往復手数料（price換算） | `0.0` |
 | `swap_per_bar` | 1バー保有あたりスワップ/金利（price、正でコスト） | `1.5` |
 | `source` | **出典**。実測ログ名 or 公開仕様の参照 | `"XMTrading published spec (BTCUSD)"` |
-| `source_date` | 取得日 `YYYY-MM-DD` | `"2026-06-16"` |
-| `source_type` | `measured`（実測） / `published_spec`（公開仕様） | `"published_spec"` |
+| `source_date` | 取得日 **`YYYY-MM-DD` 形式・未来日付不可** | `"2026-06-16"` |
+| `source_type` | **`measured`（実測） / `published_spec`（公開仕様）のいずれか必須** | `"published_spec"` |
 | `responsibility` | この数値の更新責任者 | `"主任研究員"` |
+
+### 型の検証 (Phase 26.1)
+
+sourced なアセットは型が検証され、Dashboard に件数が出る:
+- `invalid_source_type`: `source_type` が `measured` / `published_spec` でない（`unconfigured` のままも不正）
+- `invalid_source_date`: `source_date` が `YYYY-MM-DD` 形式でない/実在しない日付
+- `future_source_date`: `source_date` が未来（取得日が未来はあり得ない）
+
+Dashboard は `invalid_source_type` / `invalid_source_date`（形式不正+未来を合算）の件数を表示し、
+1件でもあれば「証拠メタ不正」警告を出す。
 
 記入後、`_meta.status` を `configured`（または部分設定なら任意のラベル）に更新する。
 
