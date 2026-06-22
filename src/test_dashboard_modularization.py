@@ -79,8 +79,11 @@ def test_main_actually_generates_outputs(tmp_path, monkeypatch):
     assert (out_dir / "index.html").exists()
     assert (out_dir / "dashboard_summary.json").exists()
     html_text = (out_dir / "index.html").read_text(encoding="utf-8")
-    for section in ["Prediction Calibration", "Narrative Reliability", "Transaction Cost Model", "Audit Report"]:
+    for section in ["予測キャリブレーション（確信度の正確さ）", "ナラティブ信頼性", "取引コストモデル", "監査レポート"]:
         assert f"<h2>{section}</h2>" in html_text
+    # 投資判断ファースト: ひとめ要約バナーとティア見出しが出ること
+    assert 'class="summary-banner"' in html_text
+    assert '<h2 class="tier">① 当日の判断材料</h2>' in html_text
 
 
 # === 空データでもサマリー関数が落ちない ===
