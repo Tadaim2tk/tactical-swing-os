@@ -913,8 +913,8 @@ def render_html(
     _a = int(numeric_or(signal_counts.get("A", 0), 0))
     _b = int(numeric_or(signal_counts.get("B", 0), 0))
     _nt = int(numeric_or(signal_counts.get("NO_TRADE", 0), 0))
-    _sig_txt = f"取引候補 {_a + _b} / 見送り {_nt}"
-    _sig_tone = "good" if (_a + _b) > 0 else "neutral"
+    _sig_txt = f"シグナル候補 {_a + _b} / 見送り {_nt}"
+    _sig_tone = "warn" if (_a + _b) > 0 else "neutral"
     _mat = str(eval_summary.get("evaluation_maturity", "")).strip().lower()
     _closed = int(numeric_or(eval_summary.get("closed", 0), 0))
     _mat_txt = {"no_signals": "データなし", "accumulating": "蓄積中", "active": "活動中"}.get(_mat, _mat or "未取得")
@@ -1004,7 +1004,10 @@ def render_html(
     <section class="card"><h2>本日のシグナル概要</h2><div class="grid">{signal_stats}</div>{table_html(signals, ["asset","side","rank","type","recommended_action","signal_strength","setup_quality_score","entry_quality_score","direction_confidence","reason_codes","no_trade_reason"])}</section>
     <section class="card"><h2>今週・今月のモード（リスク上限）</h2><div class="grid">{mode_stats}</div></section>
     <section class="card"><h2>評価概要</h2><div class="grid">{eval_stats}</div></section>
+    <section class="card"><h2>最新評価ビュー 要約</h2>{'<div class="empty">最新評価ビュー未取得</div>' if not latest_eval_summary.get('available') else f'<div class="grid">{latest_eval_stats}</div>'}</section>
+    <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
     <section class="card"><h2>資産別成績</h2>{table_html(asset_table, ["asset","signals","evaluations","win_rate","total_r","average_r","missed_opportunity_count"])}</section>
+    <section class="card"><h2>ポートフォリオ層</h2>{'<div class="empty">ポートフォリオ層未取得</div>' if not portfolio_layer.get('available') else f'<div class="grid">{portfolio_stats}</div>'}<h3>配分候補 上位</h3>{table_html(portfolio_top, ["asset","allocation_score","portfolio_weight_candidate","confidence","risk_class","risk_role","recommended_exposure","cash_ratio_candidate","latest_rank","latest_side","rationale"], "配分候補なし")}</section>
 
     <h2 class="tier">② 信頼性チェック（この出力を信じてよいか）</h2>
     <section class="card"><h2>データ健全性（鮮度）</h2><p class="notice">各分析レイヤーの最終生成時刻・行数・鮮度を一覧化します。古い(stale)・空(empty)・欠損(missing)・unavailableなデータを正常と誤読しないためのガードです。表示専用でweights.jsonは更新しません。</p>{'<div class="empty">Data Health未取得</div>' if not data_health.get('available') else f'<div class="grid">{data_health_stats}</div>'}<h3>レイヤー別 鮮度</h3>{table_html(data_health_table, ["layer","status","last_generated","age_hours","row_count","threshold_hours","cadence"], "レイヤー情報なし")}</section>
@@ -1033,9 +1036,6 @@ def render_html(
     <section class="card"><h2>メタ学習</h2>{'<div class="empty">Meta Learning未取得</div>' if not meta_learning.get('available') else f'<div class="grid">{meta_learning_stats}</div>'}<h3>成功パターン候補 上位5件</h3>{table_html(meta_learning_success, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "成功パターン候補なし")}<h3>失敗パターン候補 上位5件</h3>{table_html(meta_learning_failure, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "失敗パターン候補なし")}</section>
     <section class="card"><h2>自動較正の候補</h2>{'<div class="empty">Auto Calibration Candidates未取得</div>' if not auto_calibration.get('available') else f'<div class="grid">{auto_calibration_stats}</div>'}<h3>確信度の高い候補 上位</h3>{table_html(auto_calibration_top, ["candidate_id","asset","category","target","factor","classification","current_value","suggested_delta","suggested_value","confidence","sample_size","source","rationale"], "候補なし")}</section>
     <section class="card"><h2>人手オーバーライド分析</h2>{'<div class="empty">Human Override Analytics未取得</div>' if not human_override.get('available') else f'<div class="grid">{human_override_stats}</div>'}<h3>override impact 上位5件</h3>{table_html(human_override_top, ["proposal_id","review_decision","adoption_status","override_type","override_reason","impact_status","impact_score","source","recommended_next_action"], "override分析なし")}</section>
-    <section class="card"><h2>ポートフォリオ層</h2>{'<div class="empty">Portfolio Layer未取得</div>' if not portfolio_layer.get('available') else f'<div class="grid">{portfolio_stats}</div>'}<h3>配分候補 上位</h3>{table_html(portfolio_top, ["asset","allocation_score","portfolio_weight_candidate","confidence","risk_class","risk_role","recommended_exposure","cash_ratio_candidate","latest_rank","latest_side","rationale"], "配分候補なし")}</section>
-    <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
-    <section class="card"><h2>最新評価ビュー 要約</h2>{'<div class="empty">最新評価ビュー未取得</div>' if not latest_eval_summary.get('available') else f'<div class="grid">{latest_eval_stats}</div>'}</section>
     </details>
 
     <section class="card"><h2>安全上の注意</h2><p class="notice">{html.escape(DASHBOARD_DESCRIPTION)}</p><ul>{safe}</ul></section>
