@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 import evaluation_loader
-import score_narratives as narratives
+import score_market_context as narratives
 from time_utils import format_jst, format_utc, legacy_utc_iso, now_utc
 
 

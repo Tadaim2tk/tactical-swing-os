@@ -18,7 +18,7 @@ AIの文章分析能力(ニュースナラティブ分類)と従来のクオン�
 - シグナル発生時点のナラティブ整合判定(aligned / conflicted / neutral / insufficient_data)を
   `results/signal_narrative_alignment.csv` に **追記専用** で保存する。
 - **最初の記録が正**。既存signal_idの行は決して上書き・再計算しない(後知恵バイアス防止)。
-- score_narrativesに整合計算関数が無い環境では安全にスキップする(日次サイクルを止めない)。
+- score_market_context(旧score_narratives)に整合計算関数が無い環境では安全にスキップする(日次サイクルを止めない)。
 
 ### 2b. ナラティブ優位性検定 (narrative_edge, 月次較正)
 - aligned群とconflicted群のR成績を **Welchの2標本t検定** (不等分散、Welch–Satterthwaite自由度)で比較。

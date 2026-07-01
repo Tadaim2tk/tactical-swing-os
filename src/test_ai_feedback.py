@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 import build_ai_feedback
-import score_narratives as narratives
+import score_market_context as narratives
 from time_utils import UTC, format_jst, format_utc
 
 

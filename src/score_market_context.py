@@ -1,3 +1,10 @@
+"""score_market_context.py — 価格由来の市場コンテキストスコア(旧 score_narratives.py)。
+
+2026-07 改名: このモジュールは価格データから risk_on/risk_off 等を推定する
+**価格プロキシ**であり、文章(テキスト)ベースのナラティブ判断ではない。
+文章系の意味ベクトル層 (build_narrative_memory / retrieve_similar_narratives) と
+名前空間を分離するため score_market_context へ改名した (Phase 29.2 follow-up)。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
