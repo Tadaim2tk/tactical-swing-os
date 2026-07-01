@@ -4,7 +4,7 @@
   "weights_version": "v0-identity",
   "approved_by": "human (PR merge)",
   "approved_at": "2026-07-02",
-  "source_pr": null,
+  "source_pr": 71,
   "sample_count": 0,
   "guard_report_id": null,
   "notes": [
