@@ -44,6 +44,7 @@ jobs:
           python src/build_narrative_memory.py || echo "warning: narrative memory failed; continuing dashboard"
           python src/retrieve_similar_narratives.py || echo "warning: similar narratives failed; continuing dashboard"
           python src/evaluate_narrative_similarity.py || echo "warning: similarity evaluation failed; continuing dashboard"
+          python src/evaluate_ablation.py || echo "warning: ablation comparison failed; continuing dashboard"
 
       - name: Build AI feedback for dashboard
         run: |
