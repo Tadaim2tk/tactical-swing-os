@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "status": "approved",
+  "weights_version": "v0-identity",
+  "approved_by": "human (PR merge)",
+  "approved_at": "2026-07-02",
+  "source_pr": null,
+  "sample_count": 0,
+  "guard_report_id": null,
+  "notes": [
+    "Identity baseline (all weights = 1.0). weighted == base by construction; the shadow diff report showing zero differences is correct behaviour.",
+    "この承認は shadow 比較の開始許可であり、実推奨(active)への反映ではない。",
+    "非identity候補への更新は models/weight_versions/ にスナップショットを置く人間承認PRで行う (governance_reform_2026-07 §2 #4)。"
+  ],
+  "global": {
+    "rank_weight": 1.0,
+    "trend_weight": 1.0,
+    "momentum_weight": 1.0,
+    "volatility_weight": 1.0,
+    "risk_penalty_weight": 1.0
+  },
+  "asset_weights": {
+    "BTC": 1.0,
+    "GOLD": 1.0,
+    "WTI": 1.0,
+    "USDJPY": 1.0,
+    "SPX": 1.0,
+    "NASDAQ": 1.0,
+    "DXY": 1.0,
+    "VIX": 1.0,
+    "US10Y": 1.0
+  },
+  "rank_weights": {
+    "A": 1.0,
+    "B": 1.0,
+    "NO_TRADE": 1.0
+  },
+  "side_weights": {
+    "LONG": 1.0,
+    "SHORT": 1.0,
+    "NONE": 1.0
+  }
+}

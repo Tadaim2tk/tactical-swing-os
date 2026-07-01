@@ -345,3 +345,39 @@ def test_passed_only_when_real_sources_present():
     sources["narrative_lookahead_audit_summary"] = {"audit_status": "passed"}  # 実チェック済み
     s = ar.summarize(ar.build_findings(sources), ar.count_sources_present(sources), JST, JST)
     assert s["review_status"] == "passed"
+
+
+# === 7. shadow weights 境界 (Phase 29.1) ===
+
+def test_shadow_legit_record_no_findings():
+    # shadow_mode=true / affects_live_recommendation=false は正当な記録 -> 違反なし
+    summary = {"shadow_mode": True, "affects_live_recommendation": False,
+               "weights_json_updated": False, "patch_applied": False, "weights_version": "v0-identity"}
+    assert ar.check_shadow_weight_boundary(summary) == []
+
+
+def test_shadow_claiming_live_effect_is_blocked():
+    summary = {"shadow_mode": True, "affects_live_recommendation": True, "weights_version": "vX"}
+    out = ar.check_shadow_weight_boundary(summary)
+    assert any(f["severity"] == "blocked" and f["finding_category"] == "weights_update_violation" for f in out)
+
+
+def test_shadow_claiming_weights_update_is_blocked():
+    summary = {"shadow_mode": True, "affects_live_recommendation": False, "weights_json_updated": True}
+    out = ar.check_shadow_weight_boundary(summary)
+    assert any(f["severity"] == "blocked" for f in out)
+
+
+def test_shadow_missing_flag_is_warning():
+    summary = {"affects_live_recommendation": False, "weights_version": "vX"}
+    out = ar.check_shadow_weight_boundary(summary)
+    assert any(f["severity"] == "warning" and f["finding_category"] == "shadow_flag_missing" for f in out)
+
+
+def test_shadow_absent_source_no_findings_and_not_counted():
+    assert ar.check_shadow_weight_boundary(None) == []
+    sources = {key: __import__("pandas").DataFrame() for key in ar.CSV_SOURCE_KEYS}
+    sources["narrative_lookahead_audit_summary"] = None
+    assert ar.count_sources_present(sources) == 0
+    sources["shadow_weight_summary"] = {"shadow_mode": True, "affects_live_recommendation": False}
+    assert ar.count_sources_present(sources) == 1

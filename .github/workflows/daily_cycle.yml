@@ -6,8 +6,11 @@ on:
     # 21:55 UTC is 06:55 JST.
     - cron: "55 21 * * *"
 
+# governance_reform_2026-07 §2 #6:
+# src / docs / .github への自動pushは禁止のまま。
+# results / reports / data 配下へのデータ追記コミットのみ Actions bot に許可。
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   daily-cycle:
@@ -29,7 +32,7 @@ jobs:
       - name: Fetch market data
         run: python src/fetch_market.py
 
-      - name: Generate signals
+      - name: Generate signals (base + shadow weights)
         run: python src/generate_signal.py
 
       - name: Evaluate signals
@@ -44,6 +47,22 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
+      - name: Commit shadow comparison ledger (data append only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "tso-actions-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # governance_reform_2026-07: data/ 配下のデータ追記のみ。src/docs/.github は触らない。
+          git add data/shadow_weight_comparisons.csv
+          if git diff --cached --quiet; then
+            echo "no ledger changes to commit"
+          else
+            git commit -m "Append shadow weight comparison ledger [skip ci]" \
+              -m "Data-append commit permitted by governance_reform_2026-07 (data/ only, no code/docs/workflow changes)."
+            git pull --rebase origin main
+            git push origin main
+          fi
+
       - name: Upload TSO artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -54,3 +73,4 @@ jobs:
             results/*.csv
             results/*.json
             reports/*.md
+            reports/model_state/shadow_weight_impact.md
