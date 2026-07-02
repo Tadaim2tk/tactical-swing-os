@@ -221,3 +221,83 @@ def test_comparisons_accumulated_filters_by_version():
     assert sw._comparisons_accumulated(ledger, "vA") == 15
     assert sw._comparisons_accumulated(ledger, "vB") == 99
     assert sw._comparisons_accumulated(ledger, "vC") == 0
+
+
+# === 昇格ゲート (司令 B-1 指示: identity のうちにブロック条件をテストで固定) ===
+# 「小標本1件の後知恵(例: OBS-20260608-WTI の単発 failure)で weights を動かさない」を
+# 機械的に保証する。ゲート通過=材料提示のみで、承認は常に人間PR(不可侵 #4)。
+
+def test_gate_blocked_without_outcome_linkage_even_with_many_comparisons():
+    # 比較数が閾値を大きく超えても、結果(R差分)系列が未接続なら必ず blocked
+    gate = sw.evaluate_promotion_gate(None, comparisons_accumulated=1000)
+    assert gate["decision"] == "blocked"
+    assert any(r.startswith("no_outcome_linkage") for r in gate["blocked_reasons"])
+    assert gate["requires_human_approval"] is True
+    assert gate["apply_automatically"] is False
+
+
+def test_gate_blocked_on_single_observation_hindsight():
+    # 単発の観測(n=1)では絶対に materials_ready にならない
+    gate = sw.evaluate_promotion_gate([2.5], comparisons_accumulated=1)
+    assert gate["decision"] == "blocked"
+    joined = " ".join(gate["blocked_reasons"])
+    assert "insufficient_comparisons" in joined
+    assert "insufficient_outcome_samples" in joined
+
+
+def test_gate_blocked_at_29_samples():
+    diffs = [0.5] * 29
+    gate = sw.evaluate_promotion_gate(diffs, comparisons_accumulated=29)
+    assert gate["decision"] == "blocked"
+    assert any("insufficient" in r for r in gate["blocked_reasons"])
+
+
+def test_gate_blocked_on_zero_difference_identity():
+    # identity weights の帰結: 差分ゼロ30件 -> 変更を正当化できない
+    gate = sw.evaluate_promotion_gate([0.0] * 30, comparisons_accumulated=30)
+    assert gate["decision"] == "blocked"
+    assert any(r.startswith("zero_difference") for r in gate["blocked_reasons"])
+
+
+def test_gate_blocked_when_mean_negative():
+    gate = sw.evaluate_promotion_gate([-0.3] * 30, comparisons_accumulated=30)
+    assert gate["decision"] == "blocked"
+    assert any(r.startswith("mean_diff_not_positive") for r in gate["blocked_reasons"])
+
+
+def test_gate_blocked_when_noisy_not_significant():
+    # 平均は僅かに正だがノイズが大きい -> t検定で弾く
+    diffs = [0.02, -1.0, 1.0, -0.9, 0.95] * 6  # n=30, mean~0.014
+    gate = sw.evaluate_promotion_gate(diffs, comparisons_accumulated=30)
+    assert gate["decision"] == "blocked"
+    assert any(r.startswith("not_significant") or r.startswith("dsr_below") for r in gate["blocked_reasons"])
+
+
+def test_gate_blocked_by_dsr_under_multiple_testing():
+    # 単独なら有意に見える系列でも、多数候補の同時検定(n_trials=20, 候補間分散大)では
+    # 期待最大Sharpeに届かず DSR が弾く
+    diffs = [0.1, 0.12, 0.08, 0.11, 0.09, 0.1] * 5  # n=30, 安定した正
+    single = sw.evaluate_promotion_gate(diffs, comparisons_accumulated=30, n_trials=1)
+    multi = sw.evaluate_promotion_gate(diffs, comparisons_accumulated=30, n_trials=20, sharpe_variance=25.0)
+    assert single["decision"] == "materials_ready"  # 単独検定なら通る
+    assert multi["decision"] == "blocked"
+    assert any(r.startswith("dsr_below_threshold") for r in multi["blocked_reasons"])
+
+
+def test_gate_materials_ready_never_auto_applies():
+    # 全条件クリアでも「材料提示」止まり(人間承認とセット)
+    diffs = [0.5, 0.6, 0.45, 0.55, 0.5, 0.58] * 5  # n=30, 強く安定した正
+    gate = sw.evaluate_promotion_gate(diffs, comparisons_accumulated=60)
+    assert gate["decision"] == "materials_ready"
+    assert gate["blocked_reasons"] == []
+    assert gate["requires_human_approval"] is True
+    assert gate["apply_automatically"] is False
+
+
+def test_summary_carries_gate_and_v0_is_blocked():
+    # v0(identity, outcome未接続)の run では summary の gate が必ず blocked
+    from time_utils import now_utc
+    loaded = sw.load_approved_weights(Path("models/approved_weights.json"))  # repo同梱の v0-identity
+    summary = sw.build_summary(pd.DataFrame(columns=sw.SHADOW_COLUMNS), loaded, 1000, now_utc())
+    assert summary["promotion_gate"]["decision"] == "blocked"
+    assert summary["promotion_sample_ready"] is True  # 蓄積進捗とゲートは別物として両立
