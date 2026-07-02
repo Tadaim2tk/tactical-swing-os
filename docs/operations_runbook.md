@@ -5,15 +5,20 @@
 
 ## 0. 最重要前提（毎回思い出すこと）
 
-このシステムは**売買シグナル生成器でも自動売買botでもない**。目的は
-「AI自身の判断能力を監査し、継続的に改善する研究OS」を回すこと。
+本システムの目的は「**AIの意味ベクトル的な文章判断能力を従来のテクニカル分析に組み込み、
+ナラティブ評価を記録し、自己改善を繰り返してスイングトレードの予測精度を高める**」こと。
+実売買・発注をしないのは手段の制約であって、「予測精度で勝つための道具」という目的は
+変わらない（2026-07 ガバナンス改定で目的を復元。[governance_reform_2026-07.md](governance_reform_2026-07.md)）。
 
-- **これは実売買判断ではない。** Dashboard・レポート・提案はすべて分析と監査の出力。
-- **実資金判断・発注・XM操作・証券会社操作は Tactical Swing OS の範囲外であり、この
-  workflow には含めない。** システムは一切実行しない。
-- `weights.json` / `generate_signal.py` は**自動更新しない**。すべての提案は
-  `requires_human_approval=true`。
-- KPI は利益率でもコード行数でもなく、**純度の高い EVALUATIONS の蓄積件数**。
+- **実売買・発注・XM/証券会社操作はしない**（不可侵）。Dashboard・レポート・提案は分析出力。
+- weights の**本採用（active昇格）は人間承認（PRマージ）必須**。shadow weights の自動計算・
+  記録は日次で行ってよい（実推奨には影響しない）。
+- 主KPI は**予測精度の改善**（Brier / prediction calibration / net R）。EVALUATIONS 蓄積件数は
+  精度計算の分母となる補助指標であり、それ自体は成果ではない。
+- 統計的な**採用判断**はデータを待つが、**実装はデータを待たない**。shadow / inactive で先に
+  実装し、データが揃い次第ゲートが自動で開く構造を標準とする。
+- 監査・ガード・健全性レイヤーは既に十分にある。**新しいガードの追加は、既存ゲートを
+  1つ緩和・統合するのとセットでのみ可**（アンチ停滞ルール）。
 
 ---
 
@@ -140,17 +145,29 @@ Dashboard を開いて、**この順番**で見る。上ほど「土台の健全
 
 ---
 
-## 6. 安全インバリアント（全フェーズ不変）
+## 6. 安全インバリアント（2026-07 改定。対照表: [governance_reform_2026-07.md](governance_reform_2026-07.md)）
 
-以下はどのフェーズでも破ってはならない:
+### 不可侵（今後も絶対に変えない）
 
 - 実売買なし / 発注なし / XM・証券会社操作なし
-- Google Sheets への**新規**書き込みを増やさない（読み込みと既存同期のみ）
-- `weights.json` 自動更新なし / weights patch 自動適用なし
-- `generate_signal.py` 自動変更なし
-- GitHub Actions から git push しない
 - Secrets を ログ/Dashboard に出さない
-- 提案・較正・監査は `requires_human_approval=true`
+- lookahead 防止: `source_published_at_utc <= signal_cutoff_utc` を満たさない文章情報を
+  シグナルに使わない
+- weights の**本採用（active昇格）は人間承認（PRマージ）必須**
+- false green を作らない（`insufficient_data` 等の正直な状態表示を維持）
+- 既存テストを黙って削除しない（仕様変更に伴う修正・更新は可）
+
+### 改定済み（旧ルール → 新ルール）
+
+- 「weights.json 自動更新なし」→ **shadow weights の自動計算・記録は許可**。
+  active への昇格のみ人間承認。提案・較正・監査の `requires_human_approval=true` は不変
+  （shadow 計算は「適用」ではなく「記録」であり、実推奨に影響しない）。
+- 「generate_signal.py 自動変更なし」→ 禁止されるのは**実行時の自己書き換え**のみ。
+  通常のPRフローによる改修・リファクタ・weights読込機構の追加は普通の開発。
+- 「GitHub Actions から git push しない」→ `src / docs / .github` への自動pushは引き続き禁止。
+  **`results / reports / data` 配下へのデータ追記コミットのみ Actions bot に許可**
+  （学習ループの日次出力の永続化経路）。
+- Google Sheets への新規書き込み追加は引き続きしない（永続化は上記 Actions データコミットで行う）。
 
 ---
 

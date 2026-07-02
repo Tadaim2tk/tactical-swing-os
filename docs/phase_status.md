@@ -1,7 +1,7 @@
 # Tactical Swing OS — Phase Status
 
 > 本体repo側のフェーズ進捗ミラー。spec repo の Phase Status は後でまとめて同期する。
-> 最終更新: 2026-06-17（Phase 28.0 SPEC まで反映 / 既定路線は評価データ蓄積待ち）
+> 最終更新: 2026-07-02（Phase 29 学習ループ閉鎖 着手 / 主KPIを予測精度に復元）
 
 ## サマリー
 
@@ -16,7 +16,13 @@
 
 KPI は EVALUATIONS 蓄積件数（目標: 100 → 300 → 1000）。
 
-**現在地（2026-06-17）**: 観測装置側（評価ループの maturity / 状態分類、Dashboard の UTC 基準日統一）まで硬化済み。Cross Asset Regime Engine は **SPEC-only（本体未実装）**。能動的な大物実装は止め、既定路線は **評価データ蓄積待ち**（第1コホートの成熟を待つ）。
+**現在地（2026-07-02）**: 観測装置・監査網は十分に整備済み（PR #48〜#69）。一方で
+**学習ループ本体（学習した知見がシグナル生成へ流れ込む経路）が未着工**であり、
+`models/weights.json` は `generate_signal.py` に一度も読み込まれていない開ループだった。
+2026-07 の軌道修正ミッション（[governance_reform_2026-07.md](governance_reform_2026-07.md)）により、
+主KPIを**予測精度の改善**に復元し、**Phase 29: 学習ループ閉鎖**を進行中。
+「評価データ蓄積待ち」は既定路線から外す — 統計的な採用判断はデータを待つが、
+**実装はデータを待たない**（shadow / inactive で先に作り、データが揃い次第ゲートが自動で開く）。
 
 ---
 
@@ -61,18 +67,33 @@ GitHub Actions による自動デイリーサイクルとして稼働済み:
 | 27.2 | Evaluation Cohort Closure（awaiting_horizon / data_missing / invalid_signal_date / evaluation_maturity） | — | [#64](https://github.com/Tadaim2tk/tactical-swing-os/pull/64) | ✅ |
 | 28.0 | Cross Asset Regime Engine **SPEC-only**（本体未実装 / deferred / inactive） | SPEC-CAR-001 | [#65](https://github.com/Tadaim2tk/tactical-swing-os/pull/65) | ✅ (SPEC) |
 | — | Determinism cleanup（evaluation_summary / asset_performance が共有 UTC as_of） | — | [#66](https://github.com/Tadaim2tk/tactical-swing-os/pull/66) | ✅ |
+| 27.x | JP-EVAL-001 rev2（jp_swing_evaluate スキーマ整合 + lag cost attribution） | — | [#68](https://github.com/Tadaim2tk/tactical-swing-os/pull/68) | ✅ |
+| — | Dashboard 投資判断ファースト日本語レイアウト（バナー + 4ティア） | — | [#69](https://github.com/Tadaim2tk/tactical-swing-os/pull/69) | ✅ |
+
+---
+
+## 進行中: Phase 29 — 学習ループ閉鎖（軌道修正ミッション 2026-07）
+
+目的の復元。「学習した知見がシグナル生成に（shadowで）流れ込む閉ループが動く」ことのみを
+成果とする。**安全装置の追加は成果に数えない。** 詳細: [governance_reform_2026-07.md](governance_reform_2026-07.md)
+
+| Step | 内容 | 状態 |
+|---|---|---|
+| 29.0 | ガバナンス改革（README / runbook §0・§6 / 本表の改定 + 対照表新設） | 🔄 本PR |
+| 29.1 | Approved Weights → Shadow Mode 接続（`generate_signal.py` に承認済みweights読込。出力は base / weighted 併記、実推奨は base のまま。日次差分レポート） | ⏳ |
+| 29.2 | Narrative Memory v0（意味ベクトル層。embedding + TF-IDFフォールバック。類似局面検索を表示のみで導入） | ⏳ |
+| 29.3 | Ablation 評価フレーム（technical_only / text_narrative_only / technical_plus_text の3系統比較） | ⏳ |
+| 29.4 | 最小観測ループを1周実行（観測→事前ナラティブ→評価→類似検索→教訓） | ⏳ |
 
 ---
 
 ## 今後の候補・未実装
 
-- **評価データ蓄積待ち（現在の既定路線）**: 第1コホートが Sheets 上で成熟し clean closed
-  evaluations が積み上がるのを待つ。KPI 100 → 300 → 1000。データが溜まると Data Health が
-  healthy へ向かい、各統計ゲート（SG / DSR 等）が本格稼働する。「待つ」も正規の工程。
 - **Phase 28.1+ Cross Asset Regime Engine 本体**: SPEC-CAR-001（[SPEC_CROSS_ASSET_REGIME.md](SPEC_CROSS_ASSET_REGIME.md)）
-  に基づく本体実装。**非活性ゲート（closed評価>=30・複数資産分散>=4・観測>=20日・Data Health
-  非critical非degraded・必須入力 fresh・監査 passed/許容warning・cost未設定なら net-R 不使用）
-  達成後**に着手する。それまでは `insufficient_data` を出す（false-green を作らない）。
+  に基づく本体実装。統計的な**採用**は非活性ゲート（closed評価>=30・複数資産分散>=4・観測>=20日・
+  Data Health 非critical非degraded・必須入力 fresh・監査 passed/許容warning・cost未設定なら net-R 不使用）
+  が開くまで `insufficient_data` を出すが、**実装自体は Phase 29 完了後に shadow / inactive で
+  先行してよい**（実装はデータを待たない）。
 - **Phase 26.2 Evidence-backed Cost Configuration**: `config/cost_model.json` に XMTrading 実測
   コストを source / source_type / source_date / responsibility 付きで記入 → ネットR が有効化。
   **人間による出典付きコスト値入力待ち**（AI は値を捏造しない）。
