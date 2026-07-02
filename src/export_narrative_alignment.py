@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 try:
-    import score_narratives
+    import score_market_context as score_narratives
 except Exception:  # noqa: BLE001 - 整合記録は任意機能。importfailで日次サイクルを止めない
     score_narratives = None
 from calibration_io import read_csv
@@ -58,9 +58,9 @@ def export_alignment() -> pd.DataFrame:
         print("signals.csv is empty; nothing to record")
         return existing
 
-    # 防御: score_narrativesに必要な関数が無いバージョンでも安全に劣化する
+    # 防御: score_market_contextに必要な関数が無いバージョンでも安全に劣化する
     if score_narratives is None or not (hasattr(score_narratives, "score_market_narratives") and hasattr(score_narratives, "evaluate_signal_alignment")):
-        print("score_narratives does not expose alignment functions; skipping (alignment CSV unchanged)")
+        print("score_market_context does not expose alignment functions; skipping (alignment CSV unchanged)")
         return existing
 
     scores = score_narratives.score_market_narratives(market)
