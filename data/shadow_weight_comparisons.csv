@@ -1,2 +1,3 @@
 date,weights_version,n_signals,n_actionable,rank_changes,action_changes,mean_abs_strength_delta,max_abs_strength_delta,reconstruction_mismatches
 2026-07-01,v0-identity,9,2,0,0,0.0,0.0,0
+2026-07-02,v0-identity,9,2,0,0,0.0,0.0,0
