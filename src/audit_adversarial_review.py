@@ -295,6 +295,38 @@ def check_cross_layer_contradiction(model_state: pd.DataFrame, auto_calib: pd.Da
     return out
 
 
+def check_shadow_weight_boundary(summary) -> list[dict]:
+    """Shadow weights 層 (Phase 29.1) の境界検査。
+
+    shadow_mode=true かつ affects_live_recommendation=false は「正当な shadow 記録」であり
+    違反ではない (governance_reform_2026-07 §2 #4: shadow の自動計算・記録は許可)。
+    blocked になるのは、shadow 成果物が実推奨への影響や weights 更新を主張した場合のみ。
+    """
+    if not isinstance(summary, dict) or not summary:
+        return []
+    findings: list[dict] = []
+    target = str(summary.get("weights_version") or "approved_weights")
+    if truthy(summary.get("affects_live_recommendation")):
+        findings.append(_finding(
+            source_type="shadow_weights", target=target, category="weights_update_violation", severity="blocked",
+            evidence="affects_live_recommendation=true (shadow成果物が実推奨への影響を主張)",
+            recommended_action="shadow出力の実推奨接続を停止し、active昇格は人間承認PRで行う",
+        ))
+    if truthy(summary.get("weights_json_updated")) or truthy(summary.get("patch_applied")):
+        findings.append(_finding(
+            source_type="shadow_weights", target=target, category="weights_update_violation", severity="blocked",
+            evidence="weights_json_updated/patch_applied=true (shadow層がweights更新を主張)",
+            recommended_action="weights更新を即時停止し、変更を巻き戻す",
+        ))
+    if not truthy(summary.get("shadow_mode")):
+        findings.append(_finding(
+            source_type="shadow_weights", target=target, category="shadow_flag_missing", severity="warning",
+            evidence="shadow_mode フラグが欠落/false (shadow記録と実適用を監査が区別できない)",
+            recommended_action="shadow成果物に shadow_mode=true / affects_live_recommendation=false を必ず付与する",
+        ))
+    return findings
+
+
 # === ソース有効性 (偽passed防止) ===
 # 提案系CSVソースのキー (sources_present のカウント対象)。
 CSV_SOURCE_KEYS = [
@@ -333,6 +365,9 @@ def count_sources_present(sources: dict) -> int:
         if isinstance(df, pd.DataFrame) and not df.empty:
             n += 1
     if lookahead_counts_as_source(sources.get("narrative_lookahead_audit_summary")):
+        n += 1
+    shadow = sources.get("shadow_weight_summary")
+    if isinstance(shadow, dict) and shadow and "shadow_mode" in shadow:
         n += 1
     return n
 
@@ -395,6 +430,8 @@ def build_findings(sources: dict) -> list[dict]:
     ])
     # 6. レイヤー間の矛盾
     findings += check_cross_layer_contradiction(model_state, auto_calib)
+    # 7. shadow weights 境界 (shadow記録は正当 / 実推奨影響の主張のみ blocked)
+    findings += check_shadow_weight_boundary(sources.get("shadow_weight_summary"))
     return findings
 
 
@@ -536,6 +573,7 @@ def main() -> int:
     for key, fname in csv_sources.items():
         sources[key] = read_csv(RESULTS_DIR / fname)
     sources["narrative_lookahead_audit_summary"] = read_json(RESULTS_DIR / "narrative_lookahead_audit_summary.json")
+    sources["shadow_weight_summary"] = read_json(RESULTS_DIR / "shadow_weight_impact_summary.json")
     # 空CSV / unavailable lookahead は数えない (偽passed防止)
     sources_present = count_sources_present(sources)
 

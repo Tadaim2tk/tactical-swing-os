@@ -792,6 +792,22 @@ def main() -> int:
     signals.to_csv(RESULTS_DIR / "signals.csv", index=False)
     signals.to_json(RESULTS_DIR / "signals.json", orient="records", indent=2, force_ascii=False)
     print(f"signals generated: {len(signals)}")
+
+    # ── Shadow weights (Phase 29.1) ────────────────────────────────────────
+    # 承認済み weights を読み、weighted シグナルを shadow で記録する。
+    # 実推奨(上で書き出した signals)には一切影響しない。shadow層の失敗は
+    # シグナル生成を止めない(soft-fail)。
+    try:
+        import shadow_weights
+
+        summary = shadow_weights.run(signals)
+        print(
+            f"shadow weights: status={summary['weights_status']} "
+            f"rank_changes={summary['rank_changes']} "
+            f"comparisons={summary['comparisons_accumulated']}/{summary['min_comparisons_for_promotion']}"
+        )
+    except Exception as exc:  # noqa: BLE001 - shadow層の失敗で実シグナルを止めない
+        print(f"warning: shadow weights computation failed (live signals unaffected): {exc}")
     return 0
 
 
