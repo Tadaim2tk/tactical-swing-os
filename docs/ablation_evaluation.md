@@ -51,3 +51,19 @@ calibration slope / MFE / MAE（Rユニット・経路ベース）/ Sharpe /
 実売買・発注なし。weights.json / generate_signal.py（実行時）変更なし。
 テキスト層を signal へ接続する将来判断は、この ablation の `status=ok` な比較結果と
 人間承認PRを経る。
+
+## 改善判定（arm 対比較 / 2026-07-02 司令 B-2 指示で閾値を先行固定）
+
+`compare_arms()` が「semantic類似が予測に効いている」のか「似た説明が見つかっただけ」なのかを
+同一 (日,資産,ホライズン) ペアの R 差分で分離する。判定閾値（固定済み・変更は人間PR）:
+
+| verdict | 条件 |
+|---|---|
+| `improves` | n_pairs>=30 かつ 符号検定 p<=0.05 かつ 平均R差>0 かつ 勝ち>負け |
+| `degrades` | n_pairs>=30 かつ 符号検定 p<=0.05 かつ 平均R差<0 |
+| `no_significant_difference` | n_pairs>=30 で上記に該当せず |
+| `insufficient_data` | n_pairs<30（小標本では判定しない） |
+
+- 符号検定は正確二項（両側・純stdlib）。tie は除外。t検定 p も参考表示。
+- 出力: `results/ablation_arm_comparison.csv` + summary json の `arm_comparison` + レポート§3。
+- text 層を signal score へ接続する将来判断は `improves` 判定 + 人間承認PRを経る。

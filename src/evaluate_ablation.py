@@ -260,6 +260,94 @@ def build_cohort(memory: pd.DataFrame, *, raw_dir: Path = RAW_DIR) -> pd.DataFra
     return pd.DataFrame(rows)
 
 
+# ── arm 対比較（司令 B-2: 改善判定の閾値と表示を先に固定する） ──────────────────
+
+CHALLENGER_ARMS = ["text_narrative_only", "technical_plus_text"]
+
+COMPARISON_COLUMNS = [
+    "horizon_days",
+    "challenger_arm",
+    "n_pairs",
+    "challenger_wins",
+    "technical_wins",
+    "ties",
+    "mean_r_diff",
+    "t_p_value",
+    "sign_p_value",
+    "verdict",
+]
+
+
+def binomial_two_sided_p(wins: int, n: int) -> float:
+    """公平コイン帰無仮説の正確二項検定（両側・純stdlib）。tie は呼び手が除外する。"""
+    if n <= 0:
+        return 1.0
+    from math import comb
+
+    k = min(wins, n - wins)
+    tail = sum(comb(n, i) for i in range(0, k + 1)) / (2.0 ** n)
+    return min(1.0, 2.0 * tail)
+
+
+def compare_arms(cohort: pd.DataFrame) -> pd.DataFrame:
+    """text/combined が technical を上回るかの対比較（同一 (date,asset,horizon) ペア限定）。
+
+    「semantic類似が予測に効いている」のか「似た説明が見つかっただけ」なのかを、
+    同一cohortのペア差分で分離する。判定閾値はデータが無い今のうちに固定:
+
+    - n_pairs < MIN_SAMPLES(30) → insufficient_data（判定しない）
+    - 符号検定 p<=0.05 かつ 平均R差>0 かつ wins>losses → improves
+    - 符号検定 p<=0.05 かつ 平均R差<0 → degrades
+    - それ以外 → no_significant_difference
+
+    tie（R差=0）は符号検定から除外（標準的な sign test の扱い）。
+    """
+    from stat_guards import t_test_one_sample
+
+    if cohort.empty:
+        return pd.DataFrame(columns=COMPARISON_COLUMNS)
+    rows: list[dict] = []
+    tech = cohort[(cohort["arm"] == "technical_only") & cohort["actionable"]]
+    for h in HORIZONS:
+        tech_h = tech[tech["horizon_days"] == h][["date", "asset", "r"]].rename(columns={"r": "r_tech"})
+        for arm in CHALLENGER_ARMS:
+            ch = cohort[(cohort["arm"] == arm) & cohort["actionable"] & (cohort["horizon_days"] == h)]
+            paired = ch[["date", "asset", "r"]].merge(tech_h, on=["date", "asset"], how="inner").dropna(subset=["r", "r_tech"])
+            n = int(len(paired))
+            if n == 0:
+                rows.append({
+                    "horizon_days": h, "challenger_arm": arm, "n_pairs": 0,
+                    "challenger_wins": 0, "technical_wins": 0, "ties": 0,
+                    "mean_r_diff": np.nan, "t_p_value": np.nan, "sign_p_value": np.nan,
+                    "verdict": "insufficient_data",
+                })
+                continue
+            diffs = (paired["r"] - paired["r_tech"]).to_numpy(dtype=float)
+            wins = int((diffs > 0).sum())
+            losses = int((diffs < 0).sum())
+            ties = int((diffs == 0).sum())
+            mean_diff = float(diffs.mean())
+            _t, t_p = t_test_one_sample(diffs.tolist(), mu=0.0)
+            sign_p = binomial_two_sided_p(wins, wins + losses)
+            if n < MIN_SAMPLES:
+                verdict = "insufficient_data"
+            elif sign_p <= 0.05 and mean_diff > 0 and wins > losses:
+                verdict = "improves"
+            elif sign_p <= 0.05 and mean_diff < 0:
+                verdict = "degrades"
+            else:
+                verdict = "no_significant_difference"
+            rows.append({
+                "horizon_days": h, "challenger_arm": arm, "n_pairs": n,
+                "challenger_wins": wins, "technical_wins": losses, "ties": ties,
+                "mean_r_diff": round(mean_diff, 4),
+                "t_p_value": round(float(t_p), 4),
+                "sign_p_value": round(float(sign_p), 4),
+                "verdict": verdict,
+            })
+    return pd.DataFrame(rows, columns=COMPARISON_COLUMNS)
+
+
 # ── 指標集計 ────────────────────────────────────────────────────────────────
 
 def _calibration_slope(probs: np.ndarray, hits: np.ndarray) -> float:
@@ -326,7 +414,23 @@ def summarize_metrics(cohort: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=METRIC_COLUMNS)
 
 
-def render_report(summary: dict, table: pd.DataFrame) -> str:
+def render_report(summary: dict, table: pd.DataFrame, comparison: pd.DataFrame | None = None) -> str:
+    comparison = comparison if comparison is not None else pd.DataFrame(columns=COMPARISON_COLUMNS)
+    if comparison.empty:
+        comparison_body = "_対ペアなし（cohort 蓄積待ち）。閾値と表示は先に固定済み — データが溜まれば自動で判定が出る。_"
+    else:
+        clines = [
+            "| challenger | h | pairs | 勝ち | 負け | tie | 平均R差 | sign p | t p | verdict |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for _, c in comparison.iterrows():
+            def g(v, p=".3f"):
+                return format(v, p) if pd.notna(v) else "—"
+            clines.append(
+                f"| {c['challenger_arm']} | {c['horizon_days']}d | {c['n_pairs']} | {c['challenger_wins']} | {c['technical_wins']} "
+                f"| {c['ties']} | {g(c['mean_r_diff'])} | {g(c['sign_p_value'])} | {g(c['t_p_value'])} | **{c['verdict']}** |"
+            )
+        comparison_body = "\n".join(clines)
     if table.empty:
         body = (
             f"_cohort なし（narrative memory の局面文書 {summary['memory_days_total']} 日 / "
@@ -359,7 +463,16 @@ def render_report(summary: dict, table: pd.DataFrame) -> str:
 
 {body}
 
-## 3. 読み方と注意
+## 3. text系統は technical を上回るか（対比較・改善判定）
+
+{comparison_body}
+
+- 判定閾値（固定済み）: n_pairs>={MIN_SAMPLES} / 符号検定 p<=0.05 / 平均R差の符号。
+  **improves** = semantic類似が予測に効いている証拠 / **degrades** = 悪化 /
+  **no_significant_difference** = 「似た説明が見つかっただけ」と区別できない。
+- text 層を signal score へ接続する将来判断は improves 判定 + 人間承認PRを経る。
+
+## 4. 読み方と注意
 
 - n_actionable >= {MIN_SAMPLES} の行だけが判断材料（status=ok）。未満は insufficient_data の正直表示。
 - テキスト系統は「基準日までに結果が確定した類似日」だけで方向を決めている（as-of・lookahead-safe）。
@@ -376,6 +489,7 @@ def main() -> int:
     day_docs = build_day_documents(memory)
     cohort = build_cohort(memory)
     table = summarize_metrics(cohort)
+    comparison = compare_arms(cohort)
 
     status = "ok" if (not table.empty and (table["status"] == "ok").any()) else "insufficient_data"
     summary = {
@@ -386,11 +500,14 @@ def main() -> int:
         "memory_days_total": int(len(day_docs)),
         "cohort_rows": int(len(cohort)),
         "min_samples_for_judgement": MIN_SAMPLES,
+        # 司令 B-2: text系統の改善判定（閾値固定済み・n>=30 で自動判定）
+        "arm_comparison": comparison.where(pd.notna(comparison), None).to_dict(orient="records"),
     }
     summary.update(SAFETY_FIELDS)
 
     cohort.to_csv(RESULTS_DIR / "ablation_cohort.csv", index=False)
     table.to_csv(RESULTS_DIR / "ablation_comparison.csv", index=False)
+    comparison.to_csv(RESULTS_DIR / "ablation_arm_comparison.csv", index=False)
     (RESULTS_DIR / "ablation_comparison_summary.json").write_text(
         json.dumps({"summary": summary,
                     "rows": table.where(pd.notna(table), None).to_dict(orient="records")},
@@ -398,7 +515,9 @@ def main() -> int:
         encoding="utf-8",
     )
     report_date = format_jst(generated_at)[:10]
-    (REPORTS_DIR / f"{report_date}_ablation_comparison.md").write_text(render_report(summary, table), encoding="utf-8")
+    (REPORTS_DIR / f"{report_date}_ablation_comparison.md").write_text(
+        render_report(summary, table, comparison), encoding="utf-8"
+    )
 
     print(f"ablation comparison: status={status} cohort_rows={len(cohort)} arms={len(ARMS)} horizons={HORIZONS}")
     return 0

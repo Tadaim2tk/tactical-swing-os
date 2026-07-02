@@ -195,3 +195,78 @@ def test_safety_fields_and_arm_list():
     assert ea.SAFETY_FIELDS["connected_to_signal_score"] is False
     assert ea.SAFETY_FIELDS["weights_json_updated"] is False
     assert set(ea.ARMS) == {"technical_only", "text_narrative_only", "technical_plus_text"}
+
+
+# === arm 対比較 (司令 B-2: 改善判定の閾値を今のうちに固定) ===
+
+def _paired_cohort(n: int, diff: float, h=5, noise=None) -> pd.DataFrame:
+    """technical と challenger 2系統の対ペア cohort を合成する。"""
+    rows = []
+    for i in range(n):
+        d = f"2026-03-{(i % 28) + 1:02d}x{i}"  # date+asset の組でユニークに
+        base_r = 0.5
+        eps = (noise[i % len(noise)] if noise else 0.0)
+        for arm, r in [
+            ("technical_only", base_r),
+            ("text_narrative_only", base_r + diff + eps),
+            ("technical_plus_text", base_r + diff + eps),
+        ]:
+            rows.append({
+                "date": d, "asset": "SPX", "horizon_days": h, "arm": arm,
+                "side": "LONG", "prob": 0.6, "actionable": True,
+                "r": r, "hit": 1.0, "mfe_r": 1.0, "mae_r": -0.3, "risk_per_unit": 2.0,
+            })
+    return pd.DataFrame(rows)
+
+
+def test_compare_arms_improves_when_consistently_better():
+    comp = ea.compare_arms(_paired_cohort(40, diff=0.2))
+    row = comp[(comp["challenger_arm"] == "text_narrative_only") & (comp["horizon_days"] == 5)].iloc[0]
+    assert row["n_pairs"] == 40
+    assert row["challenger_wins"] == 40 and row["technical_wins"] == 0
+    assert row["verdict"] == "improves"
+    assert row["sign_p_value"] <= 0.001
+
+
+def test_compare_arms_degrades_when_consistently_worse():
+    comp = ea.compare_arms(_paired_cohort(40, diff=-0.2))
+    row = comp[(comp["challenger_arm"] == "technical_plus_text") & (comp["horizon_days"] == 5)].iloc[0]
+    assert row["verdict"] == "degrades"
+
+
+def test_compare_arms_insufficient_below_30_pairs():
+    # 29ペアで全勝でも判定しない(小標本の後知恵を弾く)
+    comp = ea.compare_arms(_paired_cohort(29, diff=0.3))
+    row = comp[(comp["challenger_arm"] == "text_narrative_only") & (comp["horizon_days"] == 5)].iloc[0]
+    assert row["n_pairs"] == 29
+    assert row["verdict"] == "insufficient_data"
+
+
+def test_compare_arms_no_significant_difference_on_noise():
+    # 勝ち負けが交互 -> 符号検定は棄却できない
+    noise = [0.1, -0.1]
+    comp = ea.compare_arms(_paired_cohort(40, diff=0.0, noise=noise))
+    row = comp[(comp["challenger_arm"] == "text_narrative_only") & (comp["horizon_days"] == 5)].iloc[0]
+    assert row["verdict"] == "no_significant_difference"
+
+
+def test_compare_arms_ties_excluded_from_sign_test():
+    # diff=0 (全tie) -> 符号検定n=0 -> p=1.0 -> 有意差なし
+    comp = ea.compare_arms(_paired_cohort(40, diff=0.0))
+    row = comp[(comp["challenger_arm"] == "text_narrative_only") & (comp["horizon_days"] == 5)].iloc[0]
+    assert row["ties"] == 40
+    assert row["sign_p_value"] == 1.0
+    assert row["verdict"] == "no_significant_difference"
+
+
+def test_binomial_two_sided_p_exact_values():
+    # n=10 全勝: p = 2 * (1/2)^10 = 0.001953125
+    assert abs(ea.binomial_two_sided_p(10, 10) - 2 * (0.5 ** 10)) < 1e-12
+    # 5勝5敗: 中央 -> p は 1.0 にクリップ
+    assert ea.binomial_two_sided_p(5, 10) == 1.0
+    assert ea.binomial_two_sided_p(0, 0) == 1.0
+
+
+def test_compare_arms_empty_cohort_is_honest():
+    comp = ea.compare_arms(pd.DataFrame())
+    assert comp.empty
