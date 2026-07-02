@@ -1354,3 +1354,25 @@ def top_reason_codes(reason_table: pd.DataFrame) -> dict:
         "negative": negative.to_dict(orient="records"),
         "insufficient": insufficient.to_dict(orient="records"),
     }
+
+
+def similar_narrative_summary(cases: pd.DataFrame, summary_json) -> dict:
+    """類似局面検索 (Narrative Memory v0 / Phase 29.2) のダッシュボード用サマリー。
+
+    表示のみで signal score には未接続 (connected_to_signal_score=false)。
+    """
+    payload = summary_json if isinstance(summary_json, dict) else {}
+    status = str(payload.get("status", "")).strip() or ("unavailable" if cases.empty else "ok")
+    return {
+        "available": bool(payload) or not cases.empty,
+        "similar_narrative_status": status,
+        "similar_query_date": payload.get("query_date", ""),
+        "similar_corpus_days": int(numeric_or(payload.get("corpus_days", 0), 0)),
+        "similar_memory_days_total": int(numeric_or(payload.get("memory_days_total", 0), 0)),
+        "similar_case_rows": int(len(cases)),
+        "similar_embedding_provider": payload.get("embedding_provider", "") or "tfidf_local",
+        "connected_to_signal_score": bool(payload.get("connected_to_signal_score", False)),
+        "requires_human_approval": True,
+        "weights_json_updated": False,
+        "generate_signal_updated": False,
+    }

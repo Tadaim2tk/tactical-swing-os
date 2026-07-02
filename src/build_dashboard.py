@@ -98,6 +98,10 @@ def build_dashboard() -> tuple[dict, str]:
         extras["narrative_reliability_json"],
         extras["narrative_reliability"],
     )
+    similar_narrative = similar_narrative_summary(
+        extras["similar_narrative_cases"],
+        extras["similar_narrative_summary_json"],
+    )
     generated_dt_utc = now_utc()
     dashboard_as_of = generated_dt_utc.date().isoformat()
     transaction_cost = transaction_cost_summary(evaluations, extras["cost_model_json"], as_of=dashboard_as_of)
@@ -141,6 +145,7 @@ def build_dashboard() -> tuple[dict, str]:
         "datetime_audit": len(extras["datetime_audit"]),
         "prediction_calibration": len(extras["prediction_calibration"]),
         "narrative_reliability": len(extras["narrative_reliability"]),
+        "similar_narrative_cases": len(extras["similar_narrative_cases"]),
         "narrative_lookahead_audit": len(extras["narrative_lookahead_audit"]),
         "adversarial_review": len(extras["adversarial_review"]),
         "ai_feedback": len(ai_feedback),
@@ -200,6 +205,7 @@ def build_dashboard() -> tuple[dict, str]:
         "datetime_audit_summary": datetime_health,
         "prediction_calibration_summary": prediction_calibration,
         "narrative_reliability_summary": narrative_reliability,
+        "similar_narrative_summary": similar_narrative,
         "transaction_cost_summary": transaction_cost,
         "audit_report_summary": audit_report,
         "narrative_lookahead_summary": narrative_lookahead,
@@ -258,6 +264,8 @@ def build_dashboard() -> tuple[dict, str]:
         latest_eval_summary=latest_eval_summary,
         evaluation_view_source=evaluation_view_source,
         evaluation_fallback_used=evaluation_fallback_used,
+        similar_narrative=similar_narrative,
+        similar_table=extras["similar_narrative_cases"],
         apply_false=apply_false,
         summary=summary,
     )
