@@ -90,3 +90,6 @@ results/jp_swing_evaluated.csv
 results/jp_swing_evaluated.json
 results/jp_swing_summary.json
 reports/jp_swing/*.md
+reports/narrative/*_similar_narratives.md
+reports/narrative/*_narrative_similarity_evaluation.md
+reports/ablation/*.md

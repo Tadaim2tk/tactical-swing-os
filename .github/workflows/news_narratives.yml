@@ -6,8 +6,9 @@ on:
     # 21:50 UTC is 06:50 JST.
     - cron: "50 21 * * *"
 
+# governance_reform_2026-07 §2 #6: data/ 配下のデータ追記コミットのみ許可
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   news-narratives:
@@ -32,6 +33,33 @@ jobs:
       - name: Classify news narratives
         run: python src/classify_news_narratives.py
 
+      - name: Build narrative memory (Phase 29.2)
+        run: python src/build_narrative_memory.py
+
+      - name: Retrieve similar narratives
+        run: python src/retrieve_similar_narratives.py
+        env:
+          TSO_EMBEDDING_PROVIDER: ${{ vars.TSO_EMBEDDING_PROVIDER || '' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Evaluate narrative similarity
+        run: python src/evaluate_narrative_similarity.py
+
+      - name: Commit narrative memory store (data append only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "tso-actions-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/narrative_memory.csv
+          if git diff --cached --quiet; then
+            echo "no memory changes to commit"
+          else
+            git commit -m "Append narrative memory store [skip ci]" \
+              -m "Data-append commit permitted by governance_reform_2026-07 (data/ only)."
+            git pull --rebase origin main
+            git push origin main
+          fi
+
       - name: Upload news narrative artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -43,3 +71,8 @@ jobs:
             results/news_headlines.json
             results/news_narrative_scores.csv
             results/news_narrative_scores.json
+            results/narrative_memory_summary.json
+            results/similar_narrative_cases.csv
+            results/similar_narrative_summary.json
+            results/narrative_similarity_evaluation.json
+            reports/narrative/*_similar_narratives.md
