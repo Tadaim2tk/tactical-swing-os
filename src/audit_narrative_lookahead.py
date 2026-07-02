@@ -219,6 +219,30 @@ def _base_row(audit_id: str, source_type: str, source_file: str, generated_at_js
     }
 
 
+def check_narrative_memory(memory_summary, generated_at_jst: str) -> list[dict]:
+    """Narrative Memory (Phase 29.2) の cutoff 機械除外が破れていないかを監査する。
+
+    allowed_with_violation_count > 0 = 「source_published_at_utc が signal_cutoff_utc より
+    後なのに allowed_for_signal=true の record がある」= lookahead 混入。high_risk を出す。
+    正常時(=0)は findings を出さない（memory の存在自体は違反ではない）。
+    """
+    if not isinstance(memory_summary, dict) or not memory_summary:
+        return []
+    violations = int(memory_summary.get("allowed_with_violation_count") or 0)
+    if violations <= 0:
+        return []
+    row = _base_row("mem_0", "narrative_memory", "data/narrative_memory.csv", generated_at_jst)
+    row.update({
+        "source_timing_class": "post_signal",
+        "lookahead_risk_level": "high_risk",
+        "lookahead_score": 80,
+        "issue_type": "memory_cutoff_violation",
+        "text_excerpt": f"allowed_with_violation_count={violations}",
+        "recommended_action": "narrative memory の allowed 判定ロジックを確認し、該当recordをシグナル用途から除外する",
+    })
+    return [row]
+
+
 def audit_text_record(
     *,
     audit_id: str,
@@ -459,7 +483,19 @@ def main() -> int:
     )
 
     rows = build_audit_rows(headlines, narrative_scores, ai_feedback, signal_date, evaluation_date, generated_at_jst)
+
+    # Narrative Memory (Phase 29.2) の cutoff 除外の健全性も監査対象に含める
+    try:
+        memory_summary = json.loads((RESULTS_DIR / "narrative_memory_summary.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        memory_summary = None
+    rows += check_narrative_memory(memory_summary, generated_at_jst)
+
     summary = summarize(rows, generated_at_jst, generated_at_utc)
+    if isinstance(memory_summary, dict):
+        summary["narrative_memory_records"] = int(memory_summary.get("total_records") or 0)
+        summary["narrative_memory_cutoff_violations_excluded"] = int(memory_summary.get("cutoff_violation_count") or 0)
+        summary["narrative_memory_allowed_violations"] = int(memory_summary.get("allowed_with_violation_count") or 0)
 
     audit_df = pd.DataFrame(rows, columns=AUDIT_COLUMNS)
     audit_df.to_csv(RESULTS_DIR / "narrative_lookahead_audit.csv", index=False)

@@ -39,6 +39,13 @@ jobs:
         run: |
           python src/classify_news_narratives.py || echo "warning: news narrative classification failed; continuing dashboard"
 
+      - name: Build narrative memory
+        run: |
+          python src/build_narrative_memory.py || echo "warning: narrative memory failed; continuing dashboard"
+          python src/retrieve_similar_narratives.py || echo "warning: similar narratives failed; continuing dashboard"
+          python src/evaluate_narrative_similarity.py || echo "warning: similarity evaluation failed; continuing dashboard"
+          python src/evaluate_ablation.py || echo "warning: ablation comparison failed; continuing dashboard"
+
       - name: Build AI feedback for dashboard
         run: |
           python src/build_ai_feedback.py || echo "warning: AI feedback generation failed; dashboard will continue without it"

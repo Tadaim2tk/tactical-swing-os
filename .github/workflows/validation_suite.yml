@@ -31,6 +31,10 @@ jobs:
           python src/fetch_market.py
           python src/fetch_news.py --hours 24 --max-items 30 --timeout-seconds 5 --global-timeout-seconds 45 || echo "warning: news fetch failed; continuing validation"
           python src/classify_news_narratives.py || echo "warning: news classification failed; continuing validation"
+          python src/build_narrative_memory.py
+          python src/retrieve_similar_narratives.py
+          python src/evaluate_narrative_similarity.py
+          python src/evaluate_ablation.py
           python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10
           python src/build_latest_evaluations.py
           python src/build_ai_feedback.py
@@ -95,6 +99,9 @@ jobs:
           check_file "narrative lookahead audit" "results/narrative_lookahead_audit_summary.json"
           check_file "adversarial review" "results/adversarial_review_summary.json"
           check_file "shadow weights" "results/shadow_weight_impact_summary.json"
+          check_file "narrative memory" "results/narrative_memory_summary.json"
+          check_file "similar narratives" "results/similar_narrative_summary.json"
+          check_file "ablation comparison" "results/ablation_comparison_summary.json"
           check_file "dashboard" "reports/dashboard/index.html"
 
       - name: Upload validation artifacts
@@ -166,5 +173,10 @@ jobs:
             results/adversarial_review.json
             results/adversarial_review_summary.json
             results/shadow_weight_impact_summary.json
+            results/narrative_memory_summary.json
+            results/similar_narrative_cases.csv
+            results/narrative_similarity_evaluation.json
+            results/ablation_comparison.csv
+            results/ablation_comparison_summary.json
             results/shadow_weighted_signals.csv
             reports/audit/*_adversarial_review.md

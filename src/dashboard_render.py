@@ -313,6 +313,14 @@ DISPLAY_LABELS = {
     "default_source": "デフォルトsource", "configured_sources": "設定済みsource数",
     "net_r_available": "ネットR利用可", "gross_r_available": "グロスR利用可",
     "cost_adjusted_rows": "コスト調整済み行数",
+    # --- 類似局面検索 (Narrative Memory v0 / Phase 29.2) ---
+    "similar_narrative_status": "検索ステータス", "similar_query_date": "基準日",
+    "similar_corpus_days": "過去局面日数", "similar_memory_days_total": "局面日数(総計)",
+    "similar_case_rows": "類似ケース行数", "similar_embedding_provider": "embedding provider",
+    "connected_to_signal_score": "シグナルスコア接続",
+    "similar_rank": "順位", "similar_date": "類似日", "similarity": "類似度",
+    "fwd_return_5d": "+5営業日", "fwd_return_10d": "+10営業日", "fwd_return_20d": "+20営業日",
+    "outcome_status": "結果状態",
 }
 
 
@@ -391,6 +399,10 @@ VALUE_LABELS = {
     "attack": "攻撃モード", "aggressive": "攻撃モード", "normal": "通常モード",
     "defense": "防御モード", "defensive": "防御モード",
     "tracking": "追跡中", "calibrated": "較正OK", "uncalibrated": "未較正",
+    "tfidf_local": "TF-IDF（ローカル）",
+    "no_query_document": "本日の局面文書なし",
+    "before_price_history": "価格履歴より前",
+    "no_price_data": "価格データなし",
 }
 
 
@@ -548,6 +560,8 @@ def render_html(
     latest_eval_summary: dict,
     evaluation_view_source: str,
     evaluation_fallback_used: bool,
+    similar_narrative: dict,
+    similar_table: pd.DataFrame,
     apply_false: bool,
     summary: dict,
 ) -> str:
@@ -689,6 +703,16 @@ def render_html(
     eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
     signal_stats = "".join(stat_card(k, v) for k, v in signal_counts.items())
     mode_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else display_optional(str(v))) for k, v in mode.items())
+    similar_stats = "".join(
+        [
+            stat_card("similar_narrative_status", similar_narrative.get("similar_narrative_status", "")),
+            stat_card("similar_query_date", similar_narrative.get("similar_query_date", "") or "—"),
+            stat_card("similar_corpus_days", similar_narrative.get("similar_corpus_days", 0)),
+            stat_card("similar_case_rows", similar_narrative.get("similar_case_rows", 0)),
+            stat_card("similar_embedding_provider", similar_narrative.get("similar_embedding_provider", "")),
+            stat_card("connected_to_signal_score", similar_narrative.get("connected_to_signal_score", False)),
+        ]
+    )
     ai_counts = ai_summary.get("alignment_counts", {})
     ai_stats = "".join(
         [
@@ -1020,6 +1044,7 @@ def render_html(
     <h2 class="tier">③ AI判断の質</h2>
     <section class="card"><h2>予測キャリブレーション（確信度の正確さ）</h2><p class="notice">AIの確信度を採点する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Prediction Calibration未取得</div>' if not prediction_calibration.get('available') else f'<div class="grid">{prediction_calibration_stats}</div>'}<h3>Rank別キャリブレーション</h3>{table_html(prediction_calibration_table, ["rank","implied_probability","closed_count","hit_rate","calibration_gap","brier_score","p_value","calibration_verdict","recommended_action"], "キャリブレーションデータなし")}</section>
     <section class="card"><h2>ナラティブ信頼性</h2><p class="notice">ナラティブの統計的信頼性を検定する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Narrative Reliability未取得</div>' if not narrative_reliability.get('available') else f'<div class="grid">{narrative_reliability_stats}</div>'}<h3>ナラティブ別信頼性</h3>{table_html(narrative_reliability_table, ["narrative","closed_count","win_rate","average_r","p_value","reliability_label","recommended_action"], "ナラティブ信頼性データなし")}</section>
+    <section class="card"><h2>類似局面検索（Narrative Memory v0）</h2><p class="notice">過去ニュース局面との意味的類似検索です。表示・記録のみで signal score には接続していません（connected_to_signal_score=false）。実売買・発注は行いません。</p>{'<div class="empty">類似局面検索 未取得（Narrative Memory 蓄積待ち）</div>' if not similar_narrative.get('available') else f'<div class="grid">{similar_stats}</div>'}<h3>類似局面と 5/10/20営業日後の実リターン</h3>{table_html(similar_table, ["similar_rank","similar_date","similarity","asset","fwd_return_5d","fwd_return_10d","fwd_return_20d","outcome_status"], "類似局面なし（データ蓄積で自動表示）")}</section>
     <section class="card"><h2>判断理由コード別成績</h2><h3>プラス寄与が大きい理由</h3>{table_html(top_positive, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>マイナス寄与が大きい理由</h3>{table_html(top_negative, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>データ不足</h3>{table_html(insufficient, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}</section>
     <section class="card"><h2>見送り理由分析</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "見送り理由データなし")}</section>
     <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>

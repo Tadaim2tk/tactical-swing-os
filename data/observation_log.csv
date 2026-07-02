@@ -1,0 +1,2 @@
+event_id,protocol_id,run_type,signal_id,a_rank_date,asset,side,cbs,ems,reference_price,risk_unit,review_due,outcome_price_5d,realized_r_5d,outcome_price_10d,realized_r_10d,result,similar_cases_status,narrative_memory_asof_days,lesson_file,recorded_at_utc,notes
+OBS-20260608-WTI,PROTO-0001,non_qualifying_dry_run,20260608_WTI_LONG_A-MOMENTUM,2026-06-08,WTI,LONG,76.0,84.0,96.25,4.25,2026-06-15,80.75,-3.6471,73.209999,-5.4212,failure,no_query_document,0,data/observations/OBS-20260608-WTI.md,2026-07-01 22:02:30 UTC,
