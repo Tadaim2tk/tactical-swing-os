@@ -82,3 +82,35 @@ daily_cycle が **data/ 配下のみ**の追記コミットで永続化（govern
 - 実推奨（`results/signals.csv` の既存列）は一切変更しない。実売買・発注なし。
 - weights の active 昇格（実推奨への反映）は人間承認PRが必須（不可侵）。
 - shadow層の失敗はシグナル生成を止めない（soft-fail）。
+
+## Actions bot commit の安全性監査（2026-07-02 / 司令 A-2 指示）
+
+**無限ループは構造的に不可能**（3重防御）:
+
+1. 全ワークフロー（daily_cycle / news_narratives / dashboard / validation_suite）のトリガーは
+   `workflow_dispatch` + `schedule`(cron) のみで、**`push` トリガーが存在しない**。
+   bot が main へ push しても何も起動しない。
+2. `GITHUB_TOKEN` による push は GitHub の仕様上、新しい workflow run を発生させない。
+3. commit message に `[skip ci]` を付与（念のための第3層）。
+
+レース安全性: bot commit は push 前に `git pull --rebase origin main` を実行。cron は
+21:50（news）→ 21:55（daily）→ 22:10（dashboard）と直列で、同時書込みの窓が狭い。
+万一 rebase が衝突したらそのステップが赤で落ちる（honest red、握り潰さない）。
+
+権限スコープ: `permissions: contents: write` のみ（workflow/packages 等なし）。さらに
+ステージ対象を `git add data/shadow_weight_comparisons.csv`（news 側は
+`data/narrative_memory.csv`）の**1ファイルに限定**しており、src / docs / .github に
+触れる経路がない（governance_reform_2026-07 §2 #6 の実装）。
+
+## 昇格ゲート（2026-07-02 / 司令 B-1 指示）
+
+`evaluate_promotion_gate()` が昇格判断材料の統計的成立を機械判定する。
+**単発観測・小標本の後知恵では weights を動かせない**ことをテストで固定済み:
+
+- 比較数 n>=30（SPEC-SG-001 と同一）
+- outcome 連結必須: weighted vs base の R 差分系列が無ければ無条件 blocked
+  （v0 は未接続なので常に blocked = 正直表示）
+- t検定 p<=0.05 かつ 平均R差 > 0
+- DSR >= 0.95（SPEC-DSR-001。複数候補の同時検討は n_trials で deflate）
+- 差分ゼロ（identity の帰結）は zero_difference で blocked
+- **全条件クリアでも「材料提示」のみ**: requires_human_approval=true / apply_automatically=false

@@ -297,6 +297,78 @@ def _comparisons_accumulated(ledger: pd.DataFrame, weights_version: str) -> int:
     return int(pd.to_numeric(view.get("n_actionable"), errors="coerce").fillna(0).sum())
 
 
+def evaluate_promotion_gate(
+    outcome_r_diffs: list[float] | None,
+    comparisons_accumulated: int,
+    *,
+    n_trials: int = 1,
+    sharpe_variance: float = 0.0,
+) -> dict:
+    """非identity weights を「昇格判断の材料あり」と言えるかの機械ゲート。
+
+    通過しても行われるのは人間への材料提示のみ（承認は人間PR / 不可侵 #4）。
+    小標本1件の後知恵（例: 単発の failure 観測）で weight を動かせない構造を、
+    identity のうちにテストで固定するのが目的（司令 B-1 指示）。
+
+    outcome_r_diffs: 「weighted選択 − base選択」の R 差分系列（結果が閉じたもの）。
+    v0 では outcome 連結が未実装のため None → no_outcome_linkage で必ず blocked。
+    n_trials: 同時に検討している weights 候補数（多重検定として DSR を deflate）。
+    sharpe_variance: 候補間 Sharpe の分散（n_trials>1 のとき呼び手が供給。単独候補では0でPSR相当）。
+
+    判定は SPEC-SG-001 / SPEC-DSR-001 と同一の統計ゲートに通す:
+    n >= MIN_COMPARISONS_FOR_PROMOTION / t検定 p<=0.05 かつ平均差>0 /
+    DSR >= DEFLATED_SHARPE_CONFIDENCE。blocked 理由はすべて列挙する（false green を作らない）。
+    """
+    from stat_guards import DEFLATED_SHARPE_CONFIDENCE, deflated_sharpe_ratio, t_test_one_sample
+
+    reasons: list[str] = []
+    metrics: dict = {
+        "n_outcome_diffs": 0,
+        "mean_r_diff": None,
+        "t_p_value": None,
+        "dsr": None,
+        "dsr_threshold": DEFLATED_SHARPE_CONFIDENCE,
+        "n_trials": int(n_trials),
+    }
+
+    if comparisons_accumulated < MIN_COMPARISONS_FOR_PROMOTION:
+        reasons.append(
+            f"insufficient_comparisons: {comparisons_accumulated} < {MIN_COMPARISONS_FOR_PROMOTION}"
+        )
+
+    diffs = [float(v) for v in (outcome_r_diffs or []) if pd.notna(v)]
+    metrics["n_outcome_diffs"] = len(diffs)
+    if not diffs:
+        reasons.append("no_outcome_linkage: weighted vs base の R 差分系列が未接続（結果で裏づけられない変更は提案しない）")
+    else:
+        mean_diff = float(np.mean(diffs))
+        metrics["mean_r_diff"] = round(mean_diff, 4)
+        if len(diffs) < MIN_COMPARISONS_FOR_PROMOTION:
+            reasons.append(f"insufficient_outcome_samples: {len(diffs)} < {MIN_COMPARISONS_FOR_PROMOTION}")
+        if all(abs(d) < 1e-12 for d in diffs):
+            reasons.append("zero_difference: base と weighted の結果に差が無く、weights 変更を正当化できない")
+        else:
+            _t, p = t_test_one_sample(diffs, mu=0.0)
+            metrics["t_p_value"] = round(float(p), 4)
+            if mean_diff <= 0:
+                reasons.append(f"mean_diff_not_positive: {mean_diff:.4f} <= 0")
+            if p > 0.05:
+                reasons.append(f"not_significant: p={p:.4f} > 0.05")
+            dsr = deflated_sharpe_ratio(diffs, n_trials=n_trials, sharpe_variance=float(sharpe_variance))
+            metrics["dsr"] = round(float(dsr), 4)
+            if dsr < DEFLATED_SHARPE_CONFIDENCE:
+                reasons.append(f"dsr_below_threshold: {dsr:.4f} < {DEFLATED_SHARPE_CONFIDENCE}（多重検定後は偶然と区別できない）")
+
+    return {
+        "decision": "materials_ready" if not reasons else "blocked",
+        "blocked_reasons": reasons,
+        **metrics,
+        # 材料が揃っても自動適用はしない（不可侵 #4）
+        "requires_human_approval": True,
+        "apply_automatically": False,
+    }
+
+
 def build_summary(shadow: pd.DataFrame, loaded: dict, comparisons_accumulated: int, generated_at) -> dict:
     actionable = shadow[shadow["side"].isin(["LONG", "SHORT"])] if not shadow.empty else pd.DataFrame()
     abs_delta = pd.to_numeric(actionable.get("strength_delta"), errors="coerce").abs() if not actionable.empty else pd.Series(dtype=float)
@@ -316,6 +388,9 @@ def build_summary(shadow: pd.DataFrame, loaded: dict, comparisons_accumulated: i
         "comparisons_accumulated": int(comparisons_accumulated),
         "min_comparisons_for_promotion": MIN_COMPARISONS_FOR_PROMOTION,
         "promotion_sample_ready": bool(comparisons_accumulated >= MIN_COMPARISONS_FOR_PROMOTION),
+        # 昇格ゲート: v0 は outcome 連結が無いので常に blocked（正直表示）。
+        # sample_ready は「蓄積の進捗」、gate は「昇格材料の統計的成立」— 別物として両方出す。
+        "promotion_gate": evaluate_promotion_gate(None, comparisons_accumulated),
     }
     summary.update(SAFETY_FIELDS)
     return summary
@@ -377,7 +452,12 @@ def render_report(summary: dict, shadow: pd.DataFrame) -> str:
 
 - 累積比較数（actionable, version={summary['weights_version'] or '—'}）: **{summary['comparisons_accumulated']} / {summary['min_comparisons_for_promotion']}**
 - 昇格判断に足るサンプル: **{'到達' if ready else '未到達'}**
-- 昇格の手続き: 候補weightsを `models/approved_weights.json` に反映し
+- 統計ゲート判定: **{summary['promotion_gate']['decision']}**
+  {chr(10).join('  - ' + r for r in summary['promotion_gate']['blocked_reasons']) or '  - （全条件クリア: 材料を人間へ提示可能）'}
+- ゲート仕様: n>={summary['min_comparisons_for_promotion']} / t検定 p<=0.05 かつ平均R差>0 /
+  DSR>={summary['promotion_gate']['dsr_threshold']}（SPEC-SG-001 / SPEC-DSR-001 と同一の統計基準）。
+  **単発観測・小標本の後知恵では weights を動かせない。**
+- 昇格の手続き: ゲート通過後も自動適用はない。候補weightsを `models/approved_weights.json` に反映し
   `models/weight_versions/` にスナップショットを置く**人間承認PR**を出す。
   実推奨（active）への反映はさらに別の人間承認PRが必要。
 
