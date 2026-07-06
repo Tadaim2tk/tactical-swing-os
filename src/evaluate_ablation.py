@@ -220,6 +220,7 @@ def build_cohort(memory: pd.DataFrame, *, raw_dir: Path = RAW_DIR) -> pd.DataFra
     frames = {a: load_ohlcv_frame(a, raw_dir) for a in assets}
 
     rows: list[dict] = []
+    seen_bars: set[tuple[str, int]] = set()  # レビュー指摘#2: 週末の暦日が同一バーに解決される重複を除外
     for i in range(MIN_MEMORY_DAYS, len(dates)):
         d = dates[i]
         # 類似検索: d 以前の文書のみで fit (未来語彙の混入なし)
@@ -233,6 +234,9 @@ def build_cohort(memory: pd.DataFrame, *, raw_dir: Path = RAW_DIR) -> pd.DataFra
             d_idx = bar_index(df, d)
             if d_idx < 0:
                 continue
+            if (asset, d_idx) in seen_bars:
+                continue  # 同一バーの重複サンプル化はnの水増し(先着=最初の暦日のみ採用)
+            seen_bars.add((asset, d_idx))
             risk = RISK_ATR_MULT * atr14_at(df, d_idx)
             if np.isnan(risk) or risk <= 0:
                 continue  # risk 不定は arm 非依存 -> (日,資産) ごと除外で cohort 対称性を保つ

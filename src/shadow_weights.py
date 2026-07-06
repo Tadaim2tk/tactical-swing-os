@@ -347,6 +347,9 @@ def evaluate_promotion_gate(
             reasons.append(f"insufficient_outcome_samples: {len(diffs)} < {MIN_COMPARISONS_FOR_PROMOTION}")
         if all(abs(d) < 1e-12 for d in diffs):
             reasons.append("zero_difference: base と weighted の結果に差が無く、weights 変更を正当化できない")
+        elif float(np.std(diffs)) < 1e-9:
+            # レビュー指摘#5: 定数系列は分散情報が無く、丸め残差でDSRが最大確信に化ける。fail-closed。
+            reasons.append("degenerate_variance: 差分系列が定数で分散情報が無く、統計判定できない")
         else:
             _t, p = t_test_one_sample(diffs, mu=0.0)
             metrics["t_p_value"] = round(float(p), 4)

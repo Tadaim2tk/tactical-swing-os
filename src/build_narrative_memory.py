@@ -93,9 +93,21 @@ def compute_signal_cutoff_utc(observed: pd.Timestamp) -> pd.Timestamp:
     return cutoff
 
 
-def _record_id(link: str, published: str, title: str) -> str:
-    raw = f"{link}|{published}|{title}".encode("utf-8", errors="ignore")
+def _record_id(link: str, title: str) -> str:
+    # published は含めない(配信側の published 更新・再配信で同一記事が別IDになる二重登録を防ぐ。レビュー指摘#3)
+    raw = f"{link}|{title}".encode("utf-8", errors="ignore")
     return hashlib.sha1(raw).hexdigest()[:16]
+
+
+def as_bool_series(series: pd.Series) -> pd.Series:
+    """fail-closed の bool 化。NaN/欠損/不明値は False(=シグナル用途から除外)。
+
+    `.astype(bool)` は NaN を True にする(fail-open)ため使用禁止。レビュー指摘#4。
+    """
+    return series.map(
+        lambda v: v is True or (isinstance(v, (bool, int, float)) and v == 1 and not pd.isna(v))
+        or str(v).strip().lower() == "true"
+    ).fillna(False).astype(bool)
 
 
 def _fmt(ts: pd.Timestamp | None) -> str:
@@ -135,7 +147,7 @@ def build_records(headlines: pd.DataFrame, ingested_at_utc: pd.Timestamp) -> pd.
 
         text = title if not summary else f"{title}。{summary}"
         rows.append({
-            "record_id": _record_id(_clean(h.get("link")), _clean(h.get("published_utc")), title),
+            "record_id": _record_id(_clean(h.get("link")), title),
             # memory_date = この record が材料になり得るシグナル実行日(UTC)。日毎の「局面」文書のキー。
             "memory_date": cutoff.strftime("%Y-%m-%d"),
             "asset_tags": _clean(h.get("matched_assets")),
@@ -165,15 +177,20 @@ def load_memory(path: Path = MEMORY_PATH) -> pd.DataFrame:
 
 
 def merge_memory(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
-    """既存storeへ新recordを追記。record_id 重複は既存(先着)を保持=過去の記録を書き換えない。"""
+    """既存storeへ新recordを追記。record_id 重複は既存(先着)を保持=過去の記録を書き換えない。
+
+    さらに (link, text) 同一の記事も先着保持で重複除去する(published 更新・再配信対策。
+    旧ID方式で登録済みの過去recordとの二重登録もこれで吸収する。レビュー指摘#3)。
+    """
     merged = pd.concat([existing, new], ignore_index=True)
-    merged = merged.drop_duplicates(subset=["record_id"], keep="first").reset_index(drop=True)
+    merged = merged.drop_duplicates(subset=["record_id"], keep="first")
+    merged = merged.drop_duplicates(subset=["link", "text"], keep="first").reset_index(drop=True)
     return merged.sort_values(["memory_date", "record_id"]).reset_index(drop=True)
 
 
 def build_summary(memory: pd.DataFrame, added: int, generated_at) -> dict:
-    allowed = memory["allowed_for_signal"].astype(bool) if not memory.empty else pd.Series(dtype=bool)
-    violations = memory["cutoff_violation"].astype(bool) if not memory.empty else pd.Series(dtype=bool)
+    allowed = as_bool_series(memory["allowed_for_signal"]) if not memory.empty else pd.Series(dtype=bool)
+    violations = as_bool_series(memory["cutoff_violation"]) if not memory.empty else pd.Series(dtype=bool)
     allowed_violations = int((allowed & violations).sum()) if not memory.empty else 0
     summary = {
         "generated_at_jst": format_jst(generated_at),

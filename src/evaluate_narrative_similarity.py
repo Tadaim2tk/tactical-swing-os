@@ -88,10 +88,25 @@ def evaluate(memory: pd.DataFrame, *, raw_dir: Path = RAW_DIR) -> tuple[pd.DataF
         for h in HORIZONS:
             col = f"fwd_return_{h}d"
             q_rets, s_rets = [], []
+            seen_bars: set[int] = set()
             for d, s, _sim in pairs:
+                if closes.empty:
+                    continue
+                idx_d = int(closes.index.searchsorted(pd.Timestamp(d), side="right")) - 1
+                idx_s = int(closes.index.searchsorted(pd.Timestamp(s), side="right")) - 1
+                if idx_d < 0 or idx_s < 0:
+                    continue
+                # レビュー指摘#1: 類似日 s の結果窓が d 時点で閉じていること(重なり=lookahead防止)。
+                # d の未来を含む窓を「予測子」に使うと iid でも一致率が構造的に膨らむ。
+                if idx_s + h > idx_d:
+                    continue
+                # レビュー指摘#2: 週末の暦日が同一バーに解決される重複を1件に(独立性・nの水増し防止)
+                if idx_d in seen_bars:
+                    continue
                 q = forward_returns(closes, d, [h])[col]
                 sv = forward_returns(closes, s, [h])[col]
                 if pd.notna(q) and pd.notna(sv):
+                    seen_bars.add(idx_d)
                     q_rets.append(float(q))
                     s_rets.append(float(sv))
             n = len(q_rets)

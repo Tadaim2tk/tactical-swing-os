@@ -227,3 +227,50 @@ def test_safety_fields_present_in_modules():
         assert fields["weights_json_updated"] is False
         assert fields["generate_signal_updated"] is False
         assert fields["requires_human_approval"] is True
+
+
+# === 2026-07-04 敵対的レビュー指摘の回帰テスト ===
+
+def test_record_id_stable_when_published_changes():
+    # 指摘#3: 配信側が published を更新して再配信しても同一記事は同一ID
+    a = _headline()
+    b = _headline(published_utc="2026-07-01 20:00:01 UTC")  # published だけ違う
+    ra = bnm.build_records(pd.DataFrame([a]), pd.Timestamp("2026-07-01 21:52:00"))
+    rb = bnm.build_records(pd.DataFrame([b]), pd.Timestamp("2026-07-01 21:52:00"))
+    assert ra.iloc[0]["record_id"] == rb.iloc[0]["record_id"]
+    merged = bnm.merge_memory(ra, rb)
+    assert len(merged) == 1
+
+
+def test_merge_dedupes_same_link_text_with_legacy_ids():
+    # 旧ID方式で登録済みの重複(published違いで別ID)も (link,text) で吸収する
+    a = _headline()
+    r = bnm.build_records(pd.DataFrame([a]), pd.Timestamp("2026-07-01 21:52:00"))
+    legacy = r.copy()
+    legacy.loc[0, "record_id"] = "legacy0123456789"  # 別IDの同一記事
+    merged = bnm.merge_memory(legacy, r)
+    assert len(merged) == 1
+    assert merged.iloc[0]["record_id"] == "legacy0123456789"  # 先着保持
+
+
+def test_bool_coercion_is_fail_closed():
+    # 指摘#4: NaN/欠損/不正値は False(除外)に倒す。astype(bool) の NaN->True を禁止
+    import numpy as np
+    s = pd.Series([True, False, "True", "False", np.nan, None, "garbage"])
+    out = bnm.as_bool_series(s)
+    assert out.tolist() == [True, False, True, False, False, False, False]
+
+
+def test_missing_allowed_column_excludes_everything(tmp_path):
+    # 列ごと欠損した store を load_memory 経由で読んでも fail-open しない
+    df = pd.DataFrame([_headline()])
+    mem = bnm.build_records(df, pd.Timestamp("2026-07-01 21:52:00"))
+    broken = mem.drop(columns=["allowed_for_signal"])
+    path = tmp_path / "m.csv"
+    broken.to_csv(path, index=False)
+    loaded = bnm.load_memory(path)  # reindex が NaN 列を補う
+    from time_utils import now_utc
+    s = bnm.build_summary(loaded, added=0, generated_at=now_utc())
+    assert s["allowed_for_signal_count"] == 0  # 不明は除外扱い
+    import retrieve_similar_narratives as rsn
+    assert rsn.build_day_documents(loaded).empty
