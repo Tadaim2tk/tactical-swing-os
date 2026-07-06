@@ -270,3 +270,31 @@ def test_binomial_two_sided_p_exact_values():
 def test_compare_arms_empty_cohort_is_honest():
     comp = ea.compare_arms(pd.DataFrame())
     assert comp.empty
+
+
+def test_weekend_memory_dates_not_double_counted(tmp_path):
+    # レビュー指摘#2: 金土日の memory_date は同一バーに解決される -> 1件のみ採用
+    dates = _trend_prices(tmp_path, n=200)
+    mem_days = 30
+    # 平日開始の連続30暦日(土日含む)を memory に
+    cal = pd.date_range(dates[100], periods=mem_days, freq="D")
+    rows = []
+    for i, d in enumerate(cal):
+        ds = d.strftime("%Y-%m-%d")
+        rows.append({
+            "record_id": f"r{i}", "memory_date": ds, "asset_tags": "", "source": "t",
+            "source_category": "macro", "text": f"day{i} narrative words", "link": f"https://x/{i}",
+            "observed_at_utc": f"{ds} 21:50:00 UTC", "source_published_at_utc": f"{ds} 20:00:00 UTC",
+            "ingested_at_utc": f"{ds} 21:52:00 UTC", "signal_cutoff_utc": f"{ds} 21:55:00 UTC",
+            "allowed_for_signal": True, "cutoff_violation": False, "exclusion_reason": "",
+        })
+    import build_narrative_memory as bnm2
+    mem = pd.DataFrame(rows, columns=bnm2.MEMORY_COLUMNS)
+    cohort = ea.build_cohort(mem, raw_dir=tmp_path)
+    assert not cohort.empty
+    # (asset, horizon) ごとに、cohort の日付が解決するバー位置に重複がない
+    df = ea.load_ohlcv_frame("SPX", tmp_path)
+    for h in ea.HORIZONS:
+        sub = cohort[(cohort["horizon_days"] == h) & (cohort["arm"] == "technical_only")]
+        bars = [ea.bar_index(df, d) for d in sub["date"]]
+        assert len(bars) == len(set(bars)), f"h={h} で同一バーが重複カウント"

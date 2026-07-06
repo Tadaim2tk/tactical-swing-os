@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from build_narrative_memory import MEMORY_PATH, load_memory
+from build_narrative_memory import MEMORY_PATH, as_bool_series, load_memory
 from time_utils import JST, format_jst, format_utc, now_utc
 
 RAW_DIR = Path("data/raw")
@@ -138,7 +138,8 @@ def build_day_documents(memory: pd.DataFrame) -> pd.DataFrame:
     """allowed record を memory_date 毎に連結し「局面文書」を作る。"""
     if memory.empty:
         return pd.DataFrame(columns=["memory_date", "doc", "record_count"])
-    allowed = memory[memory["allowed_for_signal"].astype(bool)].copy()
+    # fail-closed: NaN/欠損は除外扱い(astype(bool)はNaN->Trueのfail-openなので禁止。レビュー指摘#4)
+    allowed = memory[as_bool_series(memory["allowed_for_signal"])].copy()
     if allowed.empty:
         return pd.DataFrame(columns=["memory_date", "doc", "record_count"])
     grouped = (

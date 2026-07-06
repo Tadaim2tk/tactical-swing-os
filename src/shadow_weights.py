@@ -347,6 +347,9 @@ def evaluate_promotion_gate(
             reasons.append(f"insufficient_outcome_samples: {len(diffs)} < {MIN_COMPARISONS_FOR_PROMOTION}")
         if all(abs(d) < 1e-12 for d in diffs):
             reasons.append("zero_difference: base と weighted の結果に差が無く、weights 変更を正当化できない")
+        elif float(np.std(diffs)) < 1e-9:
+            # レビュー指摘#5: 定数系列は分散情報が無く、丸め残差でDSRが最大確信に化ける。fail-closed。
+            reasons.append("degenerate_variance: 差分系列が定数で分散情報が無く、統計判定できない")
         else:
             _t, p = t_test_one_sample(diffs, mu=0.0)
             metrics["t_p_value"] = round(float(p), 4)
@@ -369,7 +372,7 @@ def evaluate_promotion_gate(
     }
 
 
-def build_summary(shadow: pd.DataFrame, loaded: dict, comparisons_accumulated: int, generated_at) -> dict:
+def build_summary(shadow: pd.DataFrame, loaded: dict, comparisons_accumulated: int, generated_at, outcome_r_diffs: list[float] | None = None) -> dict:
     actionable = shadow[shadow["side"].isin(["LONG", "SHORT"])] if not shadow.empty else pd.DataFrame()
     abs_delta = pd.to_numeric(actionable.get("strength_delta"), errors="coerce").abs() if not actionable.empty else pd.Series(dtype=float)
     summary = {
@@ -388,9 +391,10 @@ def build_summary(shadow: pd.DataFrame, loaded: dict, comparisons_accumulated: i
         "comparisons_accumulated": int(comparisons_accumulated),
         "min_comparisons_for_promotion": MIN_COMPARISONS_FOR_PROMOTION,
         "promotion_sample_ready": bool(comparisons_accumulated >= MIN_COMPARISONS_FOR_PROMOTION),
-        # 昇格ゲート: v0 は outcome 連結が無いので常に blocked（正直表示）。
+        # 昇格ゲート: outcome 連結(link_shadow_outcomes)の diff 系列が無い間は必ず blocked。
+        # identity weights では全ゼロ -> zero_difference で blocked が正しい。
         # sample_ready は「蓄積の進捗」、gate は「昇格材料の統計的成立」— 別物として両方出す。
-        "promotion_gate": evaluate_promotion_gate(None, comparisons_accumulated),
+        "promotion_gate": evaluate_promotion_gate(outcome_r_diffs, comparisons_accumulated),
     }
     summary.update(SAFETY_FIELDS)
     return summary
@@ -520,7 +524,13 @@ def run(signals: pd.DataFrame | None = None, *, models_path: Path = MODELS_PATH)
             except (pd.errors.EmptyDataError, OSError):
                 accumulated = 0
 
-    summary = build_summary(shadow, loaded, accumulated, generated_at)
+    try:
+        from link_shadow_outcomes import diffs_for_version
+        outcome_diffs, _divergent = diffs_for_version(str(loaded.get("weights_version") or ""))
+        outcome_diffs = outcome_diffs or None
+    except Exception:  # noqa: BLE001 - 連結未整備でも shadow 本体は止めない(ゲートは no_outcome_linkage)
+        outcome_diffs = None
+    summary = build_summary(shadow, loaded, accumulated, generated_at, outcome_r_diffs=outcome_diffs)
 
     shadow.to_csv(RESULTS_DIR / "shadow_weighted_signals.csv", index=False)
     shadow.to_json(RESULTS_DIR / "shadow_weighted_signals.json", orient="records", indent=2, force_ascii=False)

@@ -35,6 +35,7 @@ jobs:
           python src/retrieve_similar_narratives.py
           python src/evaluate_narrative_similarity.py
           python src/evaluate_ablation.py
+          python src/link_shadow_outcomes.py
           python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10
           python src/build_latest_evaluations.py
           python src/build_ai_feedback.py

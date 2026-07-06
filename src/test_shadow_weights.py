@@ -260,7 +260,7 @@ def test_gate_blocked_on_zero_difference_identity():
 
 
 def test_gate_blocked_when_mean_negative():
-    gate = sw.evaluate_promotion_gate([-0.3] * 30, comparisons_accumulated=30)
+    gate = sw.evaluate_promotion_gate([-0.3, -0.4] * 15, comparisons_accumulated=30)  # 非定数(縮退ガードと分離)
     assert gate["decision"] == "blocked"
     assert any(r.startswith("mean_diff_not_positive") for r in gate["blocked_reasons"])
 
@@ -301,3 +301,12 @@ def test_summary_carries_gate_and_v0_is_blocked():
     summary = sw.build_summary(pd.DataFrame(columns=sw.SHADOW_COLUMNS), loaded, 1000, now_utc())
     assert summary["promotion_gate"]["decision"] == "blocked"
     assert summary["promotion_sample_ready"] is True  # 蓄積進捗とゲートは別物として両立
+
+
+def test_gate_blocked_on_degenerate_constant_series():
+    # レビュー指摘#5: 定数差分系列(分散情報なし)は丸め残差でDSRが1.0に化けても blocked
+    for c in (0.1, 0.125, -0.2):
+        gate = sw.evaluate_promotion_gate([c] * 40, comparisons_accumulated=40)
+        assert gate["decision"] == "blocked", c
+        assert any(r.startswith("degenerate_variance") or r.startswith("mean_diff_not_positive")
+                   for r in gate["blocked_reasons"]), c
