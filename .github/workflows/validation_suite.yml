@@ -36,6 +36,7 @@ jobs:
           python src/evaluate_narrative_similarity.py
           python src/evaluate_ablation.py
           python src/link_shadow_outcomes.py
+          python src/score_prediction_log.py
           python src/reevaluate_pending_signals.py --lookback-days 30 --horizon 10
           python src/build_latest_evaluations.py
           python src/build_ai_feedback.py
@@ -103,6 +104,7 @@ jobs:
           check_file "narrative memory" "results/narrative_memory_summary.json"
           check_file "similar narratives" "results/similar_narrative_summary.json"
           check_file "ablation comparison" "results/ablation_comparison_summary.json"
+          check_file "prediction log scores" "results/prediction_log_score_summary.json"
           check_file "dashboard" "reports/dashboard/index.html"
 
       - name: Upload validation artifacts

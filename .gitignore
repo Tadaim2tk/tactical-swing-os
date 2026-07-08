@@ -93,3 +93,4 @@ reports/jp_swing/*.md
 reports/narrative/*_similar_narratives.md
 reports/narrative/*_narrative_similarity_evaluation.md
 reports/ablation/*.md
+reports/prediction_log/*.md
