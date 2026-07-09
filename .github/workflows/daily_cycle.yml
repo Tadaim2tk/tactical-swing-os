@@ -39,10 +39,12 @@ jobs:
         run: python src/evaluate_signal.py || true
 
       - name: Link shadow outcomes (promotion gate input)
-        run: python src/link_shadow_outcomes.py || echo "warning: shadow outcome link failed; gate stays honest-blocked"
+        run: |
+          python src/link_shadow_outcomes.py || echo "warning - shadow outcome link failed; gate stays honest-blocked"
 
       - name: Score prediction log (all judgements, retro)
-        run: python src/score_prediction_log.py || echo "warning: prediction log scoring failed; continuing"
+        run: |
+          python src/score_prediction_log.py || echo "warning - prediction log scoring failed; continuing"
 
       - name: Build report
         run: python src/build_report.py
