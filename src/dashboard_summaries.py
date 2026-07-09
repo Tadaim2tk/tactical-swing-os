@@ -1376,3 +1376,49 @@ def similar_narrative_summary(cases: pd.DataFrame, summary_json) -> dict:
         "weights_json_updated": False,
         "generate_signal_updated": False,
     }
+
+
+def prediction_log_summary(scores: pd.DataFrame, summary_json) -> dict:
+    """予測ノート(ChatGPT日次判断の遡及採点)のダッシュボード用サマリー。
+
+    data/prediction_log_scores.csv + results/prediction_log_score_summary.json を平易な表に変換。
+    表示のみで signal score には未接続。
+    """
+    payload = summary_json if isinstance(summary_json, dict) else {}
+    by_rank = payload.get("by_rank", {}) or {}
+    rank_rows = []
+    for rank in ["A", "B", "NO_TRADE"]:
+        v = by_rank.get(rank)
+        if not isinstance(v, dict):
+            continue
+        r5, r10 = v.get("result_5d", {}), v.get("result_10d", {})
+        def fmt_rate(r):
+            if not r or r.get("win_rate") is None:
+                return "—"
+            return f"{r['win_rate']:.0%} ({r['wins']}/{r['n_closed']})"
+        rank_rows.append({
+            "rank": rank,
+            "judgements": v.get("rows", 0),
+            "with_levels": v.get("actionable_rows", 0),
+            "win_5d": fmt_rate(r5),
+            "win_10d": fmt_rate(r10),
+            "mean_r_5d": v.get("mean_r_close_5d"),
+            "basis": r5.get("statistical_basis", "insufficient_data") if r5 else "insufficient_data",
+        })
+    recent = pd.DataFrame()
+    if not scores.empty and "date" in scores.columns:
+        cols = [c for c in ["date", "asset", "side", "rank", "r_close_5d", "r_close_10d", "result_5d", "status"] if c in scores.columns]
+        recent = scores.sort_values("date").tail(12)[cols]
+    b = by_rank.get("B", {})
+    b5 = b.get("result_5d", {}) if isinstance(b, dict) else {}
+    return {
+        "available": bool(payload) or not scores.empty,
+        "prediction_total": int(payload.get("total_rows", len(scores))),
+        "prediction_awaiting": int(payload.get("awaiting_rows", 0)),
+        "prediction_suspect": int(payload.get("suspect_data_rows", 0)),
+        "b_rank_win_rate_5d": (f"{b5['win_rate']:.0%} ({b5['wins']}/{b5['n_closed']})" if b5.get("win_rate") is not None else "—"),
+        "rank_table": pd.DataFrame(rank_rows),
+        "recent_table": recent,
+        "min_samples": int(payload.get("min_samples_for_judgement", 30) or 30),
+        "connected_to_signal_score": False,
+    }

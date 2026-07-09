@@ -321,6 +321,20 @@ DISPLAY_LABELS = {
     "similar_rank": "順位", "similar_date": "類似日", "similarity": "類似度",
     "fwd_return_5d": "+5営業日", "fwd_return_10d": "+10営業日", "fwd_return_20d": "+20営業日",
     "outcome_status": "結果状態",
+    "prediction_total": "記録した判断の数",
+    "b_rank_win_rate_5d": "B級の5日勝率",
+    "prediction_awaiting": "結果待ちの判断",
+    "prediction_suspect": "記録ミス隔離",
+    "judgements": "判断数",
+    "with_levels": "水準つき",
+    "win_5d": "5日勝率",
+    "win_10d": "10日勝率",
+    "mean_r_5d": "平均R(5日)",
+    "basis": "統計的根拠",
+    "r_close_5d": "5日後R",
+    "r_close_10d": "10日後R",
+    "result_5d": "5日判定",
+    "result_10d": "10日判定",
 }
 
 
@@ -403,6 +417,13 @@ VALUE_LABELS = {
     "no_query_document": "本日の局面文書なし",
     "before_price_history": "価格履歴より前",
     "no_price_data": "価格データなし",
+    "not_applicable": "対象外(見送り)",
+    "suspect_data": "記録ミス疑い(除外)",
+    "awaiting": "結果待ち",
+    "success": "的中",
+    "failure": "外れ",
+    "scored": "採点済み",
+    "none": "指摘なし",
 }
 
 
@@ -562,6 +583,7 @@ def render_html(
     evaluation_fallback_used: bool,
     similar_narrative: dict,
     similar_table: pd.DataFrame,
+    prediction_log: dict,
     apply_false: bool,
     summary: dict,
 ) -> str:
@@ -703,6 +725,37 @@ def render_html(
     eval_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else v, value_class(v)) for k, v in eval_summary.items())
     signal_stats = "".join(stat_card(k, v) for k, v in signal_counts.items())
     mode_stats = "".join(stat_card(k, fmt_num(v) if isinstance(v, float) else display_optional(str(v))) for k, v in mode.items())
+    prediction_rank_table = prediction_log.get("rank_table", pd.DataFrame())
+    prediction_recent_table = prediction_log.get("recent_table", pd.DataFrame())
+    prediction_stats = "".join(
+        [
+            stat_card("prediction_total", prediction_log.get("prediction_total", 0)),
+            stat_card("b_rank_win_rate_5d", prediction_log.get("b_rank_win_rate_5d", "—")),
+            stat_card("prediction_awaiting", prediction_log.get("prediction_awaiting", 0)),
+            stat_card("prediction_suspect", prediction_log.get("prediction_suspect", 0)),
+            stat_card("connected_to_signal_score", prediction_log.get("connected_to_signal_score", False)),
+        ]
+    )
+    # 「準備中の分析」行: 蓄積待ち・提案なしのレイヤーを1行ずつに圧縮(壊れていない事の明示)
+    _preparing: list[tuple[str, str]] = []
+    if not prediction_calibration.get("available"):
+        _preparing.append(("確信度と的中率のズレ", "確定した評価の蓄積待ち"))
+    if not narrative_reliability.get("available"):
+        _preparing.append(("ニュース解釈の信頼性", "確定した評価の蓄積待ち"))
+    if not meta_learning.get("available"):
+        _preparing.append(("学習パターン分析（メタ学習）", "提案履歴の蓄積待ち"))
+    if not auto_calibration.get("available"):
+        _preparing.append(("自動較正の候補", "評価データの蓄積待ち"))
+    if not human_override.get("available"):
+        _preparing.append(("人手オーバーライド分析", "承認判断の履歴待ち"))
+    if not weights_patch.get("available"):
+        _preparing.append(("重み調整の候補", "候補なし（十分な統計根拠が出るまで提案されません）"))
+    if not proposal_adoption.get("available"):
+        _preparing.append(("提案の採否記録", "提案がまだありません"))
+    preparing_rows = "".join(
+        f"<tr><td>{html.escape(name)}</td><td>{html.escape(note)}</td></tr>" for name, note in _preparing
+    ) or "<tr><td colspan=2>すべての分析が稼働中です</td></tr>"
+
     similar_stats = "".join(
         [
             stat_card("similar_narrative_status", similar_narrative.get("similar_narrative_status", "")),
@@ -953,6 +1006,7 @@ def render_html(
         + _pill("当日シグナル", _sig_txt, _sig_tone)
         + _pill("評価の蓄積", _eval_txt, _mat_tone)
         + _pill("今週のモード", _mode_txt, _mode_tone)
+        + _pill("予測ノート B級5日勝率", str(prediction_log.get("b_rank_win_rate_5d", "—")), "good" if prediction_log.get("available") else "neutral")
         + "</section>"
     )
 
@@ -1024,34 +1078,36 @@ def render_html(
     <main>
     {summary_banner}
 
-    <h2 class="tier">① 当日の判断材料</h2>
-    <section class="card"><h2>本日のシグナル概要</h2><div class="grid">{signal_stats}</div>{table_html(signals, ["asset","side","rank","type","recommended_action","signal_strength","setup_quality_score","entry_quality_score","direction_confidence","reason_codes","no_trade_reason"])}</section>
-    <section class="card"><h2>今週・今月のモード（リスク上限）</h2><div class="grid">{mode_stats}</div></section>
-    <section class="card"><h2>評価概要</h2><div class="grid">{eval_stats}</div></section>
-    <section class="card"><h2>最新評価ビュー 要約</h2>{'<div class="empty">最新評価ビュー未取得</div>' if not latest_eval_summary.get('available') else f'<div class="grid">{latest_eval_stats}</div>'}</section>
-    <section class="card"><h2>Pending再評価 要約</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
-    <section class="card"><h2>資産別成績</h2>{table_html(asset_table, ["asset","signals","evaluations","win_rate","total_r","average_r","missed_opportunity_count"])}</section>
-    <section class="card"><h2>ポートフォリオ層</h2>{'<div class="empty">ポートフォリオ層未取得</div>' if not portfolio_layer.get('available') else f'<div class="grid">{portfolio_stats}</div>'}<h3>配分候補 上位</h3>{table_html(portfolio_top, ["asset","allocation_score","portfolio_weight_candidate","confidence","risk_class","risk_role","recommended_exposure","cash_ratio_candidate","latest_rank","latest_side","rationale"], "配分候補なし")}</section>
+    <h2 class="tier">① 今日の売買判断（何を・どの向きで・どこで）</h2>
+    <section class="card"><h2>予測ノートの成績（毎日の相場判断を後日採点）</h2><p class="notice">ChatGPTとの毎朝の相場判断（買い・売り・見送り）をすべて記録し、1・3・5・10営業日後の実際の値動きで採点しています。見送りの判断も記録されます。判断数が{prediction_log.get("min_samples", 30)}件に満たない集計は「データ不足」と明記し、断定しません。表示のみで自動売買はしません。</p>{'<div class="empty">予測ノート未取得</div>' if not prediction_log.get('available') else f'<div class="grid">{prediction_stats}</div>'}<h3>ランク別の成績（A=自信あり / B=監視 / NO_TRADE=見送り）</h3>{table_html(prediction_rank_table, ["rank","judgements","with_levels","win_5d","win_10d","mean_r_5d","basis"], "採点データなし")}<h3>直近の判断（新しい順）</h3>{table_html(prediction_recent_table, ["date","asset","side","rank","r_close_5d","r_close_10d","result_5d","status"], "判断記録なし")}</section>
+    <section class="card"><h2>今日のシグナル候補（システムが選んだ監視対象）</h2><div class="grid">{signal_stats}</div>{table_html(signals, ["asset","side","rank","type","recommended_action","signal_strength","setup_quality_score","entry_quality_score","direction_confidence","reason_codes","no_trade_reason"])}</section>
+    <section class="card"><h2>今週・今月のリスク上限モード</h2><div class="grid">{mode_stats}</div></section>
+    <section class="card"><h2>今日と似た過去の局面（そのあと相場はどう動いたか）</h2><p class="notice">過去ニュース局面との意味的類似検索です。表示・記録のみで signal score には接続していません（connected_to_signal_score=false）。実売買・発注は行いません。</p>{'<div class="empty">類似局面検索 未取得（Narrative Memory 蓄積待ち）</div>' if not similar_narrative.get('available') else f'<div class="grid">{similar_stats}</div>'}<h3>類似局面と 5/10/20営業日後の実リターン</h3>{table_html(similar_table, ["similar_rank","similar_date","similarity","asset","fwd_return_5d","fwd_return_10d","fwd_return_20d","outcome_status"], "類似局面なし（データ蓄積で自動表示）")}</section>
+    <section class="card"><h2>資産配分の目安</h2>{'<div class="empty">ポートフォリオ層未取得</div>' if not portfolio_layer.get('available') else f'<div class="grid">{portfolio_stats}</div>'}<h3>配分候補 上位</h3>{table_html(portfolio_top, ["asset","allocation_score","portfolio_weight_candidate","confidence","risk_class","risk_role","recommended_exposure","cash_ratio_candidate","latest_rank","latest_side","rationale"], "配分候補なし")}</section>
 
-    <h2 class="tier">② 信頼性チェック（この出力を信じてよいか）</h2>
-    <section class="card"><h2>データ健全性（鮮度）</h2><p class="notice">各分析レイヤーの最終生成時刻・行数・鮮度を一覧化します。古い(stale)・空(empty)・欠損(missing)・unavailableなデータを正常と誤読しないためのガードです。表示専用でweights.jsonは更新しません。</p>{'<div class="empty">Data Health未取得</div>' if not data_health.get('available') else f'<div class="grid">{data_health_stats}</div>'}<h3>レイヤー別 鮮度</h3>{table_html(data_health_table, ["layer","status","last_generated","age_hours","row_count","threshold_hours","cadence"], "レイヤー情報なし")}</section>
-    <section class="card"><h2>システム整合性（日時監査）</h2>{'<div class="empty">Datetime Audit未取得</div>' if not datetime_health.get('available') else f'<div class="grid">{datetime_stats}</div>'}</section>
+    <h2 class="tier">② 予測は当たっているか（結果の検証）</h2>
+    <section class="card"><h2>過去シグナルの結果まとめ</h2><div class="grid">{eval_stats}</div></section>
+    <section class="card"><h2>直近の評価結果</h2>{'<div class="empty">最新評価ビュー未取得</div>' if not latest_eval_summary.get('available') else f'<div class="grid">{latest_eval_stats}</div>'}</section>
+    <section class="card"><h2>結果待ちのシグナル</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
+    <section class="card"><h2>資産別成績</h2>{table_html(asset_table, ["asset","signals","evaluations","win_rate","total_r","average_r","missed_opportunity_count"])}</section>
+    <section class="card"><h2>判断理由ごとの成績（どの根拠が当たるか）</h2><h3>プラス寄与が大きい理由</h3>{table_html(top_positive, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>マイナス寄与が大きい理由</h3>{table_html(top_negative, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>データ不足</h3>{table_html(insufficient, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}</section>
+    <section class="card"><h2>見送り判断の検証（見送って正解だったか）</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "見送り理由データなし")}</section>
+    <h2 class="tier">③ システムの健康状態（このデータを信じてよいか）</h2>
+    <section class="card"><h2>データの鮮度チェック</h2><p class="notice">各分析レイヤーの最終生成時刻・行数・鮮度を一覧化します。古い(stale)・空(empty)・欠損(missing)・unavailableなデータを正常と誤読しないためのガードです。表示専用でweights.jsonは更新しません。</p>{'<div class="empty">Data Health未取得</div>' if not data_health.get('available') else f'<div class="grid">{data_health_stats}</div>'}<h3>レイヤー別 鮮度</h3>{table_html(data_health_table, ["layer","status","last_generated","age_hours","row_count","threshold_hours","cadence"], "レイヤー情報なし")}</section>
+    <section class="card"><h2>時刻の整合性チェック</h2>{'<div class="empty">Datetime Audit未取得</div>' if not datetime_health.get('available') else f'<div class="grid">{datetime_stats}</div>'}</section>
     <section class="card"><h2>システム状態</h2><div class="grid">{system_stats}</div></section>
-    <section class="card"><h2>敵対的レビュー（提案の危険兆候）</h2><p class="notice">提案レイヤー(Rule/Model State/Weights Patch/Auto Calibration/AI Feedback)を横断レビューし、自動適用違反・サンプル不足・過剰最適化・矛盾・過信表現を検出する敵対的監査です。自動適用せず警告のみ。weights.jsonも更新しません。</p>{'<div class="empty">Adversarial Review未取得</div>' if not adversarial_review.get('available') else f'<div class="grid">{adversarial_review_stats}</div>'}<h3>停止 / 高リスク / 警告 の詳細</h3>{table_html(adversarial_review_table[adversarial_review_table['severity'].isin(['warning','high_risk','blocked'])] if (not adversarial_review_table.empty and 'severity' in adversarial_review_table.columns) else adversarial_review_table, ["source_type","target","finding_category","severity","evidence","recommended_action"], "危険兆候の検出なし(または未取得)")}</section>
-    <section class="card"><h2>未来情報の混入監査</h2><p class="notice">ニュース/AI要約への未来情報・評価結果の混入を検出する研究プロセス監査です。自動売買判断ではなく、weights.jsonも更新しません。</p>{'<div class="empty">Narrative Lookahead Audit未取得</div>' if not narrative_lookahead.get('available') else f'<div class="grid">{narrative_lookahead_stats}</div>'}<h3>警告 / 高リスク / 停止 の詳細</h3>{table_html(narrative_lookahead_table[narrative_lookahead_table['lookahead_risk_level'].isin(['warning','high_risk','blocked'])] if (not narrative_lookahead_table.empty and 'lookahead_risk_level' in narrative_lookahead_table.columns) else narrative_lookahead_table, ["source_type","source_timing_class","lookahead_risk_level","lookahead_score","issue_type","detected_terms","recommended_action","text_excerpt"], "混入検出なし(または未取得)")}</section>
+    <section class="card"><h2>自動安全チェック（危険な提案の検出）</h2><p class="notice">提案レイヤー(Rule/Model State/Weights Patch/Auto Calibration/AI Feedback)を横断レビューし、自動適用違反・サンプル不足・過剰最適化・矛盾・過信表現を検出する敵対的監査です。自動適用せず警告のみ。weights.jsonも更新しません。</p>{'<div class="empty">Adversarial Review未取得</div>' if not adversarial_review.get('available') else f'<div class="grid">{adversarial_review_stats}</div>'}<h3>停止 / 高リスク / 警告 の詳細</h3>{table_html(adversarial_review_table[adversarial_review_table['severity'].isin(['warning','high_risk','blocked'])] if (not adversarial_review_table.empty and 'severity' in adversarial_review_table.columns) else adversarial_review_table, ["source_type","target","finding_category","severity","evidence","recommended_action"], "危険兆候の検出なし(または未取得)")}</section>
+    <section class="card"><h2>未来情報の混入チェック（後出し防止）</h2><p class="notice">ニュース/AI要約への未来情報・評価結果の混入を検出する研究プロセス監査です。自動売買判断ではなく、weights.jsonも更新しません。</p>{'<div class="empty">Narrative Lookahead Audit未取得</div>' if not narrative_lookahead.get('available') else f'<div class="grid">{narrative_lookahead_stats}</div>'}<h3>警告 / 高リスク / 停止 の詳細</h3>{table_html(narrative_lookahead_table[narrative_lookahead_table['lookahead_risk_level'].isin(['warning','high_risk','blocked'])] if (not narrative_lookahead_table.empty and 'lookahead_risk_level' in narrative_lookahead_table.columns) else narrative_lookahead_table, ["source_type","source_timing_class","lookahead_risk_level","lookahead_score","issue_type","detected_terms","recommended_action","text_excerpt"], "混入検出なし(または未取得)")}</section>
     <section class="card"><h2>監査レポート</h2><p class="notice">統合状態確認用のシステム監査です。</p><div class="grid">{audit_report_stats}</div></section>
 
-    <h2 class="tier">③ AI判断の質</h2>
-    <section class="card"><h2>予測キャリブレーション（確信度の正確さ）</h2><p class="notice">AIの確信度を採点する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Prediction Calibration未取得</div>' if not prediction_calibration.get('available') else f'<div class="grid">{prediction_calibration_stats}</div>'}<h3>Rank別キャリブレーション</h3>{table_html(prediction_calibration_table, ["rank","implied_probability","closed_count","hit_rate","calibration_gap","brier_score","p_value","calibration_verdict","recommended_action"], "キャリブレーションデータなし")}</section>
-    <section class="card"><h2>ナラティブ信頼性</h2><p class="notice">ナラティブの統計的信頼性を検定する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Narrative Reliability未取得</div>' if not narrative_reliability.get('available') else f'<div class="grid">{narrative_reliability_stats}</div>'}<h3>ナラティブ別信頼性</h3>{table_html(narrative_reliability_table, ["narrative","closed_count","win_rate","average_r","p_value","reliability_label","recommended_action"], "ナラティブ信頼性データなし")}</section>
-    <section class="card"><h2>類似局面検索（Narrative Memory v0）</h2><p class="notice">過去ニュース局面との意味的類似検索です。表示・記録のみで signal score には接続していません（connected_to_signal_score=false）。実売買・発注は行いません。</p>{'<div class="empty">類似局面検索 未取得（Narrative Memory 蓄積待ち）</div>' if not similar_narrative.get('available') else f'<div class="grid">{similar_stats}</div>'}<h3>類似局面と 5/10/20営業日後の実リターン</h3>{table_html(similar_table, ["similar_rank","similar_date","similarity","asset","fwd_return_5d","fwd_return_10d","fwd_return_20d","outcome_status"], "類似局面なし（データ蓄積で自動表示）")}</section>
-    <section class="card"><h2>判断理由コード別成績</h2><h3>プラス寄与が大きい理由</h3>{table_html(top_positive, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>マイナス寄与が大きい理由</h3>{table_html(top_negative, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>データ不足</h3>{table_html(insufficient, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}</section>
-    <section class="card"><h2>見送り理由分析</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "見送り理由データなし")}</section>
-    <section class="card"><h2>ニュースナラティブ要約</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
-    <section class="card"><h2>AIフィードバック要約</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
-    <section class="card"><h2>取引コストモデル</h2><p class="notice">ネットR評価のための分析専用モデルです。実売買・発注は行いません。</p>{transaction_cost_warning_html}<div class="grid">{transaction_cost_stats}</div></section>
+    <section class="card"><h2>準備中の分析（データが貯まると自動で動き出します）</h2><p class="notice">以下はまだ判断材料になる量のデータがありません。壊れているのではなく、蓄積待ちです。</p><table><thead><tr><th>分析</th><th>状態</th></tr></thead><tbody>{preparing_rows}</tbody></table></section>
 
-    <details class="tier4"><summary>④ 研究の内部機構（提案・パッチ・履歴・学習。クリックで展開）</summary>
+    <details class="tier4"><summary>④ 研究の内部データ（開発者向け・クリックで展開）</summary>
+    <section class="card"><h2>確信度と的中率のズレ（キャリブレーション）</h2><p class="notice">AIの確信度を採点する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Prediction Calibration未取得</div>' if not prediction_calibration.get('available') else f'<div class="grid">{prediction_calibration_stats}</div>'}<h3>Rank別キャリブレーション</h3>{table_html(prediction_calibration_table, ["rank","implied_probability","closed_count","hit_rate","calibration_gap","brier_score","p_value","calibration_verdict","recommended_action"], "キャリブレーションデータなし")}</section>
+    <section class="card"><h2>ニュース解釈の信頼性</h2><p class="notice">ナラティブの統計的信頼性を検定する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Narrative Reliability未取得</div>' if not narrative_reliability.get('available') else f'<div class="grid">{narrative_reliability_stats}</div>'}<h3>ナラティブ別信頼性</h3>{table_html(narrative_reliability_table, ["narrative","closed_count","win_rate","average_r","p_value","reliability_label","recommended_action"], "ナラティブ信頼性データなし")}</section>
+    <section class="card"><h2>ニュース要約（材料の整理）</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
+    <section class="card"><h2>AIの自己改善メモ</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
+    <section class="card"><h2>取引コストモデル</h2><p class="notice">ネットR評価のための分析専用モデルです。実売買・発注は行いません。</p>{transaction_cost_warning_html}<div class="grid">{transaction_cost_stats}</div></section>
     <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
     <section class="card"><h2>モデル状態 更新提案</h2>{'<div class="empty">Model State更新提案未取得</div>' if not model_state_summary.get('available') else f'<div class="grid">{model_state_stats}</div>'}<h3>strong候補 上位5件</h3>{table_html(model_state_strong, ["category","target","sample_count","win_rate","avg_r","proposal_direction","proposal_strength","proposed_delta","proposed_weight","rationale"], "strong候補なし")}</section>
     <section class="card"><h2>重み調整パッチ候補</h2>{'<div class="empty">Weights Patch候補未取得</div>' if not weights_patch.get('available') else f'<div class="grid">{weights_patch_stats}</div>'}<h3>patch候補 上位5件</h3>{table_html(weights_patch_candidates, ["weight_path","patch_action","current_weight","proposed_delta","proposed_value","proposal_direction","proposal_strength","rationale"], "patch候補なし")}</section>

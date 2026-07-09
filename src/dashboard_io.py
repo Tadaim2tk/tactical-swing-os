@@ -185,6 +185,8 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "adversarial_review": read_csv(RESULTS_DIR / "adversarial_review.csv"),
         "adversarial_review_summary_json": read_json(RESULTS_DIR / "adversarial_review_summary.json"),
         "similar_narrative_cases": read_csv(RESULTS_DIR / "similar_narrative_cases.csv"),
+        "prediction_log_scores": read_csv(Path("data/prediction_log_scores.csv")),
+        "prediction_log_summary_json": read_json(RESULTS_DIR / "prediction_log_score_summary.json"),
         "similar_narrative_summary_json": read_json(RESULTS_DIR / "similar_narrative_summary.json"),
     }
     return data, extras, source
