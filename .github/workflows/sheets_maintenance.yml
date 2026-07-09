@@ -7,6 +7,10 @@ on:
         description: "true で実際に resize を適用 (既定はプレビューのみ)"
         required: false
         default: "false"
+      repair_evaluations:
+        description: "inspect / apply — EVALUATIONS 列爆発の検査/修復"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -29,15 +33,26 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Trim empty grid surplus (non-destructive resize only)
+        if: inputs.repair_evaluations == ''
         run: python src/trim_sheets_grid.py
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           TRIM_APPLY: ${{ inputs.apply }}
 
+      - name: Repair EVALUATIONS column explosion
+        if: inputs.repair_evaluations != ''
+        run: python src/repair_evaluations_tab.py
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          REPAIR_APPLY: ${{ inputs.repair_evaluations == 'apply' && 'true' || 'false' }}
+
       - name: Upload report
         uses: actions/upload-artifact@v4
         with:
           name: sheets-maintenance-${{ github.run_id }}
-          if-no-files-found: error
-          path: results/sheets_maintenance_report.json
+          if-no-files-found: warn
+          path: |
+            results/sheets_maintenance_report.json
+            results/evaluations_repair_report.json
