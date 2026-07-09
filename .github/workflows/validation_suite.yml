@@ -2,6 +2,9 @@ name: Tactical Swing OS validation suite
 
 on:
   workflow_dispatch:
+  schedule:
+    # 03:30 UTC Sunday = 12:30 JST 日曜。週次の沈黙死検知網(YAML lint含む全テスト+全レイヤー実行)
+    - cron: "30 3 * * 0"
 
 permissions:
   contents: read

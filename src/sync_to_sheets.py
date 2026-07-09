@@ -290,11 +290,50 @@ def append_csv_with_result(spreadsheet, csv_path: Path, sheet_name: str) -> dict
     print(f"ok: {sheet_name} appended {len(rows)} rows")
     result["appended_rows"] = len(rows)
     result["status"] = "success" if len(rows) or duplicate_count else "skipped"
+
+    # グリッド刈り込み: append で伸びた空き行・既定50列の余りセルを解放する
+    # (workbook 全体の1,000万セル上限への防御。失敗しても同期自体は成功扱い)
+    try:
+        data_rows = len(worksheet.get_all_values())
+        target_rows = max(data_rows + 10, 2)
+        target_cols = max(len(sheet_header), 1)
+        if worksheet.row_count > target_rows or worksheet.col_count > target_cols:
+            worksheet.resize(rows=target_rows, cols=target_cols)
+            print(f"ok: {sheet_name} trimmed grid to {target_rows}x{target_cols} (was {worksheet.row_count}x{worksheet.col_count})")
+    except Exception as exc:  # noqa: BLE001 - 刈り込みは best-effort
+        print(f"warning: {sheet_name} grid trim skipped ({type(exc).__name__})")
     return result
 
 
 def append_csv(spreadsheet, csv_path: Path, sheet_name: str) -> bool:
     return append_csv_with_result(spreadsheet, csv_path, sheet_name)["status"] == "success"
+
+
+def overall_exit_code(results: list[dict]) -> int:
+    """部分失敗も正直な赤にする: failed が1件でもあれば非ゼロ。
+
+    2026-07-09 の実障害: EVALUATIONS がセル上限で失敗し続けても他タブ成功で
+    exit 0 となり、緑のまま蓄積が止まっていた(false green)。skipped は失敗ではない。
+    """
+    if not results:
+        return 1
+    if any(r.get("status") == "failed" for r in results):
+        return 1
+    if not any(r.get("status") == "success" for r in results):
+        return 1
+    return 0
+
+
+def write_sync_summary(results: list[dict]) -> None:
+    payload = {
+        "targets": results,
+        "failed_count": sum(1 for r in results if r.get("status") == "failed"),
+        "success_count": sum(1 for r in results if r.get("status") == "success"),
+        "skipped_count": sum(1 for r in results if r.get("status") == "skipped"),
+    }
+    out = Path("results/sheets_sync_summary.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main() -> int:
@@ -307,22 +346,25 @@ def main() -> int:
     spreadsheet = open_spreadsheet(client)
     ensure_future_sheets(spreadsheet)
 
-    success_count = 0
+    results = []
     for mapping in mappings:
         csv_path = Path(mapping["csv_path"])
         sheet_name = mapping["sheet_name"]
         try:
-            if append_csv(spreadsheet, csv_path, sheet_name):
-                success_count += 1
+            results.append(append_csv_with_result(spreadsheet, csv_path, sheet_name))
         except Exception as exc:  # noqa: BLE001 - keep other sheet syncs running.
             print(f"error: failed to sync {csv_path} to {sheet_name}: {exc}")
+            results.append({"sheet_name": sheet_name, "csv_path": str(csv_path),
+                            "status": "failed", "error": str(exc)[:300]})
 
-    if success_count == 0:
-        print("Sheets sync failed: no CSV was synced")
-        return 1
-
-    print(f"Sheets sync completed: {success_count}/{len(mappings)} targets")
-    return 0
+    write_sync_summary(results)
+    code = overall_exit_code(results)
+    failed = [r["sheet_name"] for r in results if r.get("status") == "failed"]
+    if failed:
+        print(f"Sheets sync FAILED for: {failed} (honest red — 詳細は results/sheets_sync_summary.json)")
+    else:
+        print(f"Sheets sync completed: {sum(1 for r in results if r['status']=='success')}/{len(mappings)} targets")
+    return code
 
 
 if __name__ == "__main__":
