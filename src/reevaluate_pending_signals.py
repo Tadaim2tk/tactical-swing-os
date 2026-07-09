@@ -42,7 +42,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Reevaluate unresolved Tactical Swing OS signals.")
     parser.add_argument("--lookback-days", type=int, default=30, help="Signal lookback window in days")
     parser.add_argument("--horizon", type=int, default=10, help="Future bars to evaluate")
-    parser.add_argument("--include-no-trade", action="store_true", help="Also reevaluate NO_TRADE signals")
+    # 2026-07-09 人間指示(設計書§6 全判断採点の原則): NO_TRADE の見送り判断も採点対象が既定。
+    # 旧: store_true(既定False) -> NO_TRADE の no_trade_correct/missed が永久に確定しなかった。
+    parser.add_argument("--include-no-trade", dest="include_no_trade", action="store_true", default=True,
+                        help="NO_TRADEシグナルも再評価する(既定: 有効)")
+    parser.add_argument("--no-include-no-trade", dest="include_no_trade", action="store_false",
+                        help="NO_TRADEシグナルを再評価から除外する(非推奨: 見送り判断も学習サンプル)")
     parser.add_argument("--write-sheets", action="store_true", help="Append reevaluations to Google Sheets PENDING_REEVALUATIONS")
     return parser.parse_args()
 
@@ -199,7 +204,11 @@ def select_reevaluation_targets(
     if "signal_id" not in sig.columns:
         sig["signal_id"] = ""
     sig["signal_id"] = sig["signal_id"].map(clean_text)
-    sig = apply_lookback(sig, lookback_days)
+    # lookback は計算量の目安であって「未確定行の廃棄」ではない(設計書§6 サンプル廃棄禁止)。
+    # 窓は「窓内 or 評価が未確定」の union に緩め、窓外の未確定行は aged_open として可視化する。
+    in_window_ids: set[str] | None = None
+    if lookback_days > 0 and not sig.empty:
+        in_window_ids = set(apply_lookback(sig, lookback_days)["signal_id"].map(clean_text))
 
     if not include_no_trade:
         side = sig.get("side", pd.Series("", index=sig.index)).fillna("").astype(str).str.upper()
@@ -212,13 +221,20 @@ def select_reevaluation_targets(
         latest_by_signal = {clean_text(row["signal_id"]): row for _, row in latest_eval.iterrows()}
 
     rows = []
+    aged_open_kept = 0
     for _, signal in sig.iterrows():
         signal_id = clean_text(signal.get("signal_id", ""))
         latest = latest_by_signal.get(signal_id)
-        if latest is None or has_open_latest_evaluation(latest):
-            rows.append(signal)
+        is_open = latest is None or has_open_latest_evaluation(latest)
+        if not is_open:
+            continue  # 確定済みは再評価不要(廃棄ではない)
+        if in_window_ids is not None and signal_id not in in_window_ids:
+            aged_open_kept += 1  # 窓外だが未確定 -> 廃棄せず対象に残す
+        rows.append(signal)
     targets = pd.DataFrame(rows).reset_index(drop=True)
-    return normalize_headers(targets), latest_eval
+    targets = normalize_headers(targets)
+    targets.attrs["aged_open_kept"] = aged_open_kept
+    return targets, latest_eval
 
 
 def bool_changed(previous, current) -> bool:
@@ -442,6 +458,7 @@ def build_summary_payload(
     target_count: int,
     run_id: str,
     sheets_result: dict,
+    aged_open_kept: int = 0,
 ) -> dict:
     outcome = reevaluations.get("outcome", pd.Series(dtype=str)).fillna("").astype(str).str.lower() if not reevaluations.empty else pd.Series(dtype=str)
     closed_count = int(reevaluations.apply(is_closed_row, axis=1).sum()) if not reevaluations.empty else 0
@@ -453,6 +470,8 @@ def build_summary_payload(
         "total_signals": int(total_signals),
         "target_signals": int(target_count),
         "reevaluated_rows": int(len(reevaluations)),
+        # lookback窓外だが未確定のため対象に残した行数(サンプル廃棄禁止の可視化・設計書§6)
+        "aged_open_kept": int(aged_open_kept),
         "closed_count": closed_count,
         "open_count": int((outcome == "open_unresolved").sum()),
         "no_entry_count": int((outcome == "no_entry").sum()),
@@ -509,6 +528,7 @@ def main() -> int:
                 target_count=len(targets),
                 run_id=run_id,
                 sheets_result=sheets_result,
+                aged_open_kept=int(targets.attrs.get("aged_open_kept", 0)),
             ),
             ensure_ascii=False,
             indent=2,
