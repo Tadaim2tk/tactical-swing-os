@@ -169,6 +169,13 @@ A昇格を減点**」。しかし現在の approved_weights 語彙は
    両 provider で比較し、良い方を採用する Issue を立てる（採用は人間判断）」
 5. **罠**: 「embedding の方が意味を分かっているはず」という事前信念で決めない。数字だけで決める。
 
+#### C-1 結果（2026-07-09 実施済み・CI run 29004885624 / 装置は PR #87）
+
+- mean Jaccard(top-5) = **1.0**（query 3日: 7/7, 7/8, 7/9 すべてで top-5 集合が完全一致）。順位の Spearman は 0.7 / 0.9 / 0.3
+- 判定: **equivalent**（top-5 は両 provider で同一）。凍結基準の既定は「TF-IDF のまま運用（コスト0）」だが、**人間判断（2026-07-09）で `TSO_EMBEDDING_PROVIDER=openai` を維持**: 検索結論が同一である以上どちらでも成立し、少額の API コストを許容して embedding を本番使用（API 失敗時は TF-IDF へ自動フォールバック）。`OPENAI_API_KEY` secret も残置
+- 正直な注記: 候補コーパスが 5〜7 日と小さく、7/7 は候補5日ちょうどで一致が強制、7/8 も最小 Jaccard 0.67 と閾値超えが構造的に確定していた。実質の判別力があった query は 7/9 のみ（最小 0.43、Spearman 0.3）。判定は凍結基準どおり有効だが、コーパスが数倍に育ち narrative retrieval が意思決定に効き始めたら `embedding_comparison.yml` の workflow_dispatch 一発で再確認する価値がある
+- 生データ: `data/embedding_comparison_c1_2026-07-09.json`（Actions artifact は90日で失効するため commit で恒久化）
+
 ### 3.5 適格 A-rank イベント発生時（CBS>=80 & EMS>=70）
 
 1. `python src/run_observation_loop.py` を実行（run_type=qualifying になる）
@@ -199,7 +206,7 @@ A昇格を減点**」。しかし現在の approved_weights 語彙は
 1. **§1 outcome 連結**（`link_shadow_outcomes.py` + ゲート接続 + テスト）— 最優先。
    これが無いと 7/15 に 30 比較が揃っても何も判断できない
 2. §2 案A の SPEC 固定（JSON スキーマと再構成式のみ。候補値はまだ書かない）
-3. C-1（APIキー登録され次第・§3.4 の手順で）
+3. C-1 — **済（2026-07-09）**: equivalent、TF-IDF 続行（結果は §3.4 に記録）
 4. Phase 26.2 コスト値（人間の出典付き入力待ち・変わらず）
 
 各項目とも: 小さいPR・テスト付き・正直表示・ゲートを弱めない。
