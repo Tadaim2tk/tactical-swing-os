@@ -1,0 +1,36 @@
+name: Tactical Swing OS embedding comparison
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  embedding-comparison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compare TF-IDF vs OpenAI embeddings (C-1)
+        run: python src/compare_embedding_providers.py
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedding-comparison-${{ github.run_id }}
+          if-no-files-found: error
+          path: results/embedding_comparison_report.json
