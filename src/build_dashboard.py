@@ -102,6 +102,10 @@ def build_dashboard() -> tuple[dict, str]:
         extras["similar_narrative_cases"],
         extras["similar_narrative_summary_json"],
     )
+    prediction_log = prediction_log_summary(
+        extras["prediction_log_scores"],
+        extras["prediction_log_summary_json"],
+    )
     generated_dt_utc = now_utc()
     dashboard_as_of = generated_dt_utc.date().isoformat()
     transaction_cost = transaction_cost_summary(evaluations, extras["cost_model_json"], as_of=dashboard_as_of)
@@ -146,6 +150,7 @@ def build_dashboard() -> tuple[dict, str]:
         "prediction_calibration": len(extras["prediction_calibration"]),
         "narrative_reliability": len(extras["narrative_reliability"]),
         "similar_narrative_cases": len(extras["similar_narrative_cases"]),
+        "prediction_log_scores": len(extras["prediction_log_scores"]),
         "narrative_lookahead_audit": len(extras["narrative_lookahead_audit"]),
         "adversarial_review": len(extras["adversarial_review"]),
         "ai_feedback": len(ai_feedback),
@@ -206,6 +211,7 @@ def build_dashboard() -> tuple[dict, str]:
         "prediction_calibration_summary": prediction_calibration,
         "narrative_reliability_summary": narrative_reliability,
         "similar_narrative_summary": similar_narrative,
+        "prediction_log_summary": {k: v for k, v in prediction_log.items() if k not in ("rank_table", "recent_table")},
         "transaction_cost_summary": transaction_cost,
         "audit_report_summary": audit_report,
         "narrative_lookahead_summary": narrative_lookahead,
@@ -266,6 +272,7 @@ def build_dashboard() -> tuple[dict, str]:
         evaluation_fallback_used=evaluation_fallback_used,
         similar_narrative=similar_narrative,
         similar_table=extras["similar_narrative_cases"],
+        prediction_log=prediction_log,
         apply_false=apply_false,
         summary=summary,
     )

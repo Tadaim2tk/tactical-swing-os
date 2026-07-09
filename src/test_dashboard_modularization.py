@@ -79,14 +79,21 @@ def test_main_actually_generates_outputs(tmp_path, monkeypatch):
     assert (out_dir / "index.html").exists()
     assert (out_dir / "dashboard_summary.json").exists()
     html_text = (out_dir / "index.html").read_text(encoding="utf-8")
-    for section in ["予測キャリブレーション（確信度の正確さ）", "ナラティブ信頼性", "取引コストモデル", "監査レポート"]:
+    for section in [
+        "予測ノートの成績（毎日の相場判断を後日採点）",
+        "監査レポート",
+        "準備中の分析（データが貯まると自動で動き出します）",
+        "確信度と的中率のズレ（キャリブレーション）",
+        "ニュース解釈の信頼性",
+        "取引コストモデル",
+    ]:
         assert f"<h2>{section}</h2>" in html_text
     # 投資判断ファースト: ひとめ要約バナーとティア見出しが出ること
     assert 'class="summary-banner"' in html_text
-    assert '<h2 class="tier">① 当日の判断材料</h2>' in html_text
+    assert '<h2 class="tier">① 今日の売買判断（何を・どの向きで・どこで）</h2>' in html_text
     # 投資判断に直結する評価更新とポートフォリオ候補は折りたたみに隠さない。
     collapsed_start = html_text.index('<details class="tier4">')
-    for section in ["最新評価ビュー 要約", "Pending再評価 要約", "ポートフォリオ層"]:
+    for section in ["直近の評価結果", "結果待ちのシグナル", "資産配分の目安"]:
         assert html_text.index(f"<h2>{section}</h2>") < collapsed_start
 
 
