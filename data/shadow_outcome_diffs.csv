@@ -1,1 +1,9 @@
 date,asset,signal_id,weights_version,pair_type,base_r,weighted_r,diff,linked_at_utc
+2026-07-08,VIX,20260708_VIX_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-07-09 05:34:45 UTC
+2026-07-09,BTC,20260709_BTC_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-07-09 05:34:45 UTC
+2026-07-09,DXY,20260709_DXY_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-07-09 05:34:45 UTC
+2026-07-09,GOLD,20260709_GOLD_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-07-09 05:34:45 UTC
+2026-07-09,NASDAQ,20260709_NASDAQ_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-07-09 05:34:45 UTC
+2026-07-09,SPX,20260709_SPX_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-07-09 05:34:45 UTC
+2026-07-09,USDJPY,20260709_USDJPY_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-07-09 05:34:45 UTC
+2026-07-09,WTI,20260709_WTI_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-07-09 05:34:45 UTC
