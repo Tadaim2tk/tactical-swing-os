@@ -145,6 +145,11 @@ def validate_row(row: pd.Series, existing_ids: set[str], raw_dir: Path = RAW_DIR
     if rank and rank not in KNOWN_RANKS:
         warnings.append(f"rank '{rank}' は既知enum外")
 
+    # 単位混在の入口検知: win_prob は 0〜1 の小数 (2026-07-01〜09 に %表記が24行混入した実績)
+    win_prob = pd.to_numeric(row.get("win_prob"), errors="coerce")
+    if pd.notna(win_prob) and not (0 <= float(win_prob) <= 1):
+        warnings.append(f"win_prob {win_prob} が 0〜1 の範囲外 (%表記の疑い。契約は小数)")
+
     # actionable 整合 + 桁違い検知（QQQ水準事故の入口検知）
     entry_low = pd.to_numeric(row.get("entry_low"), errors="coerce")
     entry_high = pd.to_numeric(row.get("entry_high"), errors="coerce")
