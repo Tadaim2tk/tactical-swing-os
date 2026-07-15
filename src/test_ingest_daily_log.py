@@ -105,3 +105,17 @@ def test_ensure_origin_idempotent(tmp_path):
     cols2 = idl.ensure_origin_column(ledger)
     assert cols1 == cols2
     assert ledger.read_text(encoding="utf-8").splitlines()[0].count("origin") == 1
+
+
+def test_win_prob_percent_notation_warned(tmp_path):
+    # win_prob は 0〜1 の小数が契約。%表記(例: 58)は取込は許可しつつ入口で警告する
+    # (2026-07-01〜09 に24行混入し、較正分析が単位混在で不能になった実績への対策)
+    ledger, raw = _ledger(tmp_path), _raw(tmp_path)
+    text = (f"{HEADER}\n"
+            "2026-07-16,PCT-001,WTI,BUY,B,M,72.5,73.5,70.0,78.0,81.0,2.0,58,0.35,,,,0.25,N,60,,,,70,,i,v,verified\n"
+            "2026-07-16,DEC-001,WTI,BUY,B,M,72.5,73.5,70.0,78.0,81.0,2.0,0.58,0.35,,,,0.25,N,60,,,,70,,i,v,verified")
+    r = idl.ingest(text, origin="chatgpt_app", apply=False, run_score=False, ledger_path=ledger, raw_dir=raw)
+    by_id = {d["signal_id"]: d for d in r["details"]}
+    assert by_id["PCT-001"]["verdict"] == "append"  # 広く取り込む(警告は正直に)
+    assert any("win_prob" in w and "範囲外" in w for w in by_id["PCT-001"]["warnings"])
+    assert not any("win_prob" in w for w in by_id["DEC-001"]["warnings"])
