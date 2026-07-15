@@ -130,3 +130,54 @@ date,signal_id,asset,side,rank,type,entry_low,entry_high,sl,tp1,tp2,rr,win_prob,
 2026-07-05,TSO-20260705-002,USDJPY,BUY,B,MONITOR,160.0,161.0,158.8,163.0,165.0,2.0,57,0.33,,,,0.25,NEUTRAL,58,,,,69,,USDJPY<158.8,DXY反発,verified,chatgpt_app
 2026-07-05,TSO-20260705-003,WTI,BUY,B,MONITOR,68.0,69.0,66.0,72.0,74.0,2.0,55,0.29,,,,0.25,NEUTRAL,56,,,,67,,WTI<66.0,68維持,verified,chatgpt_app
 2026-07-05,TSO-20260705-004,BTC,NONE,NO_TRADE,NONE,,,,,,,,,,100,0.00,NEUTRAL,,,,,,ETF/CME不足,ETF確認,unverified,,,chatgpt_app
+2026-07-10,TSO-20260710-GOLD-B01,GOLD,LONG,B,WATCH,,,,,,2.1,0.56,0.32,67,68,0,0.00,RISK_ON,61,63,60,66,68,61,DXY rebound and US10Y rise,Gold high breakout,verified,chatgpt_app
+2026-07-10,TSO-20260710-USDJPY-B01,USDJPY,LONG,B,WATCH,,,,,,2.0,0.55,0.30,66,67,0,0.00,RISK_ON,60,64,58,68,67,60,Yield spread contraction,USDJPY higher low,verified,chatgpt_app
+2026-07-10,TSO-20260710-WTI-B01,WTI,SHORT,B,WATCH,,,,,,2.2,0.58,0.35,69,70,0,0.00,NEUTRAL,62,66,65,67,70,62,WTI recovery above breakdown zone,WTI close below 72,verified,chatgpt_app
+2026-07-10,TSO-20260710-BTC-NT01,BTC,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF/CME confirmation appears,ETF flow and CME OI,unverified,chatgpt_app
+2026-07-10,TSO-20260710-ETH-NT01,ETH,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF/CME confirmation appears,ETF flow and CME OI,unverified,chatgpt_app
+2026-07-10,TSO-20260710-SPX-NT01,SPX,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,70,70,70,70,70,70,Meaningful pullback,Improved RR,verified,chatgpt_app
+2026-07-10,TSO-20260710-NDX-NT01,NASDAQ,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,72,72,71,73,72,72,Meaningful pullback,Improved RR,verified,chatgpt_app
+2026-07-11,TSO-20260711-GOLD-B01,GOLD,SHORT,B,WATCH,,,,,,2.1,0.57,0.33,68,69,0,0.00,RISK_ON,60,61,63,67,69,60,GOLD closes above recent swing high,GOLD closes below 4050,verified,chatgpt_app
+2026-07-11,TSO-20260711-USDJPY-B01,USDJPY,LONG,B,WATCH,,,,,,2.0,0.55,0.30,66,68,0,0.00,RISK_ON,61,64,58,68,68,61,DXY weakness and yield drop,USDJPY higher low confirmed,verified,chatgpt_app
+2026-07-11,TSO-20260711-WTI-B01,WTI,SHORT,B,WATCH,,,,,,2.3,0.58,0.35,69,71,0,0.00,NEUTRAL,63,66,65,67,71,63,WTI recovers above breakdown zone,WTI daily close below 72,verified,chatgpt_app
+2026-07-11,TSO-20260711-BTC-NT01,BTC,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF and CME confirmation obtained,ETF flow and CME OI verification,unverified,chatgpt_app
+2026-07-11,TSO-20260711-ETH-NT01,ETH,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF and CME confirmation obtained,ETF flow and CME OI verification,unverified,chatgpt_app
+2026-07-11,TSO-20260711-SPX-NT01,SPX,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,72,72,71,72,72,72,Meaningful pullback occurs,RR improves,verified,chatgpt_app
+2026-07-11,TSO-20260711-NDX-NT01,NASDAQ,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,73,73,72,73,73,73,Meaningful pullback occurs,RR improves,verified,chatgpt_app
+2026-07-11,TSO-20260711-DXY-NT01,DXY,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,55,55,55,55,55,55,Trend breakout,DXY trend confirmation,verified,chatgpt_app
+2026-07-11,TSO-20260711-US10Y-NT01,US10Y,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,55,55,55,55,55,55,Yield breakout,Yield trend confirmation,verified,chatgpt_app
+2026-07-11,TSO-20260711-VIX-NT01,VIX,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,60,60,60,60,60,60,VIX above 20,VIX regime shift,verified,chatgpt_app
+2026-07-12,TSO-20260712-USDJPY-B01,USDJPY,LONG,B,WATCH,,,,,,2.1,0.56,0.31,67,69,0,0.00,RISK_ON,62,65,60,68,69,62,DXY falls and yields fall,USDJPY higher low,verified,chatgpt_app
+2026-07-12,TSO-20260712-WTI-B01,WTI,SHORT,B,WATCH,,,,,,2.3,0.58,0.35,69,71,0,0.00,NEUTRAL,63,66,65,68,71,63,WTI recovers above resistance,WTI daily close below 72,verified,chatgpt_app
+2026-07-12,TSO-20260712-GOLD-B01,GOLD,SHORT,B,WATCH,,,,,,2.0,0.55,0.30,66,68,0,0.00,NEUTRAL,61,62,63,67,68,61,DXY weakens and yields fall,GOLD lower low,verified,chatgpt_app
+2026-07-12,TSO-20260712-BTC-NT01,BTC,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF and CME confirmation appears,ETF flow and CME OI confirmation,unverified,chatgpt_app
+2026-07-12,TSO-20260712-ETH-NT01,ETH,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF and CME confirmation appears,ETF flow and CME OI confirmation,unverified,chatgpt_app
+2026-07-12,TSO-20260712-SPX-NT01,SPX,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,72,72,72,72,72,72,Meaningful pullback occurs,RR improves,verified,chatgpt_app
+2026-07-12,TSO-20260712-NDX-NT01,NASDAQ,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,73,73,73,73,73,73,Meaningful pullback occurs,RR improves,verified,chatgpt_app
+2026-07-12,TSO-20260712-DXY-NT01,DXY,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,55,55,55,55,55,55,Trend breakout,DXY trend confirmation,verified,chatgpt_app
+2026-07-12,TSO-20260712-US10Y-NT01,US10Y,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,55,55,55,55,55,55,Yield breakout,Yield trend confirmation,verified,chatgpt_app
+2026-07-12,TSO-20260712-VIX-NT01,VIX,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,60,60,60,60,60,60,VIX above 20,VIX regime shift,verified,chatgpt_app
+2026-07-13,TSO-20260713-USDJPY-B01,USDJPY,LONG,B,WATCH,,,,,,2.1,0.56,0.31,68,69,0,0.00,RISK_ON,62,65,60,69,69,62,CPI weakens and yields fall,USDJPY higher high,verified,chatgpt_app
+2026-07-13,TSO-20260713-WTI-B01,WTI,SHORT,B,WATCH,,,,,,2.3,0.58,0.35,69,71,0,0.00,NEUTRAL,63,66,65,68,71,63,Renewed Hormuz escalation,WTI close below 72,verified,chatgpt_app
+2026-07-13,TSO-20260713-GOLD-B01,GOLD,SHORT,B,WATCH,,,,,,2.0,0.55,0.30,67,68,0,0.00,NEUTRAL,61,63,63,67,68,61,DXY weakens and yields fall,Gold lower low,verified,chatgpt_app
+2026-07-13,TSO-20260713-BTC-NT01,BTC,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF/CME confirmation obtained,ETF flow and CME OI,unverified,chatgpt_app
+2026-07-13,TSO-20260713-ETH-NT01,ETH,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF/CME confirmation obtained,ETF flow and CME OI,unverified,chatgpt_app
+2026-07-13,TSO-20260713-SPX-NT01,SPX,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,72,72,72,72,72,72,TSMC disappointment,Post-earnings breadth,verified,chatgpt_app
+2026-07-13,TSO-20260713-NDX-NT01,NASDAQ,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_ON,73,73,73,73,73,73,TSMC disappointment,AI leadership holds,verified,chatgpt_app
+2026-07-14,TSO-20260714-USDJPY-B01,USDJPY,LONG,B,WATCH,,,,,,2.0,0.56,0.31,68,69,0,0.00,NEUTRAL,62,65,61,69,69,62,CPI weakens and yields fall,USDJPY higher high,verified,chatgpt_app
+2026-07-14,TSO-20260714-WTI-B01,WTI,LONG,B,WATCH,,,,,,2.1,0.57,0.34,70,71,0,0.00,RISK_OFF,65,68,67,70,71,65,Hormuz tensions ease,WTI holds breakout,verified,chatgpt_app
+2026-07-14,TSO-20260714-GOLD-B01,GOLD,SHORT,B,WATCH,,,,,,1.9,0.54,0.29,66,67,0,0.00,NEUTRAL,60,62,63,67,67,60,Real yields fall,Gold lower high,verified,chatgpt_app
+2026-07-14,TSO-20260714-BTC-NT01,BTC,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF/CME confirmation appears,ETF flow and CME OI,unverified,chatgpt_app
+2026-07-14,TSO-20260714-ETH-NT01,ETH,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,NEUTRAL,0,0,0,0,0,0,ETF/CME confirmation appears,ETF flow and CME OI,unverified,chatgpt_app
+2026-07-14,TSO-20260714-SPX-NT01,SPX,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_OFF,68,68,68,68,68,68,CPI surprise and earnings risk,Post-CPI reaction,verified,chatgpt_app
+2026-07-14,TSO-20260714-NDX-NT01,NASDAQ,NONE,NO_TRADE,NONE,,,,,,,0,0,0,0,100,0.00,RISK_OFF,67,67,67,67,67,67,AI leadership breaks,TSMC and chip reaction,verified,chatgpt_app
+2026-07-15,TSO-20260715-GOLD-B01,GOLD,LONG,B,PULLBACK,4025,4045,3990,4100,4145,2.0,0.56,0.34,69,70,32,0.25,RISK_ON,63,66,65,68,71,64,GOLD closes below 3990 or DXY and US10Y rise together,Check 1D/3D MFE-MAE; PPI reaction; 4100/4145 reach,verified,chatgpt_app
+2026-07-15,TSO-20260715-BTC-NT01,BTC,NONE,NO_TRADE,NONE,,,,,,0,0,0,56,48,79,0,RISK_ON,54,45,48,52,55,48,ETF inflows persist and CME OI/basis confirm price rise,Verify IBIT/FBTC flows CME OI basis funding and 64000 hold,unverified,chatgpt_app
+2026-07-15,TSO-20260715-ETH-NT01,ETH,NONE,NO_TRADE,NONE,,,,,,0,0,0,40,35,92,0,NEUTRAL,38,32,30,35,38,25,Consistent spot price and ETF/derivatives data become available,Resolve conflicting price feeds then calculate MFE-MAE,unverified,chatgpt_app
+2026-07-15,TSO-20260715-WTI-NT01,WTI,NONE,NO_TRADE,MOMENTUM_AVOID,,,,,,0,0,0,78,52,87,0,RISK_OFF,73,74,71,76,68,72,Pullback to 77-78 holds or ceasefire causes confirmed breakdown below 77,Check whether avoiding post-shock momentum prevented adverse MAE,verified,chatgpt_app
+2026-07-15,TSO-20260715-USDJPY-B01,USDJPY,LONG,B,PULLBACK,161.55,161.9,160.95,162.8,163.5,2.1,0.55,0.31,68,69,38,0.25,NEUTRAL,62,65,60,68,70,62,US10Y below 4.50 and DXY below 100.5 or official intervention,Check higher low MFE-MAE and reaction to PPI/Warsh,verified,chatgpt_app
+2026-07-15,TSO-20260715-SPX-B01,SPX,LONG,B,PULLBACK,7490,7520,7440,7590,7620,1.7,0.55,0.29,70,68,41,0.25,RISK_ON,63,68,67,69,71,66,SPX closes below 7440 or VIX closes above 18,Check breadth banks semiconductors and 1D/3D MFE-MAE,verified,chatgpt_app
+2026-07-15,TSO-20260715-NDX-B01,NASDAQ,LONG,B,PULLBACK,25820,25980,25540,26300,26550,1.8,0.56,0.32,72,70,40,0.25,RISK_ON,64,69,68,71,73,67,NASDAQ closes below 25540 or semiconductor leadership fails,Check NVIDIA TSMC ADR SOX breadth and 1D/3D MFE-MAE,verified,chatgpt_app
+2026-07-15,TSO-20260715-DXY-NT01,DXY,NONE,NO_TRADE,CONFIRMATION_ONLY,,,,,,0,0,0,55,48,76,0,NEUTRAL,52,50,52,50,53,50,Break above 101.30 or below 100.50,Use as confirmation for GOLD and USDJPY after PPI,verified,chatgpt_app
+2026-07-15,TSO-20260715-US10Y-NT01,US10Y,NONE,NO_TRADE,CONFIRMATION_ONLY,,,,,,0,0,0,56,50,74,0,NEUTRAL,54,51,53,52,55,52,Break outside 4.55-4.62 range,Verify PPI and Warsh reaction; use for GOLD/USDJPY/NASDAQ,verified,chatgpt_app
+2026-07-15,TSO-20260715-VIX-NT01,VIX,NONE,NO_TRADE,CONFIRMATION_ONLY,,,,,,0,0,0,58,45,78,0,RISK_ON,55,52,50,54,56,50,Close above 18 or below 15.5,Confirm whether equity pullbacks remain controlled,verified,chatgpt_app

@@ -162,3 +162,23 @@ def test_scale_mismatch_excluded_not_repaired(tmp_path):
     s = spl.summarize(scores)
     assert s["suspect_data_rows"] == 1
     assert s["by_rank"]["B"]["result_5d"]["n_closed"] == 0  # 集計を汚さない
+
+
+def test_same_family_index_confusion_quarantined(tmp_path):
+    # NASDAQ総合水準(25,900前後)をNQ先物系列(29,400)の資産に記録 -> 桁は近いが
+    # (close-reference)/risk が偽の約+10Rを生むため ±10% ガードで隔離する。
+    # 一方、通常の押し目entry(anchorから~1%)は隔離しない。
+    _prices(tmp_path, asset="NASDAQ", base=29400.0, step=0.0)
+    scores = spl.score_ledger(
+        pd.DataFrame([
+            _row(signal_id="FAR", asset="NASDAQ", entry_low=25820.0, entry_high=25980.0, sl=25540.0),
+            _row(signal_id="NEAR", asset="NASDAQ", entry_low=29000.0, entry_high=29100.0, sl=28700.0),
+        ]),
+        raw_dir=tmp_path, scored_at="t")
+    far = scores[scores["signal_id"] == "FAR"].iloc[0]
+    assert far["data_quality"] == "scale_mismatch"
+    assert pd.isna(far["r_close_5d"])
+    assert far["result_5d"] == "suspect_data"
+    near = scores[scores["signal_id"] == "NEAR"].iloc[0]
+    assert near["data_quality"] == "ok"
+    assert pd.notna(near["r_close_5d"])

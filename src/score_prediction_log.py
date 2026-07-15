@@ -36,6 +36,7 @@ REPORTS_DIR = Path("reports/prediction_log")
 
 HORIZONS = [1, 3, 5, 10]
 MIN_SAMPLES = 30  # 集計判断の敷居(SPEC-SG-001と整合)。件数はそれ未満でも正直に表示する
+MAX_REFERENCE_ANCHOR_DEVIATION = 0.10  # reference が anchor からこれ以上離れたら scale_mismatch 隔離
 
 SCORE_COLUMNS = [
     "date",
@@ -134,10 +135,14 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
     out["anchor_close"] = round(anchor_close, 6)
 
     # データ品質ガード(反後知恵: 補正はしない・採点から正直に外すだけ):
-    # 記録水準が価格系列と桁違い(例: QQQ水準をNASDAQ指数に記録) -> 方向Rは計算不能
+    # 記録水準が価格系列と不一致 -> 方向Rは計算不能。桁違い(例: QQQ 700台を
+    # NASDAQ=NQ先物に記録, x0.02)だけでなく、同族指数の混同(例: NASDAQ総合
+    # 26,000台をNQ先物29,000台に記録, x0.88)も (close-reference)/risk が
+    # 偽の数R〜数十Rを生むため、anchor から ±10% 超の reference は隔離する。
+    # 日次スイングの entry ゾーンが当日終値から10%超離れることは想定しない。
     if actionable and not np.isnan(reference) and anchor_close > 0:
         ratio = reference / anchor_close
-        if ratio > 5 or ratio < 0.2:
+        if abs(ratio - 1.0) > MAX_REFERENCE_ANCHOR_DEVIATION:
             out["data_quality"] = "scale_mismatch"
             actionable = False
             out["actionable"] = False

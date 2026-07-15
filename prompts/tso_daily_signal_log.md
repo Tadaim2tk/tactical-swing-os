@@ -28,7 +28,7 @@ BTC / ETH / GOLD / WTI / USDJPY / SPX / NASDAQ / DXY / US10Y / VIX
 | WTI | WTI 先物 USD/bbl | 74 前後 |
 | USDJPY | ドル円 | 162 前後 |
 | SPX | ES 先物（指数） | 7,500 前後 |
-| NASDAQ | **NQ 先物（指数）** | **29,000 前後。QQQ（700台）の水準で書くのは禁止** |
+| NASDAQ | **NQ 先物（指数）** | **29,000 前後。QQQ（700台）や NASDAQ総合（26,000台）の水準で書くのは禁止** |
 | DXY | ドル指数 | 101 前後 |
 | US10Y | 米10年債利回り % | 4.6 前後 |
 | VIX | VIX 指数 | 17 前後 |
