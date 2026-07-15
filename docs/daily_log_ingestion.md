@@ -60,3 +60,23 @@ n が溜まるまで両方走らせ、統計ゲート（n>=30）を満たして�
 - 取込は台帳（data/signal_log.csv）への追記のみ。ライブ評価ループの真実源にはしない
 - codex 実行は read-only サンドボックス。自動 apply はしない（人間確認を挟む）
 - 実売買・発注なし。signal score 未接続
+
+## 出力契約 v2（2026-07-15）— 採点で実際に起きた事故への対応
+
+採点済み台帳のレビュー（2026-07-15、n=131）で以下の欠陥が判明し、
+`prompts/tso_daily_signal_log.md` を**全経路共通の契約 v2** に改定した。
+ChatGPT アプリ側のプロジェクト指示も v2 の内容に差し替えること（アプリ側の旧指示が
+残っていると同じ事故が再発する）。
+
+| 事故 | 件数 | v2 での対応 |
+|---|---|---|
+| ETH が価格系列外で採点不能（invalid_data） | 10 | ETH をユニバースに追加（fetch_market.py: ETH-USD）。既存10行は次回採点で自動回復 |
+| NASDAQ を QQQ 水準（700台）で記帳 → scale_mismatch | 6 | 資産ごとの参照系列・桁の目安表を契約に明記（NASDAQ = NQ 先物 29,000 前後） |
+| asset=NONE の行が混入 → 採点不能 | 2 | asset=NONE 禁止。「何もない日」は全資産 NO_TRADE 行で表現 |
+| QQQ 等リスト外資産の行 | 1 | ユニバース10資産に固定。リスト外は本文のみ |
+| actionable 行の entry/sl 欠落（ETH 6/21 など） | 1+ | A/B 行の必須項目リストを明記（欠けると「記録が死ぬ」と警告） |
+| NO_TRADE 行の ems 等スコア欠落 | 13 | NO_TRADE 行もスコア6種+no_trade_score+regime を必須化 |
+| 日次ブロックの欠測（7/8 など） | — | 全資産 NO_TRADE の日も csv ブロック省略禁止を明記 |
+
+経路1（アプリ貼り付け）・経路2（gpt_terminal）とも同一契約。signal_id は台帳の既存形式
+`YYYYMMDD_ASSET_SIDE_TYPE` に統一（旧 TSO-YYYYMMDD-NNN 連番は廃止）。

@@ -9,6 +9,7 @@ import yfinance as yf
 
 ASSETS = {
     "BTC-USD": "BTC",
+    "ETH-USD": "ETH",
     "GC=F": "GOLD",
     "CL=F": "WTI",
     "JPY=X": "USDJPY",
