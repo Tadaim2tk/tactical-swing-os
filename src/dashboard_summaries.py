@@ -1686,3 +1686,18 @@ def execution_view_summary(scores: pd.DataFrame, ledger: pd.DataFrame) -> dict:
             "best": round(max(sums), 2),
         })
     return out
+
+
+def execution_sim_summary(sim: pd.DataFrame) -> dict:
+    """SL/TP執行シミュレーション(data/execution_simulation.csv)のダッシュボード用サマリー。
+
+    集計ロジックは simulate_execution.summarize を共有(重複実装しない)。
+    Pages でも追跡CSVから直接計算できる。表示のみ。
+    """
+    try:
+        from simulate_execution import summarize as _summarize
+    except ImportError:
+        return {"available": False}
+    out = _summarize(sim if sim is not None else pd.DataFrame())
+    out["available"] = bool(out.get("orders"))
+    return out

@@ -117,6 +117,7 @@ def test_summaries_handle_empty_data():
     assert isinstance(dashboard_summaries.todays_judgements_summary(empty, empty), dict)
     assert isinstance(dashboard_summaries.performance_series_summary(empty, empty), dict)
     assert isinstance(dashboard_summaries.execution_view_summary(empty, empty), dict)
+    assert isinstance(dashboard_summaries.execution_sim_summary(empty), dict)
 
 
 # === 統合レイヤーのキーが維持されている (機能変更なしの担保) ===

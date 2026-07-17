@@ -45,6 +45,7 @@ jobs:
       - name: Score prediction log (all judgements, retro)
         run: |
           python src/score_prediction_log.py || echo "warning - prediction log scoring failed; continuing"
+          python src/simulate_execution.py || echo "warning - execution simulation failed; continuing"
 
       - name: Build report
         run: python src/build_report.py
@@ -61,7 +62,7 @@ jobs:
           git config user.name "tso-actions-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # governance_reform_2026-07: data/ 配下のデータ追記のみ。src/docs/.github は触らない。
-          git add data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv
+          git add data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv data/execution_simulation.csv
           if git diff --cached --quiet; then
             echo "no ledger changes to commit"
           else

@@ -118,6 +118,7 @@ def build_dashboard() -> tuple[dict, str]:
         extras["prediction_log_scores"],
         extras["signal_ledger"],
     )
+    execution_sim = execution_sim_summary(extras["execution_simulation"])
     generated_dt_utc = now_utc()
     dashboard_as_of = generated_dt_utc.date().isoformat()
     transaction_cost = transaction_cost_summary(evaluations, extras["cost_model_json"], as_of=dashboard_as_of)
@@ -289,6 +290,7 @@ def build_dashboard() -> tuple[dict, str]:
         todays_judgements=todays_judgements,
         performance_series=performance_series,
         execution_view=execution_view,
+        execution_sim=execution_sim,
         summary=summary,
     )
     html_path = REPORTS_DIR / "index.html"

@@ -1015,6 +1015,7 @@ def render_html(
     todays_judgements: dict,
     performance_series: dict,
     execution_view: dict,
+    execution_sim: dict,
     summary: dict,
 ) -> str:
     top_positive = reason_table[reason_table["reliability_label"].isin(["strong_positive", "positive"])].head(10) if not reason_table.empty and "reliability_label" in reason_table.columns else pd.DataFrame()
@@ -1513,6 +1514,39 @@ def render_html(
                 "この安定性が窓の数を増やしても崩れないかが、リスク許容度を上げる判断材料になります。"
                 "窓数が少ないうちは偶然の寄与が大きい点に注意。</p>"
             )
+    # === SL/TP執行シミュレーション(保守的) ===
+    es = execution_sim or {}
+    sim_tiles = ""
+    sim_detail = ""
+    if es.get("available") and es.get("fills_resolved"):
+        eb = es.get("exit_breakdown") or {}
+        _gross = es.get("gross_total_r")
+        _cap = es.get("gross_capital_pct")
+        _wr = es.get("win_rate")
+        _cost = (es.get("cost_sensitivity_r") or {}).get("0.05R")
+        sim_tiles = "".join([
+            _tile("決着した擬似取引", str(es["fills_resolved"]),
+                  f"SL {eb.get('filled_sl', 0)} / TP1 {eb.get('filled_tp1', 0)} / 期限 {eb.get('filled_time_exit', 0)}"),
+            _tile("勝率(執行)", f"{_wr * 100:.0f}%" if _wr is not None else "—", "決着分のみ"),
+            _tile("合計R(コスト前)", f"{_gross:+.1f}R" if _gross is not None else "—",
+                  f"平均 {es.get('avg_r'):+.2f}R/件" if es.get("avg_r") is not None else "",
+                  "positive" if (_gross or 0) > 0 else "negative"),
+            _tile("資産換算(記帳リスク)", f"{_cap:+.2f}%" if _cap is not None else "—",
+                  f"100万円なら約{_cap:+.1f}万円" if _cap is not None else "",
+                  "positive" if (_cap or 0) > 0 else "negative"),
+            _tile("コスト0.05R/件なら", f"{_cost:+.1f}R" if _cost is not None else "—", "感応度(出典つきコスト未設定のため)"),
+        ])
+        sim_detail = (
+            f'<p class="notice">対象注文 {es.get("orders", 0)}件: 未到達 {es.get("no_fill", 0)} / 進行中 {es.get("open", 0)} / '
+            f'水準取り違え隔離 {es.get("excluded_scale", 0)}。'
+            "ルール: ゾーン内最悪価格で約定 / 約定足でSL接触なら損切り扱い / TP1は翌足以降 / 同足はSL優先 / 判断日+5バー終値で時間切れ決済。"
+            "すべて不利側に倒した<b>下限イメージ</b>です。</p>"
+        )
+    elif es.get("available"):
+        sim_detail = '<p class="notice">決着した擬似取引がまだありません。</p>'
+    else:
+        sim_detail = '<p class="notice">シミュレーションデータ未生成(日次CIで自動生成されます)。</p>'
+
     exec_note = (
         '<p class="notice">終値基準の方向採点で、SL/TP執行は再現していません。到達判定は当日タッチを拾えないため、'
         "同日中に約定して損切りになった判断が「未到達」側に落ち、この枠の成績はその分よく見えます"
@@ -1564,6 +1598,11 @@ def render_html(
       <section class="card"><h2>到達分の累積R(5日終値基準)</h2>{exec_chart}</section>
       <section class="card"><h2>安定性 — 移動窓の正味R(記帳日ベース)</h2>{exec_windows_html}{exec_reading}</section>
     </div>
+    <section class="card" id="execsim"><h2>SL/TP執行シミュレーション(保守的・下限イメージ)</h2>
+      <p class="notice">上の「到達×終値」が方向の質(上限寄り)を示すのに対し、こちらは記帳どおりのSL/TP1で執行した場合の下限寄りの見積もりです。実際はこの間にあります。</p>
+      {sim_detail}
+      <div class="tiles">{sim_tiles}</div>
+    </section>
 
     <details class="group" id="verify"><summary><span class="n" style="color:var(--accent)">04</span> 検証 — 予測は当たっているか<span class="g-sub">評価・理由コード・見送り検証・類似局面・内部エンジン</span></summary><div class="g-body">
     <section class="card"><h2>過去シグナルの結果まとめ(内部エンジン)</h2><div class="grid">{eval_stats}</div></section>
