@@ -79,22 +79,28 @@ def test_main_actually_generates_outputs(tmp_path, monkeypatch):
     assert (out_dir / "index.html").exists()
     assert (out_dir / "dashboard_summary.json").exists()
     html_text = (out_dir / "index.html").read_text(encoding="utf-8")
+    # 2026-07-17 再設計: サービスの一次面は「台帳の今日の判断 → 答え合わせ → 成績」。
+    # 全セクションは温存されるが、内部データは details.group に折りたたむ。
     for section in [
-        "予測ノートの成績（毎日の相場判断を後日採点）",
+        "予測ノートの成績",
         "監査レポート",
-        "準備中の分析（データが貯まると自動で動き出します）",
-        "確信度と的中率のズレ（キャリブレーション）",
+        "準備中の分析(データが貯まると自動で動き出します)",
+        "確信度と的中率のズレ(キャリブレーション)",
         "ニュース解釈の信頼性",
         "取引コストモデル",
+        "前営業日の答え合わせ",
+        "見送り(NO_TRADE)",
     ]:
-        assert f"<h2>{section}</h2>" in html_text
-    # 投資判断ファースト: ひとめ要約バナーとティア見出しが出ること
-    assert 'class="summary-banner"' in html_text
-    assert '<h2 class="tier">① 今日の売買判断（何を・どの向きで・どこで）</h2>' in html_text
-    # 投資判断に直結する評価更新とポートフォリオ候補は折りたたみに隠さない。
-    collapsed_start = html_text.index('<details class="tier4">')
-    for section in ["直近の評価結果", "結果待ちのシグナル", "資産配分の目安"]:
-        assert html_text.index(f"<h2>{section}</h2>") < collapsed_start
+        assert f"<h2>{section}</h2>" in html_text, section
+    # 一次面の契約: 状態ピル・今日の判断・成績(チャート)は折りたたみの外にある
+    assert 'class="pills"' in html_text
+    assert 'id="today"' in html_text and 'id="perf"' in html_text
+    assert 'class="chart"' in html_text  # 累積R/地平線勝率のSVG
+    first_group = html_text.index('<details class="group"')
+    assert html_text.index('id="today"') < first_group
+    assert html_text.index('id="perf"') < first_group
+    # 台帳が読めた場合の判断カード(この統合テストは実データで走る)
+    assert 'class="jgrid"' in html_text or "方向つき判断はありません" in html_text or "台帳(data/signal_log.csv)が読めません" in html_text
 
 
 # === 空データでもサマリー関数が落ちない ===
@@ -107,6 +113,8 @@ def test_summaries_handle_empty_data():
     assert isinstance(dashboard_summaries.narrative_reliability_summary(None, empty), dict)
     assert isinstance(dashboard_summaries.transaction_cost_summary(empty, None), dict)
     assert isinstance(dashboard_summaries.audit_report_summary(""), dict)
+    assert isinstance(dashboard_summaries.todays_judgements_summary(empty, empty), dict)
+    assert isinstance(dashboard_summaries.performance_series_summary(empty, empty), dict)
 
 
 # === 統合レイヤーのキーが維持されている (機能変更なしの担保) ===
