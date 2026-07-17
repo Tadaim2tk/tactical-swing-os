@@ -1014,6 +1014,7 @@ def render_html(
     apply_false: bool,
     todays_judgements: dict,
     performance_series: dict,
+    execution_view: dict,
     summary: dict,
 ) -> str:
     top_positive = reason_table[reason_table["reliability_label"].isin(["strong_positive", "positive"])].head(10) if not reason_table.empty and "reliability_label" in reason_table.columns else pd.DataFrame()
@@ -1465,6 +1466,59 @@ def render_html(
     ])
     min_n = prediction_log.get("min_samples", 30)
 
+    # === 03 執行ビュー(到達分のみ) ===
+    ev = execution_view or {}
+    exec_tiles = ""
+    exec_chart = '<p class="notice">到達した判断の確定データがまだありません。</p>'
+    exec_windows_html = ""
+    exec_reading = ""
+    if ev.get("available") and ev.get("fills"):
+        _fr = ev.get("fill_rate")
+        _fr_txt = f" ({_fr * 100:.0f}%)" if _fr is not None else ""
+        _man = ev["capital_pct"]
+        exec_tiles = "".join([
+            _tile("約定率(到達/発注)", f"{ev['fills']}/{ev['orders']}{_fr_txt}", "risk_pct>0の確定判断のみ"),
+            _tile("累積R(到達分)", f"{ev['cum_r']:+.1f}R", f"平均 {ev['avg_r']:+.2f}R/件",
+                  "positive" if ev["cum_r"] > 0 else "negative"),
+            _tile("資産換算(記帳リスク)", f"{_man:+.2f}%", f"100万円なら約{_man:+.1f}万円",
+                  "positive" if _man > 0 else "negative"),
+            _tile("最大ドローダウン", f"-{ev['max_dd_r']:.1f}R", "到達分の累積ベース"),
+        ])
+        exec_chart = cum_r_chart(ev.get("series") or [])
+        wrows = ""
+        stable_w = None
+        for w in ev.get("windows") or []:
+            tone = "positive" if w["pos_rate"] >= 0.9 else ""
+            if stable_w is None and w["pos_rate"] >= 0.9:
+                stable_w = w
+            wrows += (
+                f"<tr><td>{w['w']}営業日</td><td>{w['n_windows']}</td>"
+                f"<td class=\"{tone}\">{w['pos_rate'] * 100:.0f}%</td>"
+                f"<td>{w['worst']:+.2f}R</td><td>{w['best']:+.2f}R</td></tr>"
+            )
+        if wrows:
+            exec_windows_html = (
+                '<div class="table-wrap"><table class="slim"><thead><tr>'
+                '<th>窓幅</th><th>窓の数</th><th>プラス窓率</th><th>最悪の窓</th><th>最良の窓</th>'
+                f"</tr></thead><tbody>{wrows}</tbody></table></div>"
+            )
+        else:
+            exec_windows_html = '<p class="notice">窓を作れるだけの記帳日数がまだありません。</p>'
+        if stable_w:
+            _all_pos = stable_w["pos_rate"] >= 1.0
+            _rate_txt = "すべて" if _all_pos else f"{stable_w['pos_rate'] * 100:.0f}%"
+            exec_reading = (
+                f'<p class="notice"><b>読み方:</b> これまでの実績では、{stable_w["w"]}営業日の窓({stable_w["n_windows"]}本)の'
+                f'{_rate_txt}が差し引きプラスでした(最悪の窓 {stable_w["worst"]:+.2f}R)。'
+                "この安定性が窓の数を増やしても崩れないかが、リスク許容度を上げる判断材料になります。"
+                "窓数が少ないうちは偶然の寄与が大きい点に注意。</p>"
+            )
+    exec_note = (
+        '<p class="notice">終値基準の方向採点で、SL/TP執行は再現していません。到達判定は当日タッチを拾えないため、'
+        "同日中に約定して損切りになった判断が「未到達」側に落ち、この枠の成績はその分よく見えます"
+        "(判定の修正が別途進行中。反映されると自動で正確になります)。スプレッド等のコストは未控除です。</p>"
+    )
+
     return f"""<!doctype html>
 <html lang="ja">
 <head>
@@ -1478,7 +1532,7 @@ def render_html(
   <div class="topbar"><div class="topbar-in">
     <span class="brand">Tactical Swing OS<small>研究用・実売買なし</small></span>
     <nav class="jump">
-      <a href="#today">今日</a><a href="#perf">成績</a><a href="#verify">検証</a><a href="#health">健康</a><a href="#lab">研究ログ</a>
+      <a href="#today">今日</a><a href="#perf">成績</a><a href="#exec">執行</a><a href="#verify">検証</a><a href="#health">健康</a><a href="#lab">研究ログ</a>
     </nav>
     <span class="gen">{html.escape(generated_at_jst or generated)}</span>
     <button id="theme-toggle" type="button">表示切替</button>
@@ -1502,7 +1556,16 @@ def render_html(
     </div>
     <section class="card"><h2>予測ノートの成績</h2><p class="notice">毎朝の相場判断(買い・売り・見送り)をすべて記録し、1・3・5・10営業日後の実際の値動きで採点しています。見送りも採点対象です。</p>{'<div class="empty">予測ノート未取得</div>' if not prediction_log.get('available') else f'<div class="grid">{prediction_stats}</div>'}<h3>ランク別の成績(A=自信あり / B=監視 / NO_TRADE=見送り)</h3>{table_html(prediction_rank_table, ["rank", "judgements", "with_levels", "win_5d", "win_10d", "mean_r_5d", "basis"], "採点データなし")}<h3>直近の判断(新しい順)</h3>{table_html(prediction_recent_table, ["date", "asset", "side", "rank", "r_close_5d", "r_close_10d", "result_5d", "status"], "判断記録なし")}</section>
 
-    <details class="group" id="verify"><summary><span class="n" style="color:var(--accent)">03</span> 検証 — 予測は当たっているか<span class="g-sub">評価・理由コード・見送り検証・類似局面・内部エンジン</span></summary><div class="g-body">
+    <h2 class="sec" id="exec"><span class="n">03</span>執行ビュー(到達分のみ)</h2>
+    <p class="sec-sub">「朝に指値を出したもの」(risk_pct&gt;0)のうち、entry帯へ実際に価格が到達した判断だけの損益ビューです。未到達の判断はここには入りません。</p>
+    {exec_note}
+    <div class="tiles">{exec_tiles}</div>
+    <div class="charts">
+      <section class="card"><h2>到達分の累積R(5日終値基準)</h2>{exec_chart}</section>
+      <section class="card"><h2>安定性 — 移動窓の正味R(記帳日ベース)</h2>{exec_windows_html}{exec_reading}</section>
+    </div>
+
+    <details class="group" id="verify"><summary><span class="n" style="color:var(--accent)">04</span> 検証 — 予測は当たっているか<span class="g-sub">評価・理由コード・見送り検証・類似局面・内部エンジン</span></summary><div class="g-body">
     <section class="card"><h2>過去シグナルの結果まとめ(内部エンジン)</h2><div class="grid">{eval_stats}</div></section>
     <section class="card"><h2>直近の評価結果</h2>{'<div class="empty">最新評価ビュー未取得</div>' if not latest_eval_summary.get('available') else f'<div class="grid">{latest_eval_stats}</div>'}</section>
     <section class="card"><h2>結果待ちのシグナル</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id", "asset", "side", "rank", "previous_outcome", "outcome", "r_multiple", "error_type"], "直近決着シグナルなし")}</section>
@@ -1515,7 +1578,7 @@ def render_html(
     <section class="card"><h2>今週・今月のリスク上限モード</h2><div class="grid">{mode_stats}</div></section>
     </div></details>
 
-    <details class="group" id="health"><summary><span class="n" style="color:var(--accent)">04</span> システムの健康<span class="g-sub">このデータを信じてよいか — 鮮度・監査・安全チェック</span></summary><div class="g-body">
+    <details class="group" id="health"><summary><span class="n" style="color:var(--accent)">05</span> システムの健康<span class="g-sub">このデータを信じてよいか — 鮮度・監査・安全チェック</span></summary><div class="g-body">
     <section class="card"><h2>データの鮮度チェック</h2><p class="notice">古い(stale)・空(empty)・欠損(missing)のデータを正常と誤読しないためのガードです。</p>{'<div class="empty">Data Health未取得</div>' if not data_health.get('available') else f'<div class="grid">{data_health_stats}</div>'}<h3>レイヤー別 鮮度</h3>{table_html(data_health_table, ["layer", "status", "last_generated", "age_hours", "row_count", "threshold_hours", "cadence"], "レイヤー情報なし")}</section>
     <section class="card"><h2>時刻の整合性チェック</h2>{'<div class="empty">Datetime Audit未取得</div>' if not datetime_health.get('available') else f'<div class="grid">{datetime_stats}</div>'}</section>
     <section class="card"><h2>システム状態</h2><div class="grid">{system_stats}</div></section>
@@ -1525,7 +1588,7 @@ def render_html(
     <section class="card"><h2>準備中の分析(データが貯まると自動で動き出します)</h2><p class="notice">以下は蓄積待ちであり、壊れているのではありません。</p><div class="table-wrap"><table class="slim"><thead><tr><th>分析</th><th>状態</th></tr></thead><tbody>{preparing_rows}</tbody></table></div></section>
     </div></details>
 
-    <details class="group" id="lab"><summary><span class="n" style="color:var(--accent)">05</span> 研究ログ(開発者向け)<span class="g-sub">較正・ニュース・重み提案・メタ学習・監査の内部データ</span></summary><div class="g-body">
+    <details class="group" id="lab"><summary><span class="n" style="color:var(--accent)">06</span> 研究ログ(開発者向け)<span class="g-sub">較正・ニュース・重み提案・メタ学習・監査の内部データ</span></summary><div class="g-body">
     <section class="card"><h2>確信度と的中率のズレ(キャリブレーション)</h2>{'<div class="empty">Prediction Calibration未取得</div>' if not prediction_calibration.get('available') else f'<div class="grid">{prediction_calibration_stats}</div>'}<h3>Rank別キャリブレーション</h3>{table_html(prediction_calibration_table, ["rank", "implied_probability", "closed_count", "hit_rate", "calibration_gap", "brier_score", "p_value", "calibration_verdict", "recommended_action"], "キャリブレーションデータなし")}</section>
     <section class="card"><h2>ニュース解釈の信頼性</h2>{'<div class="empty">Narrative Reliability未取得</div>' if not narrative_reliability.get('available') else f'<div class="grid">{narrative_reliability_stats}</div>'}<h3>ナラティブ別信頼性</h3>{table_html(narrative_reliability_table, ["narrative", "closed_count", "win_rate", "average_r", "p_value", "reliability_label", "recommended_action"], "ナラティブ信頼性データなし")}</section>
     <section class="card"><h2>ニュース要約(材料の整理)</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>

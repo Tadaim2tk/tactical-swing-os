@@ -1613,3 +1613,76 @@ def performance_series_summary(scores: pd.DataFrame, ledger: pd.DataFrame) -> di
                     "n": int(len(closed)),
                 }
     return out
+
+
+def execution_view_summary(scores: pd.DataFrame, ledger: pd.DataFrame) -> dict:
+    """執行ビュー: 「朝に指値を出したもの」(actionable かつ risk_pct>0)のうち
+    entry帯に到達した判断だけで、資産がどう増減したかを表示するための集計。
+
+    - close基準の方向採点であり SL/TP 執行の再現ではない(過大にも過小にもなり得る)
+    - 到達判定は当日タッチを拾わない既知バイアスがある(過小方向)
+    - capital_pct は各判断の記帳 risk_pct で重み付けした資金%換算
+    - windows: 記帳日ベースの移動窓 W 日の正味Rがプラスだった割合(安定性の目安)
+    """
+    out = {
+        "available": False, "orders": 0, "fills": 0, "fill_rate": None,
+        "cum_r": None, "capital_pct": None, "avg_r": None, "max_dd_r": None,
+        "series": [], "windows": [], "zero_risk_excluded": 0,
+    }
+    if scores is None or scores.empty:
+        return out
+    need = {"data_quality", "rank", "actionable", "date", "signal_id", "entry_touched_5d", "r_close_5d"}
+    if not need.issubset(set(scores.columns)):
+        return out
+    sc = scores.copy()
+    sc = sc[(sc["data_quality"] == "ok") & (sc["actionable"].astype(str).str.lower() == "true") & (sc["rank"].isin(["A", "B"]))]
+    sc["r5"] = pd.to_numeric(sc["r_close_5d"], errors="coerce")
+    sc = sc.dropna(subset=["r5"])
+    if sc.empty:
+        return out
+    rp_map = {}
+    if ledger is not None and not ledger.empty and {"signal_id", "risk_pct"}.issubset(ledger.columns):
+        led = ledger.copy()
+        led["rp"] = pd.to_numeric(led["risk_pct"], errors="coerce")
+        rp_map = dict(zip(led["signal_id"].astype(str), led["rp"]))
+    sc["rp"] = sc["signal_id"].astype(str).map(rp_map)
+    zero_risk = sc[(sc["rp"].isna()) | (sc["rp"] <= 0)]
+    orders = sc[sc["rp"] > 0]
+    out["available"] = True
+    out["zero_risk_excluded"] = int(len(zero_risk))
+    out["orders"] = int(len(orders))
+    fills = orders[orders["entry_touched_5d"].astype(str).str.lower() == "true"].sort_values(["date", "asset"])
+    out["fills"] = int(len(fills))
+    if out["orders"]:
+        out["fill_rate"] = round(out["fills"] / out["orders"], 3)
+    if fills.empty:
+        return out
+    cum = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for _, r in fills.iterrows():
+        cum += float(r["r5"])
+        peak = max(peak, cum)
+        max_dd = max(max_dd, peak - cum)
+        out["series"].append({"date": str(r["date"]), "asset": str(r.get("asset", "")), "r": round(float(r["r5"]), 2), "cum": round(cum, 3)})
+    out["cum_r"] = round(cum, 2)
+    out["capital_pct"] = round(float((fills["r5"] * fills["rp"]).sum()), 2)
+    out["avg_r"] = round(float(fills["r5"].mean()), 2)
+    out["max_dd_r"] = round(max_dd, 2)
+
+    # 安定性: 記帳日ベースの移動窓 W 日で正味Rがプラスだった窓の割合
+    daily = fills.groupby(fills["date"].astype(str))["r5"].sum()
+    all_days = sorted(sc["date"].astype(str).unique())  # 記帳が確定している全日(約定なし日=0を含む)
+    net_by_day = [float(daily.get(d, 0.0)) for d in all_days]
+    for w in (5, 10, 15, 20):
+        if len(net_by_day) < w:
+            continue
+        sums = [sum(net_by_day[i:i + w]) for i in range(len(net_by_day) - w + 1)]
+        pos = sum(1 for s in sums if s > 0)
+        out["windows"].append({
+            "w": w, "n_windows": len(sums),
+            "pos_rate": round(pos / len(sums), 3),
+            "worst": round(min(sums), 2),
+            "best": round(max(sums), 2),
+        })
+    return out
