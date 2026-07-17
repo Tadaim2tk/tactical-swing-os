@@ -1422,3 +1422,144 @@ def prediction_log_summary(scores: pd.DataFrame, summary_json) -> dict:
         "min_samples": int(payload.get("min_samples_for_judgement", 30) or 30),
         "connected_to_signal_score": False,
     }
+
+
+def _ledger_num(value):
+    """台帳セルを float に。空欄・非数値は None(捏造しない)。"""
+    n = pd.to_numeric(value, errors="coerce")
+    return float(n) if pd.notna(n) else None
+
+
+def todays_judgements_summary(ledger: pd.DataFrame, scores: pd.DataFrame) -> dict:
+    """手動予測台帳(data/signal_log.csv)の最新記帳日をカード表示用に整形する。
+
+    ダッシュボードの「今日の判断」ヒーローの供給源。表示のみで発注はしない。
+    前日分は prediction_log_scores と突き合わせて答え合わせを返す。
+    """
+    out = {
+        "available": False,
+        "ledger_date": None,
+        "actionable": [],
+        "no_trade": [],
+        "prev_date": None,
+        "prev_results": [],
+    }
+    if ledger is None or ledger.empty or "date" not in ledger.columns:
+        return out
+    led = ledger.copy()
+    led["date"] = led["date"].astype(str).str.strip()
+    dates = sorted(d for d in led["date"].unique() if d and d.lower() not in {"nan", "none"})
+    if not dates:
+        return out
+    latest = dates[-1]
+    out["available"] = True
+    out["ledger_date"] = latest
+    out["prev_date"] = dates[-2] if len(dates) > 1 else None
+
+    for _, r in led[led["date"] == latest].iterrows():
+        side = str(r.get("side", "") or "").strip().upper()
+        side = {"LONG": "BUY", "SHORT": "SELL"}.get(side, side)
+        rank = str(r.get("rank", "") or "").strip().upper()
+        row = {
+            "asset": str(r.get("asset", "") or ""),
+            "side": side,
+            "rank": rank,
+            "type": str(r.get("type", "") or ""),
+            "entry_low": _ledger_num(r.get("entry_low")),
+            "entry_high": _ledger_num(r.get("entry_high")),
+            "sl": _ledger_num(r.get("sl")),
+            "tp1": _ledger_num(r.get("tp1")),
+            "tp2": _ledger_num(r.get("tp2")),
+            "rr": _ledger_num(r.get("rr")),
+            "win_prob": _ledger_num(r.get("win_prob")),
+            "expected_r": _ledger_num(r.get("expected_r")),
+            "risk_pct": _ledger_num(r.get("risk_pct")),
+            "regime": str(r.get("regime", "") or ""),
+            "invalidation": str(r.get("invalidation", "") or ""),
+            "no_trade_score": _ledger_num(r.get("no_trade_score")),
+        }
+        if side in {"BUY", "SELL"} and rank in {"A", "B"}:
+            out["actionable"].append(row)
+        else:
+            out["no_trade"].append(row)
+    out["actionable"].sort(key=lambda x: (x["rank"] != "A", x["asset"]))
+
+    prev = out["prev_date"]
+    if prev and scores is not None and not scores.empty and "date" in scores.columns:
+        sc = scores.copy()
+        sc["date"] = sc["date"].astype(str).str.strip()
+        for _, r in sc[sc["date"] == prev].iterrows():
+            if str(r.get("actionable", "")).strip().lower() != "true" and str(r.get("data_quality", "")) != "scale_mismatch":
+                continue
+            out["prev_results"].append({
+                "asset": str(r.get("asset", "") or ""),
+                "side": str(r.get("side", "") or ""),
+                "rank": str(r.get("rank", "") or ""),
+                "touched": str(r.get("entry_touched_5d", "")).strip().lower() == "true",
+                "r_close_1d": _ledger_num(r.get("r_close_1d")),
+                "result_5d": str(r.get("result_5d", "") or ""),
+                "status": str(r.get("status", "") or ""),
+                "data_quality": str(r.get("data_quality", "") or ""),
+            })
+    return out
+
+
+def performance_series_summary(scores: pd.DataFrame, ledger: pd.DataFrame) -> dict:
+    """台帳採点(close基準)から成績チャート用の系列を作る。表示のみ。
+
+    - cum_r: B級 actionable の r_close_5d 累積(日付順)
+    - horizon_win: 1/3/5/10営業日の勝率とn
+    - calibration: 事前win_prob平均 vs 実現勝率(5d) — 単位は0〜1
+    n<min_samplesの断定を避けるため、nを必ず添えて返す。
+    """
+    out = {"available": False, "cum_r": [], "horizon_win": [], "calibration": {}, "tiles": {}}
+    if scores is None or scores.empty:
+        return out
+    sc = scores.copy()
+    for col in ("data_quality", "status", "actionable", "rank", "date"):
+        if col not in sc.columns:
+            return out
+    # 5日Rが確定していれば採用する(10日確定=status scoredまでは待たない)
+    ok = sc[sc["data_quality"] == "ok"]
+    act = ok[(ok["actionable"].astype(str).str.lower() == "true") & (ok["rank"] == "B")].copy()
+    out["available"] = True
+    out["tiles"] = {
+        "total_rows": int(len(sc)),
+        "awaiting": int((sc["status"] == "awaiting_horizon").sum()),
+        "suspect": int((sc.get("result_5d", pd.Series(dtype=str)) == "suspect_data").sum()),
+        "b_scored": int(pd.to_numeric(act.get("r_close_5d"), errors="coerce").notna().sum()) if "r_close_5d" in act.columns else 0,
+    }
+    if not act.empty and "r_close_5d" in act.columns:
+        ser = act.copy()
+        ser["r5"] = pd.to_numeric(ser["r_close_5d"], errors="coerce")
+        ser = ser.dropna(subset=["r5"]).sort_values(["date", "asset"])
+        cum = 0.0
+        for _, r in ser.iterrows():
+            cum += float(r["r5"])
+            out["cum_r"].append({"date": str(r["date"]), "asset": str(r.get("asset", "")), "r": float(r["r5"]), "cum": round(cum, 3)})
+        out["tiles"]["mean_r_5d"] = round(float(ser["r5"].mean()), 2) if len(ser) else None
+        for h in (1, 3, 5, 10):
+            col = f"r_close_{h}d"
+            if col not in act.columns:
+                continue
+            v = pd.to_numeric(act[col], errors="coerce").dropna()
+            if len(v) == 0:
+                continue
+            wins = int((v > 0).sum())
+            out["horizon_win"].append({"horizon": f"{h}日", "n": int(len(v)), "wins": wins, "rate": round(wins / len(v), 3)})
+    if ledger is not None and not ledger.empty and "signal_id" in ledger.columns and "win_prob" in ledger.columns and "signal_id" in act.columns:
+        led = ledger[["signal_id", "win_prob"]].copy()
+        led["wp"] = pd.to_numeric(led["win_prob"], errors="coerce")
+        led.loc[led["wp"] > 1, "wp"] = led.loc[led["wp"] > 1, "wp"] / 100.0  # 旧%表記の防御的正規化(表示のみ)
+        joined = act.merge(led, on="signal_id", how="left").dropna(subset=["wp"])
+        if "r_close_5d" in joined.columns:
+            r5 = pd.to_numeric(joined["r_close_5d"], errors="coerce")
+            closed = joined[r5.notna()]
+            if len(closed) > 0:
+                rr5 = pd.to_numeric(closed["r_close_5d"], errors="coerce")
+                out["calibration"] = {
+                    "stated_mean": round(float(closed["wp"].mean()), 2),
+                    "realized_rate": round(float((rr5 > 0).mean()), 2),
+                    "n": int(len(closed)),
+                }
+    return out

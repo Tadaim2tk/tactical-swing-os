@@ -536,6 +536,433 @@ def stat_card(label: str, value, css_class: str = "") -> str:
     return f'<div class="stat {css_class}"><div class="stat-label">{html.escape(display_label(label))}</div><div class="stat-value">{html.escape(display_value(value))}</div></div>'
 
 
+# === 再設計 (2026-07-17): サービスとしての「今日の判断」ヘルパー ===
+# 供給源は手動予測台帳(todays_judgements_summary)。表示のみで発注はしない。
+
+SIDE_DISPLAY = {"BUY": ("買い", "▲", "buy"), "SELL": ("売り", "▼", "sell")}
+
+NO_TRADE_TYPE_JA = {
+    "NO_TRADE": "見送り",
+    "NONE": "見送り",
+    "MOMENTUM_AVOID": "追随回避",
+    "EVENT_WAIT": "イベント待ち",
+    "CONFIRMATION_ONLY": "確認変数",
+    "DIVERGENCE_WAIT": "乖離解消待ち",
+}
+
+
+def fmt_price(v) -> str:
+    """価格の桁に応じた表示(捏造しない: 非数値は—)。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "—"
+    if f != f:  # NaN
+        return "—"
+    if abs(f) >= 1000:
+        return f"{f:,.0f}"
+    if abs(f) >= 100:
+        return f"{f:,.2f}".rstrip("0").rstrip(".")
+    return f"{f:,.4f}".rstrip("0").rstrip(".")
+
+
+def range_figure(row: dict) -> str:
+    """SL〜TP の価格レンジ図。エントリー帯を面で、SL/TPを目盛で示す。"""
+    pts = {k: row.get(k) for k in ("sl", "entry_low", "entry_high", "tp1", "tp2")}
+    if pts["entry_low"] is None or pts["entry_high"] is None or pts["sl"] is None:
+        return ""
+    vals = [v for v in pts.values() if v is not None]
+    lo, hi = min(vals), max(vals)
+    span = hi - lo
+    if span <= 0:
+        return ""
+    pad = span * 0.07
+    lo -= pad
+    hi += pad
+    span = hi - lo
+    W, H = 560, 66
+
+    def x(v):
+        return round((v - lo) / span * (W - 28) + 14, 1)
+
+    e1, e2 = x(pts["entry_low"]), x(pts["entry_high"])
+    parts = [f'<svg class="range" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="価格レンジ">']
+    parts.append(f'<line x1="14" y1="33" x2="{W - 14}" y2="33" class="rg-track"/>')
+    parts.append(f'<rect x="{min(e1, e2)}" y="27" width="{max(abs(e2 - e1), 4)}" height="12" rx="3" class="rg-entry"/>')
+
+    def tick(v, cls, label, above):
+        xx = x(v)
+        y1, y2 = (20, 33) if above else (33, 46)
+        ty = 14 if above else 60
+        parts.append(f'<line x1="{xx}" y1="{y1}" x2="{xx}" y2="{y2}" class="rg-tick {cls}"/>')
+        parts.append(f'<text x="{xx}" y="{ty}" class="rg-lab {cls}">{label} {fmt_price(v)}</text>')
+
+    tick(pts["sl"], "rg-sl", "SL", False)
+    if pts.get("tp1") is not None:
+        tick(pts["tp1"], "rg-tp", "TP1", True)
+    if pts.get("tp2") is not None:
+        tick(pts["tp2"], "rg-tp", "TP2", False)
+    parts.append(
+        f'<text x="{(e1 + e2) / 2:.1f}" y="14" class="rg-lab rg-entry-lab">IN {fmt_price(pts["entry_low"])}–{fmt_price(pts["entry_high"])}</text>'
+    )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def judgement_card(row: dict) -> str:
+    """当日のA/B級判断1件をカードとして描画する。"""
+    ja, arrow, side_cls = SIDE_DISPLAY.get(str(row.get("side", "")), (str(row.get("side", "?")), "", "flat"))
+    rank = str(row.get("rank", ""))
+    stats = []
+
+    def st(label, value):
+        stats.append(f'<div class="jc-stat"><span>{html.escape(label)}</span><b>{html.escape(value)}</b></div>')
+
+    if row.get("rr") is not None:
+        st("RR", fmt_num(row["rr"]))
+    if row.get("win_prob") is not None:
+        st("勝率(申告)", f"{row['win_prob'] * 100:.0f}%")
+    if row.get("expected_r") is not None:
+        st("期待値", f"{row['expected_r']:+.2f}R")
+    if row.get("risk_pct") is not None:
+        st("リスク", f"{row['risk_pct']:.2f}%")
+    inv = str(row.get("invalidation") or "").strip()
+    inv_html = f'<p class="jc-inv"><span>無効化:</span> {html.escape(inv)}</p>' if inv else ""
+    type_txt = str(row.get("type") or "").strip()
+    type_chip = f'<span class="chip">{html.escape(type_txt)}</span>' if type_txt else ""
+    rank_cls = " rank-a" if rank == "A" else ""
+    return (
+        f'<article class="jcard {side_cls}{rank_cls}">'
+        f'<header><span class="jc-side {side_cls}">{arrow} {html.escape(ja)}</span>'
+        f'<span class="jc-asset">{html.escape(str(row.get("asset", "")))}</span>'
+        f'<span class="chip rank">{html.escape(rank)}級</span>{type_chip}</header>'
+        f"{range_figure(row)}"
+        f'<div class="jc-stats">{"".join(stats)}</div>'
+        f"{inv_html}"
+        f"</article>"
+    )
+
+
+def no_trade_strip(rows: list) -> str:
+    if not rows:
+        return '<p class="notice">見送りの記帳はありません。</p>'
+    chips = []
+    for r in rows:
+        t = str(r.get("type") or "").strip().upper()
+        label = NO_TRADE_TYPE_JA.get(t, t or "見送り")
+        chips.append(f'<span class="nt-chip"><b>{html.escape(str(r.get("asset", "")))}</b><em>{html.escape(label)}</em></span>')
+    return f'<div class="nt-strip">{"".join(chips)}</div>'
+
+
+def prev_results_html(tj: dict) -> str:
+    rows = tj.get("prev_results") or []
+    prev = str(tj.get("prev_date") or "—")
+    if not rows:
+        return f'<p class="notice">前営業日({html.escape(prev)})に方向つきの判断はありませんでした。</p>'
+    tr = []
+    for r in rows:
+        side_ja = {"LONG": "買い", "SHORT": "売り"}.get(str(r.get("side", "")), str(r.get("side", "")))
+        v = r.get("r_close_1d")
+        if str(r.get("data_quality")) == "scale_mismatch":
+            verdict = '<span class="chip warn">水準取り違えのため採点隔離</span>'
+        elif v is None:
+            verdict = '<span class="chip">結果待ち</span>'
+        else:
+            tone = "positive" if v > 0 else "negative" if v < 0 else "neutral"
+            verdict = f'<b class="{tone}">{v:+.2f}R</b> <span class="muted">(1日後・終値基準)</span>'
+        touched = "到達" if r.get("touched") else "未到達*"
+        tr.append(
+            f"<tr><td><b>{html.escape(str(r.get('asset', '')))}</b></td>"
+            f"<td>{html.escape(side_ja)} {html.escape(str(r.get('rank', '')))}級</td>"
+            f"<td>{touched}</td><td>{verdict}</td></tr>"
+        )
+    note = (
+        '<p class="notice">*entry到達は翌営業日以降のバーで判定しており、記帳当日中の到達はまだ拾えません'
+        "(既知の測定上の注意)。Rは終値基準の方向採点で、SL/TP執行の再現ではありません。</p>"
+    )
+    return (
+        f'<div class="table-wrap"><table class="slim"><thead><tr><th>資産</th><th>判断</th><th>entry</th><th>結果</th></tr></thead>'
+        f'<tbody>{"".join(tr)}</tbody></table></div>{note}'
+    )
+
+
+def cum_r_chart(series: list) -> str:
+    """B級判断の累積R(5日終値基準)ライン。単一系列のため凡例なし(タイトルが命名)。"""
+    pts = [p for p in series if isinstance(p.get("cum"), (int, float))]
+    if len(pts) < 2:
+        return '<p class="notice">確定した判断が2件未満のため蓄積待ちです。</p>'
+    W, H, L, R, T, B = 920, 240, 50, 16, 16, 32
+    ys = [p["cum"] for p in pts] + [0.0]
+    ylo, yhi = min(ys), max(ys)
+    if yhi - ylo < 1e-9:
+        yhi = ylo + 1.0
+    pad = (yhi - ylo) * 0.10
+    ylo -= pad
+    yhi += pad
+    n = len(pts)
+
+    def X(i):
+        return L + (W - L - R) * (i / (n - 1))
+
+    def Y(v):
+        return T + (H - T - B) * (1 - (v - ylo) / (yhi - ylo))
+
+    path = " ".join(f"{'M' if i == 0 else 'L'}{X(i):.1f},{Y(p['cum']):.1f}" for i, p in enumerate(pts))
+    area = (
+        f"M{X(0):.1f},{Y(0):.1f} "
+        + " ".join(f"L{X(i):.1f},{Y(p['cum']):.1f}" for i, p in enumerate(pts))
+        + f" L{X(n - 1):.1f},{Y(0):.1f} Z"
+    )
+    dots = "".join(
+        f'<circle cx="{X(i):.1f}" cy="{Y(p["cum"]):.1f}" r="10" class="hit" '
+        f'data-tip="{html.escape(str(p.get("date", "")))} {html.escape(str(p.get("asset", "")))} / この判断 {p["r"]:+.2f}R / 累積 {p["cum"]:+.2f}R"/>'
+        for i, p in enumerate(pts)
+    )
+    ticks = ""
+    for tv in (round(ylo + pad, 1), 0.0, round(yhi - pad, 1)):
+        zero = ' zero' if abs(tv) < 1e-9 else ""
+        ticks += (
+            f'<line x1="{L}" y1="{Y(tv):.1f}" x2="{W - R}" y2="{Y(tv):.1f}" class="gr{zero}"/>'
+            f'<text x="{L - 8}" y="{Y(tv) + 4:.1f}" class="ax">{tv:+.1f}</text>'
+        )
+    last = pts[-1]
+    return (
+        f'<svg class="chart" viewBox="0 0 {W} {H}" role="img" aria-label="B級判断の累積R(5日終値基準)">'
+        f'{ticks}<path d="{area}" class="area"/><path d="{path}" class="line"/>'
+        f'<circle cx="{X(n - 1):.1f}" cy="{Y(last["cum"]):.1f}" r="4" class="dot"/>'
+        f'<text x="{X(n - 1) - 4:.1f}" y="{Y(last["cum"]) - 12:.1f}" class="last">{last["cum"]:+.1f}R</text>{dots}'
+        f'<text x="{L}" y="{H - 8}" class="ax x">{html.escape(str(pts[0].get("date", "")))}</text>'
+        f'<text x="{W - R}" y="{H - 8}" class="ax x end">{html.escape(str(last.get("date", "")))}</text></svg>'
+    )
+
+
+def horizon_chart(bars: list) -> str:
+    """地平線別勝率(B級)。ひとつの指標なので単色・直接ラベル。50%線を参照線に。"""
+    if not bars:
+        return '<p class="notice">確定した判断の蓄積待ちです。</p>'
+    W, H, L, R, T, B = 560, 220, 44, 12, 18, 36
+    bw = 58
+    n = len(bars)
+    gap = (W - L - R - bw * n) / max(n - 1, 1) if n > 1 else 0
+    y0v = T + (H - T - B)
+
+    def Y(v):
+        return T + (H - T - B) * (1 - v)
+
+    parts = [f'<svg class="chart" viewBox="0 0 {W} {H}" role="img" aria-label="地平線別勝率(B級・終値基準)">']
+    for g in (0.0, 0.5, 1.0):
+        zero = ' zero' if abs(g - 0.5) < 1e-9 else ""
+        parts.append(
+            f'<line x1="{L}" y1="{Y(g):.1f}" x2="{W - R}" y2="{Y(g):.1f}" class="gr{zero}"/>'
+            f'<text x="{L - 8}" y="{Y(g) + 4:.1f}" class="ax">{int(g * 100)}%</text>'
+        )
+    for i, b in enumerate(bars):
+        x0 = L + i * (bw + gap)
+        yb = Y(b["rate"])
+        parts.append(
+            f'<rect x="{x0:.1f}" y="{yb:.1f}" width="{bw}" height="{max(y0v - yb, 2):.1f}" rx="4" class="bar" '
+            f'data-tip="{html.escape(str(b["horizon"]))}後: {b["rate"] * 100:.0f}% ({b["wins"]}/{b["n"]})"/>'
+        )
+        parts.append(f'<text x="{x0 + bw / 2:.1f}" y="{yb - 7:.1f}" class="val">{b["rate"] * 100:.0f}%</text>')
+        parts.append(f'<text x="{x0 + bw / 2:.1f}" y="{H - 10}" class="ax x mid">{html.escape(str(b["horizon"]))} (n={b["n"]})</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def summary_pill(label: str, value: str, tone: str) -> str:
+    return (
+        f'<span class="summary-pill pill-{tone}">'
+        f'<span class="pill-k">{html.escape(label)}</span>'
+        f'<span class="pill-v">{html.escape(value)}</span></span>'
+    )
+
+
+PAGE_CSS = """
+:root {
+  --bg:#f4f6fb; --surface:#ffffff; --surface2:#eef2f9; --line:#d9e0ec; --line2:#e7ecf5;
+  --text:#182233; --muted:#5b6880; --accent:#2f5fd0; --accent-soft:rgba(47,95,208,.12);
+  --pos:#147a48; --pos-soft:rgba(20,122,72,.11); --neg:#c02f3c; --neg-soft:rgba(192,47,60,.10);
+  --warn:#8a6100; --warn-soft:rgba(178,131,0,.14); --shadow:0 1px 2px rgba(20,30,55,.06), 0 8px 24px rgba(20,30,55,.06);
+}
+:root[data-theme="dark"] {
+  --bg:#0e1420; --surface:#161e2e; --surface2:#1d2739; --line:#2b3852; --line2:#233047;
+  --text:#e9eefb; --muted:#95a3c0; --accent:#729dff; --accent-soft:rgba(114,157,255,.16);
+  --pos:#3ec39b; --pos-soft:rgba(62,195,155,.14); --neg:#f2808f; --neg-soft:rgba(242,128,143,.12);
+  --warn:#e0b356; --warn-soft:rgba(224,179,86,.15); --shadow:0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#0e1420; --surface:#161e2e; --surface2:#1d2739; --line:#2b3852; --line2:#233047;
+    --text:#e9eefb; --muted:#95a3c0; --accent:#729dff; --accent-soft:rgba(114,157,255,.16);
+    --pos:#3ec39b; --pos-soft:rgba(62,195,155,.14); --neg:#f2808f; --neg-soft:rgba(242,128,143,.12);
+    --warn:#e0b356; --warn-soft:rgba(224,179,86,.15); --shadow:0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
+  }
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; scroll-padding-top:64px; }
+body { margin:0; background:var(--bg); color:var(--text);
+  font-family:system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", "Segoe UI", sans-serif;
+  font-size:14px; line-height:1.65; -webkit-font-smoothing:antialiased; }
+a { color:var(--accent); text-decoration:none; }
+.wrap { max-width:1160px; margin:0 auto; padding:0 20px 56px; }
+.topbar { position:sticky; top:0; z-index:30; background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:blur(10px); border-bottom:1px solid var(--line2); }
+.topbar-in { max-width:1160px; margin:0 auto; padding:10px 20px; display:flex; align-items:center; gap:16px; }
+.brand { font-weight:800; font-size:15px; letter-spacing:.01em; white-space:nowrap; }
+.brand small { color:var(--muted); font-weight:600; margin-left:8px; }
+nav.jump { display:flex; gap:2px; flex:1; overflow-x:auto; }
+nav.jump a { padding:6px 11px; border-radius:999px; color:var(--muted); font-weight:600; font-size:13px; white-space:nowrap; }
+nav.jump a:hover { background:var(--accent-soft); color:var(--accent); }
+#theme-toggle { border:1px solid var(--line); background:var(--surface); color:var(--muted);
+  border-radius:999px; padding:5px 12px; cursor:pointer; font-size:12px; }
+.gen { color:var(--muted); font-size:12px; white-space:nowrap; }
+h1 { font-size:22px; margin:26px 0 4px; }
+.lead { color:var(--muted); margin:0 0 18px; max-width:860px; }
+h2.sec { font-size:17px; margin:34px 0 4px; display:flex; align-items:baseline; gap:10px; }
+h2.sec .n { color:var(--accent); font-weight:800; }
+p.sec-sub { color:var(--muted); margin:0 0 14px; font-size:13px; }
+section.card { background:var(--surface); border:1px solid var(--line2); border-radius:14px;
+  padding:18px 20px; box-shadow:var(--shadow); margin-bottom:14px; }
+section.card > h2 { margin:0 0 6px; font-size:15px; }
+section.card > h3 { margin:18px 0 8px; font-size:12.5px; color:var(--muted); letter-spacing:.05em; }
+.notice { color:var(--muted); font-size:12.5px; margin:8px 0 4px; }
+.muted { color:var(--muted); }
+.pills { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0 6px; }
+.summary-pill { display:flex; flex-direction:column; gap:2px; padding:10px 16px; border-radius:12px;
+  border:1px solid var(--line); background:var(--surface); box-shadow:var(--shadow); min-width:150px; }
+.summary-pill .pill-k { font-size:11px; color:var(--muted); letter-spacing:.03em; }
+.summary-pill .pill-v { font-size:16px; font-weight:800; }
+.pill-good { border-color:color-mix(in srgb, var(--pos) 45%, var(--line)); } .pill-good .pill-v { color:var(--pos); }
+.pill-warn { border-color:color-mix(in srgb, var(--warn) 55%, var(--line)); } .pill-warn .pill-v { color:var(--warn); }
+.pill-bad { border-color:color-mix(in srgb, var(--neg) 55%, var(--line)); } .pill-bad .pill-v { color:var(--neg); }
+.jgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px, 1fr)); gap:14px; }
+.jcard { background:var(--surface); border:1px solid var(--line2); border-left:4px solid var(--line);
+  border-radius:14px; padding:14px 16px 12px; box-shadow:var(--shadow); }
+.jcard.buy { border-left-color:var(--pos); }
+.jcard.sell { border-left-color:var(--neg); }
+.jcard.rank-a { outline:2px solid var(--accent); outline-offset:-1px; }
+.jcard header { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:4px; }
+.jc-side { font-weight:800; font-size:13px; padding:3px 10px; border-radius:999px; }
+.jc-side.buy { color:var(--pos); background:var(--pos-soft); }
+.jc-side.sell { color:var(--neg); background:var(--neg-soft); }
+.jc-asset { font-size:19px; font-weight:800; letter-spacing:.01em; }
+.chip { font-size:11px; font-weight:700; color:var(--muted); background:var(--surface2);
+  border:1px solid var(--line2); padding:2px 9px; border-radius:999px; }
+.chip.rank { color:var(--accent); background:var(--accent-soft); border-color:transparent; }
+.chip.warn { color:var(--warn); background:var(--warn-soft); border-color:transparent; }
+.jc-stats { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.jc-stat { background:var(--surface2); border-radius:9px; padding:6px 11px; display:flex; flex-direction:column; min-width:78px; }
+.jc-stat span { font-size:10.5px; color:var(--muted); }
+.jc-stat b { font-size:14.5px; }
+.jc-inv { margin:10px 0 0; font-size:12px; color:var(--muted); border-top:1px dashed var(--line2); padding-top:8px; }
+.jc-inv span { font-weight:700; }
+svg.range { width:100%; height:66px; display:block; margin-top:8px; }
+.rg-track { stroke:var(--line); stroke-width:2; }
+.rg-entry { fill:var(--accent); opacity:.75; }
+.rg-tick { stroke-width:2; } .rg-tick.rg-sl { stroke:var(--neg); } .rg-tick.rg-tp { stroke:var(--pos); }
+.rg-lab { font-size:10.5px; fill:var(--muted); text-anchor:middle; font-weight:600; }
+.rg-lab.rg-sl { fill:var(--neg); } .rg-lab.rg-tp { fill:var(--pos); } .rg-lab.rg-entry-lab { fill:var(--accent); font-weight:700; }
+.nt-strip { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+.nt-chip { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--line2); background:var(--surface2);
+  border-radius:999px; padding:5px 12px; font-size:12px; }
+.nt-chip b { font-size:12.5px; } .nt-chip em { font-style:normal; color:var(--muted); }
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:9px; margin-top:8px; }
+.stat { background:var(--surface2); border:1px solid var(--line2); border-radius:10px; padding:10px 12px; }
+.stat-label { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+.stat-value { margin-top:4px; font-size:16px; font-weight:750; overflow-wrap:anywhere; }
+.tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:4px 0 14px; }
+.tile { background:var(--surface); border:1px solid var(--line2); border-radius:12px; padding:12px 14px; box-shadow:var(--shadow); }
+.tile .t-k { font-size:11px; color:var(--muted); }
+.tile .t-v { font-size:22px; font-weight:800; margin-top:2px; }
+.tile .t-s { font-size:11px; color:var(--muted); margin-top:2px; }
+.tile .t-v.positive { color:var(--pos); } .tile .t-v.negative { color:var(--neg); } .tile .t-v.accent { color:var(--accent); }
+.charts { display:grid; grid-template-columns:1.6fr 1fr; gap:14px; }
+@media (max-width:900px) { .charts { grid-template-columns:1fr; } }
+svg.chart { width:100%; height:auto; display:block; }
+svg.chart .gr { stroke:var(--line2); stroke-width:1; }
+svg.chart .gr.zero { stroke:var(--muted); stroke-dasharray:4 4; }
+svg.chart .ax { font-size:11px; fill:var(--muted); text-anchor:end; }
+svg.chart .ax.x { text-anchor:start; } svg.chart .ax.x.end { text-anchor:end; } svg.chart .ax.x.mid { text-anchor:middle; }
+svg.chart .line { fill:none; stroke:var(--accent); stroke-width:2.25; stroke-linejoin:round; }
+svg.chart .area { fill:var(--accent); opacity:.10; }
+svg.chart .dot { fill:var(--accent); }
+svg.chart .last { font-size:12.5px; font-weight:800; fill:var(--accent); text-anchor:end; }
+svg.chart .bar { fill:var(--accent); opacity:.85; }
+svg.chart .bar:hover { opacity:1; }
+svg.chart .val { font-size:12px; font-weight:750; fill:var(--text); text-anchor:middle; }
+svg.chart .hit { fill:transparent; cursor:crosshair; }
+svg.chart .hit:hover { fill:var(--accent); opacity:.25; }
+.table-wrap { overflow-x:auto; border:1px solid var(--line2); border-radius:10px; margin-top:8px; }
+table { width:100%; border-collapse:collapse; min-width:680px; }
+table.slim { min-width:0; }
+th, td { padding:8px 11px; border-bottom:1px solid var(--line2); text-align:left; vertical-align:top; font-size:13px; }
+tbody tr:last-child td { border-bottom:none; }
+th { color:var(--muted); background:var(--surface2); font-size:11.5px; letter-spacing:.03em; position:sticky; top:0; }
+tr:hover td { background:var(--accent-soft); }
+.badge { display:inline-flex; align-items:center; border-radius:999px; padding:2px 8px; font-size:11.5px; font-weight:700; background:var(--surface2); color:var(--muted); }
+.badge-a, .badge-trade, .badge-strong_positive, .badge-positive { background:var(--pos-soft); color:var(--pos); }
+.badge-b, .badge-watch, .badge-medium { background:var(--warn-soft); color:var(--warn); }
+.badge-no_trade, .badge-none, .badge-data_insufficient, .badge-insufficient_data { background:var(--surface2); color:var(--muted); }
+.badge-strong_negative, .badge-negative, .badge-high { background:var(--neg-soft); color:var(--neg); }
+.positive { color:var(--pos); font-weight:700; }
+.negative { color:var(--neg); font-weight:700; }
+.neutral { color:var(--muted); }
+.empty { color:var(--muted); padding:12px 14px; border:1px dashed var(--line); border-radius:10px; font-size:13px; }
+ul { margin:8px 0 0; padding-left:20px; color:var(--muted); }
+details.group { margin:10px 0 14px; }
+details.group > summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px;
+  padding:13px 16px; background:var(--surface); border:1px solid var(--line2); border-radius:12px;
+  font-weight:750; font-size:14px; box-shadow:var(--shadow); user-select:none; }
+details.group > summary::-webkit-details-marker { display:none; }
+details.group > summary::after { content:"開く"; margin-left:auto; font-size:11.5px; color:var(--accent); font-weight:600; }
+details.group[open] > summary::after { content:"閉じる"; }
+details.group > summary .g-sub { color:var(--muted); font-weight:500; font-size:12px; }
+details.group > .g-body { padding-top:12px; }
+#tooltip { position:fixed; z-index:99; pointer-events:none; background:var(--text); color:var(--bg);
+  font-size:12px; font-weight:600; padding:6px 10px; border-radius:8px; opacity:0; transition:opacity .08s; max-width:320px; }
+footer.foot { color:var(--muted); font-size:12px; margin-top:26px; border-top:1px solid var(--line2); padding-top:14px; }
+"""
+
+PAGE_JS = """
+(function () {
+  var KEY = "tso-theme";
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  if (saved === "light" || saved === "dark") document.documentElement.setAttribute("data-theme", saved);
+  var btn = document.getElementById("theme-toggle");
+  function label() {
+    var t = document.documentElement.getAttribute("data-theme");
+    if (!t) t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    btn.textContent = t === "dark" ? "ライト表示" : "ダーク表示";
+  }
+  btn.addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme");
+    if (!cur) cur = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    var next = cur === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    label();
+  });
+  label();
+
+  var tip = document.getElementById("tooltip");
+  document.addEventListener("mousemove", function (ev) {
+    var t = ev.target && ev.target.closest ? ev.target.closest("[data-tip]") : null;
+    if (t) {
+      tip.textContent = t.getAttribute("data-tip");
+      tip.style.opacity = "1";
+      var x = Math.min(ev.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+      var y = Math.max(ev.clientY - tip.offsetHeight - 12, 8);
+      tip.style.left = x + "px";
+      tip.style.top = y + "px";
+    } else {
+      tip.style.opacity = "0";
+    }
+  }, { passive: true });
+})();
+"""
+
+
 def render_html(
     *,
     generated: str,
@@ -585,6 +1012,8 @@ def render_html(
     similar_table: pd.DataFrame,
     prediction_log: dict,
     apply_false: bool,
+    todays_judgements: dict,
+    performance_series: dict,
     summary: dict,
 ) -> str:
     top_positive = reason_table[reason_table["reliability_label"].isin(["strong_positive", "positive"])].head(10) if not reason_table.empty and "reliability_label" in reason_table.columns else pd.DataFrame()
@@ -976,152 +1405,147 @@ def render_html(
         ]
     )
     safe = "".join(f"<li>{html.escape(note)}</li>" for note in SAFETY_NOTES)
-    # === ひとめ要約バナー（投資判断の最優先サマリを最上部に） ===
-    def _pill(label: str, value: str, tone: str) -> str:
-        return (
-            f'<span class="summary-pill pill-{tone}">'
-            f'<span class="pill-k">{html.escape(label)}</span>'
-            f'<span class="pill-v">{html.escape(value)}</span></span>'
-        )
 
+    # === ヘッダーピル(信頼と状態の一次情報) ===
+    tj = todays_judgements or {}
+    perf = performance_series or {}
+    gen_date = (generated_at_jst or generated or "")[:10]
+    ledger_date = str(tj.get("ledger_date") or "")
+    if not tj.get("available"):
+        ledger_pill = summary_pill("台帳の記帳", "未取得", "bad")
+    elif ledger_date == gen_date:
+        ledger_pill = summary_pill("台帳の記帳", f"{ledger_date}(本日分あり)", "good")
+    else:
+        ledger_pill = summary_pill("台帳の記帳", f"最終 {ledger_date}", "warn")
     _health = str(data_health.get("health_status", "")).strip().lower()
     _health_tone = {"healthy": "good", "watch": "warn", "degraded": "warn", "critical": "bad"}.get(_health, "neutral")
     _health_txt = display_value(_health) if _health else "未取得"
-    _a = int(numeric_or(signal_counts.get("A", 0), 0))
-    _b = int(numeric_or(signal_counts.get("B", 0), 0))
-    _nt = int(numeric_or(signal_counts.get("NO_TRADE", 0), 0))
-    _sig_txt = f"シグナル候補 {_a + _b} / 見送り {_nt}"
-    _sig_tone = "warn" if (_a + _b) > 0 else "neutral"
-    _mat = str(eval_summary.get("evaluation_maturity", "")).strip().lower()
-    _closed = int(numeric_or(eval_summary.get("closed", 0), 0))
-    _mat_txt = {"no_signals": "データなし", "accumulating": "蓄積中", "active": "活動中"}.get(_mat, _mat or "未取得")
-    _mat_tone = {"active": "good", "accumulating": "warn", "no_signals": "neutral"}.get(_mat, "neutral")
-    _eval_txt = f"{_mat_txt}（決着 {_closed}）"
     _mode_raw = str(mode.get("next_week_mode", "")).strip()
     _mode_txt = display_value(_mode_raw) if _mode_raw and _mode_raw.lower() != "not available" else "未取得"
     _mode_tone = {"attack": "good", "aggressive": "good", "defense": "warn", "defensive": "warn", "normal": "neutral"}.get(_mode_raw.lower(), "neutral")
-    summary_banner = (
-        '<section class="summary-banner">'
-        + _pill("計器の健全性", _health_txt, _health_tone)
-        + _pill("当日シグナル", _sig_txt, _sig_tone)
-        + _pill("評価の蓄積", _eval_txt, _mat_tone)
-        + _pill("今週のモード", _mode_txt, _mode_tone)
-        + _pill("予測ノート B級5日勝率", str(prediction_log.get("b_rank_win_rate_5d", "—")), "good" if prediction_log.get("available") else "neutral")
-        + "</section>"
+    header_pills = (
+        ledger_pill
+        + summary_pill("計器の健全性", _health_txt, _health_tone)
+        + summary_pill("今週のモード", _mode_txt, _mode_tone)
+        + summary_pill("B級 5日勝率(終値)", str(prediction_log.get("b_rank_win_rate_5d", "—")), "good" if prediction_log.get("available") else "neutral")
     )
+
+    # === 01 今日の判断 ===
+    if not tj.get("available"):
+        today_block = '<div class="empty">台帳(data/signal_log.csv)が読めませんでした。取込フローを確認してください。</div>'
+    elif not tj.get("actionable"):
+        today_block = f'<div class="empty">{html.escape(ledger_date)} の方向つき判断はありません(全資産 見送り)。</div>'
+    else:
+        today_block = f'<div class="jgrid">{"".join(judgement_card(r) for r in tj.get("actionable") or [])}</div>'
+    stale_note = ""
+    if tj.get("available") and ledger_date and ledger_date != gen_date:
+        stale_note = (
+            f'<p class="notice">⚠ 表示は最終記帳 {html.escape(ledger_date)} 分です。'
+            "今朝のレポートを台帳へ取り込むと、ここが本日分に更新されます。</p>"
+        )
+
+    # === 02 成績タイル ===
+    tiles = perf.get("tiles") or {}
+    calib = perf.get("calibration") or {}
+
+    def _tile(k: str, v: str, sub: str = "", cls: str = "") -> str:
+        sub_html = f'<div class="t-s">{html.escape(sub)}</div>' if sub else ""
+        return f'<div class="tile"><div class="t-k">{html.escape(k)}</div><div class="t-v {cls}">{html.escape(v)}</div>{sub_html}</div>'
+
+    _mean_r = tiles.get("mean_r_5d")
+    _mean_cls = "positive" if isinstance(_mean_r, (int, float)) and _mean_r > 0 else "negative" if isinstance(_mean_r, (int, float)) and _mean_r < 0 else ""
+    _calib_v = f"{calib['stated_mean']:.2f}→{calib['realized_rate']:.2f}" if calib else "—"
+    _calib_s = f"申告→実現(5日勝率)・n={calib['n']}" if calib else "確定データの蓄積待ち"
+    tiles_html = "".join([
+        _tile("記録した判断", str(tiles.get("total_rows", 0)), "全ランク・全資産"),
+        _tile("B級 平均R(5日)", (f"{_mean_r:+.2f}R" if isinstance(_mean_r, (int, float)) else "—"), f"確定 {tiles.get('b_scored', 0)}件", _mean_cls),
+        _tile("較正", _calib_v, _calib_s, "accent"),
+        _tile("結果待ち", str(tiles.get("awaiting", 0)), "採点地平線が未確定"),
+        _tile("採点隔離", str(tiles.get("suspect", 0)), "水準取り違え等を除外"),
+    ])
+    min_n = prediction_log.get("min_samples", 30)
 
     return f"""<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tactical Swing OS ダッシュボード</title>
-  <style>
-    :root {{ color-scheme: dark; --bg:#0b1020; --panel:#121a2e; --panel2:#17213a; --text:#edf2ff; --muted:#98a6c7; --line:#263553; --pos:#65d98c; --neg:#ff7b86; --warn:#ffd166; --accent:#7aa2ff; }}
-    * {{ box-sizing: border-box; }}
-    body {{ margin:0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }}
-    header {{ padding:28px; background:linear-gradient(135deg, #111b35, #0c1224); border-bottom:1px solid var(--line); }}
-    h1 {{ margin:0 0 10px; font-size:28px; }}
-    h2 {{ margin:0 0 14px; font-size:18px; }}
-    h3 {{ margin:18px 0 10px; font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }}
-    main {{ padding:20px; display:grid; gap:18px; }}
-    .meta {{ display:flex; flex-wrap:wrap; gap:10px; color:var(--muted); font-size:13px; }}
-    .lead {{ margin:14px 0 0; max-width:960px; color:var(--muted); line-height:1.7; }}
-    .card {{ background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; box-shadow:0 8px 24px rgba(0,0,0,.18); }}
-    .grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:10px; }}
-    .stat {{ background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:12px; }}
-    .stat-label {{ color:var(--muted); font-size:12px; }}
-    .stat-value {{ margin-top:6px; font-size:20px; font-weight:700; }}
-    .table-wrap {{ overflow-x:auto; border:1px solid var(--line); border-radius:8px; }}
-    table {{ width:100%; border-collapse:collapse; min-width:720px; }}
-    th, td {{ padding:9px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; font-size:13px; }}
-    th {{ color:var(--muted); background:#10182b; position:sticky; top:0; }}
-    tr:hover td {{ background:rgba(122,162,255,.05); }}
-    .badge {{ display:inline-flex; align-items:center; border-radius:999px; padding:2px 8px; font-size:12px; font-weight:700; background:#273554; color:#dbe6ff; }}
-    .badge-a, .badge-trade, .badge-strong_positive, .badge-positive {{ background:rgba(101,217,140,.16); color:var(--pos); }}
-    .badge-b, .badge-watch, .badge-medium {{ background:rgba(255,209,102,.16); color:var(--warn); }}
-    .badge-no_trade, .badge-none, .badge-data_insufficient, .badge-insufficient_data {{ background:rgba(152,166,199,.16); color:var(--muted); }}
-    .badge-strong_negative, .badge-negative, .badge-high {{ background:rgba(255,123,134,.16); color:var(--neg); }}
-    .positive {{ color:var(--pos); font-weight:700; }}
-    .negative {{ color:var(--neg); font-weight:700; }}
-    .neutral {{ color:var(--muted); }}
-    .empty {{ color:var(--muted); padding:14px; border:1px dashed var(--line); border-radius:8px; }}
-    .notice {{ color:var(--muted); margin:8px 0 12px; }}
-    ul {{ margin:8px 0 0; padding-left:20px; color:var(--muted); }}
-    .summary-banner {{ display:flex; flex-wrap:wrap; gap:12px; padding:16px; background:var(--panel); border:1px solid var(--line); border-radius:8px; }}
-    .summary-pill {{ display:flex; flex-direction:column; gap:3px; padding:10px 16px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); min-width:140px; }}
-    .summary-pill .pill-k {{ font-size:11px; color:var(--muted); letter-spacing:.04em; }}
-    .summary-pill .pill-v {{ font-size:17px; font-weight:800; }}
-    .pill-good {{ border-color:rgba(101,217,140,.55); }} .pill-good .pill-v {{ color:var(--pos); }}
-    .pill-warn {{ border-color:rgba(255,209,102,.55); }} .pill-warn .pill-v {{ color:var(--warn); }}
-    .pill-bad {{ border-color:rgba(255,123,134,.65); }} .pill-bad .pill-v {{ color:var(--neg); }}
-    .pill-neutral .pill-v {{ color:var(--text); }}
-    h2.tier {{ margin:14px 0 0; padding:10px 14px; font-size:16px; border-left:4px solid var(--accent); background:rgba(122,162,255,.10); border-radius:4px; color:var(--text); }}
-    details.tier4 > summary {{ cursor:pointer; padding:10px 14px; font-size:15px; font-weight:700; border-left:4px solid var(--muted); background:rgba(152,166,199,.10); border-radius:4px; color:var(--muted); }}
-    details.tier4[open] > summary {{ margin-bottom:14px; }}
-    details.tier4 > section.card {{ margin-top:14px; }}
-  </style>
+  <title>Tactical Swing OS</title>
+  <style>{PAGE_CSS}</style>
 </head>
 <body>
-  <header>
-    <h1>Tactical Swing OS ダッシュボード</h1>
-    <div class="meta">
-      <span>生成日時（JST）: {html.escape(generated_at_jst or generated)}</span>
-      <span>Actions実行時刻（UTC）: {html.escape(generated_at_utc)}</span>
-      <span>データ基準日: {html.escape(display_optional(data_reference_date))}</span>
-      <span>データソース: {html.escape(display_source(source))}</span>
-      <span>最新シグナル日: {html.escape(display_optional(latest_dates["latest_signal_date"]))}</span>
-      <span>最新評価日: {html.escape(display_optional(latest_dates["latest_evaluation_date"]))}</span>
+  <div id="tooltip" role="status"></div>
+  <div class="topbar"><div class="topbar-in">
+    <span class="brand">Tactical Swing OS<small>研究用・実売買なし</small></span>
+    <nav class="jump">
+      <a href="#today">今日</a><a href="#perf">成績</a><a href="#verify">検証</a><a href="#health">健康</a><a href="#lab">研究ログ</a>
+    </nav>
+    <span class="gen">{html.escape(generated_at_jst or generated)}</span>
+    <button id="theme-toggle" type="button">表示切替</button>
+  </div></div>
+  <main class="wrap">
+    <div class="pills">{header_pills}</div>
+
+    <h2 class="sec" id="today"><span class="n">01</span>今日の判断 <span class="muted" style="font-size:12px; font-weight:600">記帳日 {html.escape(ledger_date or "—")}</span></h2>
+    <p class="sec-sub">手動予測台帳の最新記帳。entry帯へ価格が到達した場合のみ検討する監視案であり、成行の指示ではありません。最終判断は人間が行います。</p>
+    {stale_note}
+    {today_block}
+    <section class="card"><h2>見送り(NO_TRADE)</h2>{no_trade_strip(tj.get("no_trade") or [])}</section>
+    <section class="card"><h2>前営業日の答え合わせ</h2>{prev_results_html(tj)}</section>
+
+    <h2 class="sec" id="perf"><span class="n">02</span>成績と較正</h2>
+    <p class="sec-sub">終値基準の方向採点です(SL/TP執行の再現ではありません)。判断数が{min_n}件未満の集計は「データ不足」として断定しません。</p>
+    <div class="tiles">{tiles_html}</div>
+    <div class="charts">
+      <section class="card"><h2>B級判断の累積R(5日終値基準)</h2>{cum_r_chart(perf.get("cum_r") or [])}</section>
+      <section class="card"><h2>地平線別勝率(B級)</h2>{horizon_chart(perf.get("horizon_win") or [])}</section>
     </div>
-    <p class="lead">{html.escape(DASHBOARD_DESCRIPTION)}</p>
-  </header>
-    <main>
-    {summary_banner}
+    <section class="card"><h2>予測ノートの成績</h2><p class="notice">毎朝の相場判断(買い・売り・見送り)をすべて記録し、1・3・5・10営業日後の実際の値動きで採点しています。見送りも採点対象です。</p>{'<div class="empty">予測ノート未取得</div>' if not prediction_log.get('available') else f'<div class="grid">{prediction_stats}</div>'}<h3>ランク別の成績(A=自信あり / B=監視 / NO_TRADE=見送り)</h3>{table_html(prediction_rank_table, ["rank", "judgements", "with_levels", "win_5d", "win_10d", "mean_r_5d", "basis"], "採点データなし")}<h3>直近の判断(新しい順)</h3>{table_html(prediction_recent_table, ["date", "asset", "side", "rank", "r_close_5d", "r_close_10d", "result_5d", "status"], "判断記録なし")}</section>
 
-    <h2 class="tier">① 今日の売買判断（何を・どの向きで・どこで）</h2>
-    <section class="card"><h2>予測ノートの成績（毎日の相場判断を後日採点）</h2><p class="notice">ChatGPTとの毎朝の相場判断（買い・売り・見送り）をすべて記録し、1・3・5・10営業日後の実際の値動きで採点しています。見送りの判断も記録されます。判断数が{prediction_log.get("min_samples", 30)}件に満たない集計は「データ不足」と明記し、断定しません。表示のみで自動売買はしません。</p>{'<div class="empty">予測ノート未取得</div>' if not prediction_log.get('available') else f'<div class="grid">{prediction_stats}</div>'}<h3>ランク別の成績（A=自信あり / B=監視 / NO_TRADE=見送り）</h3>{table_html(prediction_rank_table, ["rank","judgements","with_levels","win_5d","win_10d","mean_r_5d","basis"], "採点データなし")}<h3>直近の判断（新しい順）</h3>{table_html(prediction_recent_table, ["date","asset","side","rank","r_close_5d","r_close_10d","result_5d","status"], "判断記録なし")}</section>
-    <section class="card"><h2>今日のシグナル候補（システムが選んだ監視対象）</h2><div class="grid">{signal_stats}</div>{table_html(signals, ["asset","side","rank","type","recommended_action","signal_strength","setup_quality_score","entry_quality_score","direction_confidence","reason_codes","no_trade_reason"])}</section>
-    <section class="card"><h2>今週・今月のリスク上限モード</h2><div class="grid">{mode_stats}</div></section>
-    <section class="card"><h2>今日と似た過去の局面（そのあと相場はどう動いたか）</h2><p class="notice">過去ニュース局面との意味的類似検索です。表示・記録のみで signal score には接続していません（connected_to_signal_score=false）。実売買・発注は行いません。</p>{'<div class="empty">類似局面検索 未取得（Narrative Memory 蓄積待ち）</div>' if not similar_narrative.get('available') else f'<div class="grid">{similar_stats}</div>'}<h3>類似局面と 5/10/20営業日後の実リターン</h3>{table_html(similar_table, ["similar_rank","similar_date","similarity","asset","fwd_return_5d","fwd_return_10d","fwd_return_20d","outcome_status"], "類似局面なし（データ蓄積で自動表示）")}</section>
-    <section class="card"><h2>資産配分の目安</h2>{'<div class="empty">ポートフォリオ層未取得</div>' if not portfolio_layer.get('available') else f'<div class="grid">{portfolio_stats}</div>'}<h3>配分候補 上位</h3>{table_html(portfolio_top, ["asset","allocation_score","portfolio_weight_candidate","confidence","risk_class","risk_role","recommended_exposure","cash_ratio_candidate","latest_rank","latest_side","rationale"], "配分候補なし")}</section>
-
-    <h2 class="tier">② 予測は当たっているか（結果の検証）</h2>
-    <section class="card"><h2>過去シグナルの結果まとめ</h2><div class="grid">{eval_stats}</div></section>
+    <details class="group" id="verify"><summary><span class="n" style="color:var(--accent)">03</span> 検証 — 予測は当たっているか<span class="g-sub">評価・理由コード・見送り検証・類似局面・内部エンジン</span></summary><div class="g-body">
+    <section class="card"><h2>過去シグナルの結果まとめ(内部エンジン)</h2><div class="grid">{eval_stats}</div></section>
     <section class="card"><h2>直近の評価結果</h2>{'<div class="empty">最新評価ビュー未取得</div>' if not latest_eval_summary.get('available') else f'<div class="grid">{latest_eval_stats}</div>'}</section>
-    <section class="card"><h2>結果待ちのシグナル</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id","asset","side","rank","previous_outcome","outcome","r_multiple","error_type"], "直近決着シグナルなし")}</section>
-    <section class="card"><h2>資産別成績</h2>{table_html(asset_table, ["asset","signals","evaluations","win_rate","total_r","average_r","missed_opportunity_count"])}</section>
-    <section class="card"><h2>判断理由ごとの成績（どの根拠が当たるか）</h2><h3>プラス寄与が大きい理由</h3>{table_html(top_positive, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>マイナス寄与が大きい理由</h3>{table_html(top_negative, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}<h3>データ不足</h3>{table_html(insufficient, ["reason_code","signals_count","evaluated_count","win_rate","average_r","total_r","reliability_label"])}</section>
-    <section class="card"><h2>見送り判断の検証（見送って正解だったか）</h2>{table_html(no_trade_table, ["no_trade_reason","count","missed_opportunity_count","average_mfe_r","assessment"], "見送り理由データなし")}</section>
-    <h2 class="tier">③ システムの健康状態（このデータを信じてよいか）</h2>
-    <section class="card"><h2>データの鮮度チェック</h2><p class="notice">各分析レイヤーの最終生成時刻・行数・鮮度を一覧化します。古い(stale)・空(empty)・欠損(missing)・unavailableなデータを正常と誤読しないためのガードです。表示専用でweights.jsonは更新しません。</p>{'<div class="empty">Data Health未取得</div>' if not data_health.get('available') else f'<div class="grid">{data_health_stats}</div>'}<h3>レイヤー別 鮮度</h3>{table_html(data_health_table, ["layer","status","last_generated","age_hours","row_count","threshold_hours","cadence"], "レイヤー情報なし")}</section>
+    <section class="card"><h2>結果待ちのシグナル</h2>{'<div class="empty">Pending再評価未取得</div>' if not pending_summary.get('available') else f'<div class="grid">{pending_stats}</div>'}<h3>直近決着シグナル上位5件</h3>{table_html(pending_closed, ["signal_id", "asset", "side", "rank", "previous_outcome", "outcome", "r_multiple", "error_type"], "直近決着シグナルなし")}</section>
+    <section class="card"><h2>資産別成績</h2>{table_html(asset_table, ["asset", "signals", "evaluations", "win_rate", "total_r", "average_r", "missed_opportunity_count"])}</section>
+    <section class="card"><h2>判断理由ごとの成績(どの根拠が当たるか)</h2><h3>プラス寄与が大きい理由</h3>{table_html(top_positive, ["reason_code", "signals_count", "evaluated_count", "win_rate", "average_r", "total_r", "reliability_label"])}<h3>マイナス寄与が大きい理由</h3>{table_html(top_negative, ["reason_code", "signals_count", "evaluated_count", "win_rate", "average_r", "total_r", "reliability_label"])}<h3>データ不足</h3>{table_html(insufficient, ["reason_code", "signals_count", "evaluated_count", "win_rate", "average_r", "total_r", "reliability_label"])}</section>
+    <section class="card"><h2>見送り判断の検証(見送って正解だったか)</h2>{table_html(no_trade_table, ["no_trade_reason", "count", "missed_opportunity_count", "average_mfe_r", "assessment"], "見送り理由データなし")}</section>
+    <section class="card"><h2>今日と似た過去の局面</h2><p class="notice">過去ニュース局面との意味的類似検索です。表示・記録のみで signal score には接続していません。</p>{'<div class="empty">類似局面検索 未取得(Narrative Memory 蓄積待ち)</div>' if not similar_narrative.get('available') else f'<div class="grid">{similar_stats}</div>'}<h3>類似局面と 5/10/20営業日後の実リターン</h3>{table_html(similar_table, ["similar_rank", "similar_date", "similarity", "asset", "fwd_return_5d", "fwd_return_10d", "fwd_return_20d", "outcome_status"], "類似局面なし(データ蓄積で自動表示)")}</section>
+    <section class="card"><h2>資産配分の目安</h2>{'<div class="empty">ポートフォリオ層未取得</div>' if not portfolio_layer.get('available') else f'<div class="grid">{portfolio_stats}</div>'}<h3>配分候補 上位</h3>{table_html(portfolio_top, ["asset", "allocation_score", "portfolio_weight_candidate", "confidence", "risk_class", "risk_role", "recommended_exposure", "cash_ratio_candidate", "latest_rank", "latest_side", "rationale"], "配分候補なし")}</section>
+    <section class="card"><h2>参考: 内部シグナルエンジンの当日候補</h2><p class="notice">ライブ評価ループ(generate_signal)の出力です。台帳の記帳判断とは別系統の研究用シグナルです。</p><div class="grid">{signal_stats}</div>{table_html(signals, ["asset", "side", "rank", "type", "recommended_action", "signal_strength", "setup_quality_score", "entry_quality_score", "direction_confidence", "reason_codes", "no_trade_reason"])}</section>
+    <section class="card"><h2>今週・今月のリスク上限モード</h2><div class="grid">{mode_stats}</div></section>
+    </div></details>
+
+    <details class="group" id="health"><summary><span class="n" style="color:var(--accent)">04</span> システムの健康<span class="g-sub">このデータを信じてよいか — 鮮度・監査・安全チェック</span></summary><div class="g-body">
+    <section class="card"><h2>データの鮮度チェック</h2><p class="notice">古い(stale)・空(empty)・欠損(missing)のデータを正常と誤読しないためのガードです。</p>{'<div class="empty">Data Health未取得</div>' if not data_health.get('available') else f'<div class="grid">{data_health_stats}</div>'}<h3>レイヤー別 鮮度</h3>{table_html(data_health_table, ["layer", "status", "last_generated", "age_hours", "row_count", "threshold_hours", "cadence"], "レイヤー情報なし")}</section>
     <section class="card"><h2>時刻の整合性チェック</h2>{'<div class="empty">Datetime Audit未取得</div>' if not datetime_health.get('available') else f'<div class="grid">{datetime_stats}</div>'}</section>
     <section class="card"><h2>システム状態</h2><div class="grid">{system_stats}</div></section>
-    <section class="card"><h2>自動安全チェック（危険な提案の検出）</h2><p class="notice">提案レイヤー(Rule/Model State/Weights Patch/Auto Calibration/AI Feedback)を横断レビューし、自動適用違反・サンプル不足・過剰最適化・矛盾・過信表現を検出する敵対的監査です。自動適用せず警告のみ。weights.jsonも更新しません。</p>{'<div class="empty">Adversarial Review未取得</div>' if not adversarial_review.get('available') else f'<div class="grid">{adversarial_review_stats}</div>'}<h3>停止 / 高リスク / 警告 の詳細</h3>{table_html(adversarial_review_table[adversarial_review_table['severity'].isin(['warning','high_risk','blocked'])] if (not adversarial_review_table.empty and 'severity' in adversarial_review_table.columns) else adversarial_review_table, ["source_type","target","finding_category","severity","evidence","recommended_action"], "危険兆候の検出なし(または未取得)")}</section>
-    <section class="card"><h2>未来情報の混入チェック（後出し防止）</h2><p class="notice">ニュース/AI要約への未来情報・評価結果の混入を検出する研究プロセス監査です。自動売買判断ではなく、weights.jsonも更新しません。</p>{'<div class="empty">Narrative Lookahead Audit未取得</div>' if not narrative_lookahead.get('available') else f'<div class="grid">{narrative_lookahead_stats}</div>'}<h3>警告 / 高リスク / 停止 の詳細</h3>{table_html(narrative_lookahead_table[narrative_lookahead_table['lookahead_risk_level'].isin(['warning','high_risk','blocked'])] if (not narrative_lookahead_table.empty and 'lookahead_risk_level' in narrative_lookahead_table.columns) else narrative_lookahead_table, ["source_type","source_timing_class","lookahead_risk_level","lookahead_score","issue_type","detected_terms","recommended_action","text_excerpt"], "混入検出なし(または未取得)")}</section>
-    <section class="card"><h2>監査レポート</h2><p class="notice">統合状態確認用のシステム監査です。</p><div class="grid">{audit_report_stats}</div></section>
+    <section class="card"><h2>自動安全チェック(危険な提案の検出)</h2><p class="notice">提案レイヤーを横断レビューし、自動適用違反・サンプル不足・過剰最適化・矛盾を検出する敵対的監査です。警告のみで自動適用しません。</p>{'<div class="empty">Adversarial Review未取得</div>' if not adversarial_review.get('available') else f'<div class="grid">{adversarial_review_stats}</div>'}<h3>停止 / 高リスク / 警告 の詳細</h3>{table_html(adversarial_review_table[adversarial_review_table['severity'].isin(['warning', 'high_risk', 'blocked'])] if (not adversarial_review_table.empty and 'severity' in adversarial_review_table.columns) else adversarial_review_table, ["source_type", "target", "finding_category", "severity", "evidence", "recommended_action"], "危険兆候の検出なし(または未取得)")}</section>
+    <section class="card"><h2>未来情報の混入チェック(後出し防止)</h2>{'<div class="empty">Narrative Lookahead Audit未取得</div>' if not narrative_lookahead.get('available') else f'<div class="grid">{narrative_lookahead_stats}</div>'}<h3>警告 / 高リスク / 停止 の詳細</h3>{table_html(narrative_lookahead_table[narrative_lookahead_table['lookahead_risk_level'].isin(['warning', 'high_risk', 'blocked'])] if (not narrative_lookahead_table.empty and 'lookahead_risk_level' in narrative_lookahead_table.columns) else narrative_lookahead_table, ["source_type", "source_timing_class", "lookahead_risk_level", "lookahead_score", "issue_type", "detected_terms", "recommended_action", "text_excerpt"], "混入検出なし(または未取得)")}</section>
+    <section class="card"><h2>監査レポート</h2><div class="grid">{audit_report_stats}</div></section>
+    <section class="card"><h2>準備中の分析(データが貯まると自動で動き出します)</h2><p class="notice">以下は蓄積待ちであり、壊れているのではありません。</p><div class="table-wrap"><table class="slim"><thead><tr><th>分析</th><th>状態</th></tr></thead><tbody>{preparing_rows}</tbody></table></div></section>
+    </div></details>
 
-    <section class="card"><h2>準備中の分析（データが貯まると自動で動き出します）</h2><p class="notice">以下はまだ判断材料になる量のデータがありません。壊れているのではなく、蓄積待ちです。</p><table><thead><tr><th>分析</th><th>状態</th></tr></thead><tbody>{preparing_rows}</tbody></table></section>
-
-    <details class="tier4"><summary>④ 研究の内部データ（開発者向け・クリックで展開）</summary>
-    <section class="card"><h2>確信度と的中率のズレ（キャリブレーション）</h2><p class="notice">AIの確信度を採点する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Prediction Calibration未取得</div>' if not prediction_calibration.get('available') else f'<div class="grid">{prediction_calibration_stats}</div>'}<h3>Rank別キャリブレーション</h3>{table_html(prediction_calibration_table, ["rank","implied_probability","closed_count","hit_rate","calibration_gap","brier_score","p_value","calibration_verdict","recommended_action"], "キャリブレーションデータなし")}</section>
-    <section class="card"><h2>ニュース解釈の信頼性</h2><p class="notice">ナラティブの統計的信頼性を検定する分析専用層です。weights.jsonは更新しません。</p>{'<div class="empty">Narrative Reliability未取得</div>' if not narrative_reliability.get('available') else f'<div class="grid">{narrative_reliability_stats}</div>'}<h3>ナラティブ別信頼性</h3>{table_html(narrative_reliability_table, ["narrative","closed_count","win_rate","average_r","p_value","reliability_label","recommended_action"], "ナラティブ信頼性データなし")}</section>
-    <section class="card"><h2>ニュース要約（材料の整理）</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
+    <details class="group" id="lab"><summary><span class="n" style="color:var(--accent)">05</span> 研究ログ(開発者向け)<span class="g-sub">較正・ニュース・重み提案・メタ学習・監査の内部データ</span></summary><div class="g-body">
+    <section class="card"><h2>確信度と的中率のズレ(キャリブレーション)</h2>{'<div class="empty">Prediction Calibration未取得</div>' if not prediction_calibration.get('available') else f'<div class="grid">{prediction_calibration_stats}</div>'}<h3>Rank別キャリブレーション</h3>{table_html(prediction_calibration_table, ["rank", "implied_probability", "closed_count", "hit_rate", "calibration_gap", "brier_score", "p_value", "calibration_verdict", "recommended_action"], "キャリブレーションデータなし")}</section>
+    <section class="card"><h2>ニュース解釈の信頼性</h2>{'<div class="empty">Narrative Reliability未取得</div>' if not narrative_reliability.get('available') else f'<div class="grid">{narrative_reliability_stats}</div>'}<h3>ナラティブ別信頼性</h3>{table_html(narrative_reliability_table, ["narrative", "closed_count", "win_rate", "average_r", "p_value", "reliability_label", "recommended_action"], "ナラティブ信頼性データなし")}</section>
+    <section class="card"><h2>ニュース要約(材料の整理)</h2><div class="grid">{news_stats}</div><h3>Top News Drivers</h3><ul>{news_driver_list}</ul></section>
     <section class="card"><h2>AIの自己改善メモ</h2><div class="grid">{ai_stats}</div><h3>上位の改善仮説</h3><ul>{ai_hypothesis_list}</ul></section>
-    <section class="card"><h2>取引コストモデル</h2><p class="notice">ネットR評価のための分析専用モデルです。実売買・発注は行いません。</p>{transaction_cost_warning_html}<div class="grid">{transaction_cost_stats}</div></section>
-    <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type","target_type","target_name","proposal_strength","priority","average_r","win_rate","proposed_change","apply_automatically"])}</section>
-    <section class="card"><h2>モデル状態 更新提案</h2>{'<div class="empty">Model State更新提案未取得</div>' if not model_state_summary.get('available') else f'<div class="grid">{model_state_stats}</div>'}<h3>strong候補 上位5件</h3>{table_html(model_state_strong, ["category","target","sample_count","win_rate","avg_r","proposal_direction","proposal_strength","proposed_delta","proposed_weight","rationale"], "strong候補なし")}</section>
-    <section class="card"><h2>重み調整パッチ候補</h2>{'<div class="empty">Weights Patch候補未取得</div>' if not weights_patch.get('available') else f'<div class="grid">{weights_patch_stats}</div>'}<h3>patch候補 上位5件</h3>{table_html(weights_patch_candidates, ["weight_path","patch_action","current_weight","proposed_delta","proposed_value","proposal_direction","proposal_strength","rationale"], "patch候補なし")}</section>
-    <section class="card"><h2>重み調整パッチ レビュー</h2>{'<div class="empty">Weights Patchレビュー未取得</div>' if not weights_patch_review.get('available') else f'<div class="grid">{weights_patch_review_stats}</div>'}<h3>承認候補 上位5件</h3>{table_html(weights_patch_review_candidates, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","patch_risk_level","review_reason"], "承認候補なし")}<h3>保留候補 上位5件</h3>{table_html(weights_patch_review_holds, ["weight_path","review_decision","recommended_human_action","sample_count","confidence_level","proposal_strength","proposed_delta","evidence_quality","missing_conditions","review_reason"], "保留候補なし")}</section>
-    <section class="card"><h2>提案採否トラッキング</h2>{'<div class="empty">Proposal Adoption Tracking未取得</div>' if not proposal_adoption.get('available') else f'<div class="grid">{proposal_adoption_stats}</div>'}<h3>承認判断待ち 上位5件</h3>{table_html(proposal_adoption_pending, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "承認判断待ちなし")}<h3>保留中 上位5件</h3>{table_html(proposal_adoption_held, ["weight_path","adoption_status","adoption_source","recommended_next_action","sample_count","confidence_level","proposal_strength","tracking_reason"], "保留中なし")}</section>
-    <section class="card"><h2>重みバージョン履歴</h2>{'<div class="empty">Weight Version History未取得</div>' if not weight_history.get('available') else f'<div class="grid">{weight_history_stats}</div>'}<h3>Proposal一覧 上位5件</h3>{table_html(weight_history_rows, ["version_id","source","proposal_id","review_decision","adoption_status","description","weights_json_updated","patch_applied","requires_human_approval","notes"], "履歴Proposalなし")}</section>
-    <section class="card"><h2>メタ学習</h2>{'<div class="empty">Meta Learning未取得</div>' if not meta_learning.get('available') else f'<div class="grid">{meta_learning_stats}</div>'}<h3>成功パターン候補 上位5件</h3>{table_html(meta_learning_success, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "成功パターン候補なし")}<h3>失敗パターン候補 上位5件</h3>{table_html(meta_learning_failure, ["meta_learning_id","pattern_type","category","target","proposal_id","impact_score","sample_count","confidence_level","recommended_action","learning_hypothesis"], "失敗パターン候補なし")}</section>
-    <section class="card"><h2>自動較正の候補</h2>{'<div class="empty">Auto Calibration Candidates未取得</div>' if not auto_calibration.get('available') else f'<div class="grid">{auto_calibration_stats}</div>'}<h3>確信度の高い候補 上位</h3>{table_html(auto_calibration_top, ["candidate_id","asset","category","target","factor","classification","current_value","suggested_delta","suggested_value","confidence","sample_size","source","rationale"], "候補なし")}</section>
-    <section class="card"><h2>人手オーバーライド分析</h2>{'<div class="empty">Human Override Analytics未取得</div>' if not human_override.get('available') else f'<div class="grid">{human_override_stats}</div>'}<h3>override impact 上位5件</h3>{table_html(human_override_top, ["proposal_id","review_decision","adoption_status","override_type","override_reason","impact_status","impact_score","source","recommended_next_action"], "override分析なし")}</section>
-    </details>
+    <section class="card"><h2>取引コストモデル</h2>{transaction_cost_warning_html}<div class="grid">{transaction_cost_stats}</div></section>
+    <section class="card"><h2>ルール改善候補</h2><p class="notice">すべての改善候補は自動適用されません: <strong>{str(apply_false).lower()}</strong></p>{table_html(rule_view, ["proposal_type", "target_type", "target_name", "proposal_strength", "priority", "average_r", "win_rate", "proposed_change", "apply_automatically"])}</section>
+    <section class="card"><h2>モデル状態 更新提案</h2>{'<div class="empty">Model State更新提案未取得</div>' if not model_state_summary.get('available') else f'<div class="grid">{model_state_stats}</div>'}<h3>strong候補 上位5件</h3>{table_html(model_state_strong, ["category", "target", "sample_count", "win_rate", "avg_r", "proposal_direction", "proposal_strength", "proposed_delta", "proposed_weight", "rationale"], "strong候補なし")}</section>
+    <section class="card"><h2>重み調整パッチ候補</h2>{'<div class="empty">Weights Patch候補未取得</div>' if not weights_patch.get('available') else f'<div class="grid">{weights_patch_stats}</div>'}<h3>patch候補 上位5件</h3>{table_html(weights_patch_candidates, ["weight_path", "patch_action", "current_weight", "proposed_delta", "proposed_value", "proposal_direction", "proposal_strength", "rationale"], "patch候補なし")}</section>
+    <section class="card"><h2>重み調整パッチ レビュー</h2>{'<div class="empty">Weights Patchレビュー未取得</div>' if not weights_patch_review.get('available') else f'<div class="grid">{weights_patch_review_stats}</div>'}<h3>承認候補 上位5件</h3>{table_html(weights_patch_review_candidates, ["weight_path", "review_decision", "recommended_human_action", "sample_count", "confidence_level", "proposal_strength", "proposed_delta", "patch_risk_level", "review_reason"], "承認候補なし")}<h3>保留候補 上位5件</h3>{table_html(weights_patch_review_holds, ["weight_path", "review_decision", "recommended_human_action", "sample_count", "confidence_level", "proposal_strength", "proposed_delta", "evidence_quality", "missing_conditions", "review_reason"], "保留候補なし")}</section>
+    <section class="card"><h2>提案採否トラッキング</h2>{'<div class="empty">Proposal Adoption Tracking未取得</div>' if not proposal_adoption.get('available') else f'<div class="grid">{proposal_adoption_stats}</div>'}<h3>承認判断待ち 上位5件</h3>{table_html(proposal_adoption_pending, ["weight_path", "adoption_status", "adoption_source", "recommended_next_action", "sample_count", "confidence_level", "proposal_strength", "tracking_reason"], "承認判断待ちなし")}<h3>保留中 上位5件</h3>{table_html(proposal_adoption_held, ["weight_path", "adoption_status", "adoption_source", "recommended_next_action", "sample_count", "confidence_level", "proposal_strength", "tracking_reason"], "保留中なし")}</section>
+    <section class="card"><h2>重みバージョン履歴</h2>{'<div class="empty">Weight Version History未取得</div>' if not weight_history.get('available') else f'<div class="grid">{weight_history_stats}</div>'}<h3>Proposal一覧 上位5件</h3>{table_html(weight_history_rows, ["version_id", "source", "proposal_id", "review_decision", "adoption_status", "description", "weights_json_updated", "patch_applied", "requires_human_approval", "notes"], "履歴Proposalなし")}</section>
+    <section class="card"><h2>メタ学習</h2>{'<div class="empty">Meta Learning未取得</div>' if not meta_learning.get('available') else f'<div class="grid">{meta_learning_stats}</div>'}<h3>成功パターン候補 上位5件</h3>{table_html(meta_learning_success, ["meta_learning_id", "pattern_type", "category", "target", "proposal_id", "impact_score", "sample_count", "confidence_level", "recommended_action", "learning_hypothesis"], "成功パターン候補なし")}<h3>失敗パターン候補 上位5件</h3>{table_html(meta_learning_failure, ["meta_learning_id", "pattern_type", "category", "target", "proposal_id", "impact_score", "sample_count", "confidence_level", "recommended_action", "learning_hypothesis"], "失敗パターン候補なし")}</section>
+    <section class="card"><h2>自動較正の候補</h2>{'<div class="empty">Auto Calibration Candidates未取得</div>' if not auto_calibration.get('available') else f'<div class="grid">{auto_calibration_stats}</div>'}<h3>確信度の高い候補 上位</h3>{table_html(auto_calibration_top, ["candidate_id", "asset", "category", "target", "factor", "classification", "current_value", "suggested_delta", "suggested_value", "confidence", "sample_size", "source", "rationale"], "候補なし")}</section>
+    <section class="card"><h2>人手オーバーライド分析</h2>{'<div class="empty">Human Override Analytics未取得</div>' if not human_override.get('available') else f'<div class="grid">{human_override_stats}</div>'}<h3>override impact 上位5件</h3>{table_html(human_override_top, ["proposal_id", "review_decision", "adoption_status", "override_type", "override_reason", "impact_status", "impact_score", "source", "recommended_next_action"], "override分析なし")}</section>
+    </div></details>
 
-    <section class="card"><h2>安全上の注意</h2><p class="notice">{html.escape(DASHBOARD_DESCRIPTION)}</p><ul>{safe}</ul></section>
+    <footer class="foot"><b>安全上の注意</b> — {html.escape(DASHBOARD_DESCRIPTION)}<ul>{safe}</ul></footer>
   </main>
   <script type="application/json" id="dashboard-summary">{html.escape(json.dumps(summary, ensure_ascii=False))}</script>
+  <script>{PAGE_JS}</script>
 </body>
 </html>
 """
