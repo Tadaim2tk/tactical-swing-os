@@ -329,3 +329,26 @@ def test_transaction_cost_summary_warning_composes_multiple():
     s = bd.transaction_cost_summary(pd.DataFrame(), j, as_of="2026-06-16")
     assert "証拠主義違反" in s["warning"]
     assert "証拠メタ不正" in s["warning"]  # 両方が合成される
+
+
+def test_prediction_log_summary_fallback_from_csv_when_json_missing():
+    # Pages 環境では results/ の summary_json が存在しない。追跡済みCSVから
+    # ランク別成績を再計算し、「採点データなし」の空表を出さないこと。
+    scores = pd.DataFrame([
+        {"date": "2026-07-01", "asset": "WTI", "side": "LONG", "rank": "B", "actionable": "True",
+         "data_quality": "ok", "status": "scored", "r_close_5d": 1.2, "r_close_10d": 0.5, "result_5d": "success"},
+        {"date": "2026-07-02", "asset": "GOLD", "side": "SHORT", "rank": "B", "actionable": "True",
+         "data_quality": "ok", "status": "scored", "r_close_5d": -0.4, "r_close_10d": -0.2, "result_5d": "failure"},
+        {"date": "2026-07-03", "asset": "BTC", "side": "NONE", "rank": "NO_TRADE", "actionable": "False",
+         "data_quality": "ok", "status": "awaiting_horizon", "r_close_5d": None, "r_close_10d": None, "result_5d": "awaiting"},
+    ])
+    out = bd.prediction_log_summary(scores, None)
+    assert out["available"] is True
+    assert out["prediction_total"] == 3
+    assert out["prediction_awaiting"] == 1
+    rank_table = out["rank_table"]
+    assert not rank_table.empty
+    b = rank_table[rank_table["rank"] == "B"].iloc[0]
+    assert b["judgements"] == 2
+    assert "1/2" in b["win_5d"]  # 勝率 50% (1/2)
+    assert b["basis"] == "insufficient_data"  # n<30 は断定しない

@@ -1378,13 +1378,63 @@ def similar_narrative_summary(cases: pd.DataFrame, summary_json) -> dict:
     }
 
 
+def _prediction_payload_from_scores(scores: pd.DataFrame, min_samples: int = 30) -> dict:
+    """summary_json が無い環境(Pages等: results/ は untracked)向けに、追跡済みの
+    採点CSVだけから同じ形のサマリーを再計算するフォールバック。"""
+    if scores is None or scores.empty or "rank" not in scores.columns:
+        return {}
+    sc = scores.copy()
+    ok = sc[sc.get("data_quality", pd.Series(dtype=str)) == "ok"] if "data_quality" in sc.columns else sc
+    by_rank = {}
+    for rank in ("A", "B", "NO_TRADE"):
+        sub = ok[ok["rank"] == rank]
+        if sub.empty:
+            continue
+        entry = {"rows": int(len(sub))}
+        if "actionable" in sub.columns:
+            entry["actionable_rows"] = int((sub["actionable"].astype(str).str.lower() == "true").sum())
+        for h in (5, 10):
+            col = f"r_close_{h}d"
+            if col not in sub.columns:
+                continue
+            v = pd.to_numeric(sub[col], errors="coerce").dropna()
+            if len(v) == 0:
+                continue
+            wins = int((v > 0).sum())
+            entry[f"result_{h}d"] = {
+                "n_closed": int(len(v)),
+                "wins": wins,
+                "win_rate": wins / len(v),
+                "statistical_basis": "ok" if len(v) >= min_samples else "insufficient_data",
+            }
+        r5 = pd.to_numeric(sub.get("r_close_5d"), errors="coerce").dropna() if "r_close_5d" in sub.columns else pd.Series(dtype=float)
+        if len(r5):
+            entry["mean_r_close_5d"] = round(float(r5.mean()), 2)
+        by_rank[rank] = entry
+    if not by_rank:
+        return {}
+    awaiting = int((sc["status"] == "awaiting_horizon").sum()) if "status" in sc.columns else 0
+    suspect = int((sc.get("result_5d", pd.Series(dtype=str)) == "suspect_data").sum()) if "result_5d" in sc.columns else 0
+    return {
+        "total_rows": int(len(sc)),
+        "awaiting_rows": awaiting,
+        "suspect_data_rows": suspect,
+        "min_samples_for_judgement": min_samples,
+        "by_rank": by_rank,
+        "recomputed_from_csv": True,
+    }
+
+
 def prediction_log_summary(scores: pd.DataFrame, summary_json) -> dict:
     """予測ノート(ChatGPT日次判断の遡及採点)のダッシュボード用サマリー。
 
     data/prediction_log_scores.csv + results/prediction_log_score_summary.json を平易な表に変換。
+    summary_json 不在時(Pages等)は追跡済みCSVから同形を再計算する。
     表示のみで signal score には未接続。
     """
     payload = summary_json if isinstance(summary_json, dict) else {}
+    if not payload:
+        payload = _prediction_payload_from_scores(scores)
     by_rank = payload.get("by_rank", {}) or {}
     rank_rows = []
     for rank in ["A", "B", "NO_TRADE"]:
