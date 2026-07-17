@@ -99,6 +99,7 @@ def test_main_actually_generates_outputs(tmp_path, monkeypatch):
     first_group = html_text.index('<details class="group"')
     assert html_text.index('id="today"') < first_group
     assert html_text.index('id="perf"') < first_group
+    assert html_text.index('id="exec"') < first_group  # 執行ビューも一次面
     # 台帳が読めた場合の判断カード(この統合テストは実データで走る)
     assert 'class="jgrid"' in html_text or "方向つき判断はありません" in html_text or "台帳(data/signal_log.csv)が読めません" in html_text
 
@@ -115,6 +116,7 @@ def test_summaries_handle_empty_data():
     assert isinstance(dashboard_summaries.audit_report_summary(""), dict)
     assert isinstance(dashboard_summaries.todays_judgements_summary(empty, empty), dict)
     assert isinstance(dashboard_summaries.performance_series_summary(empty, empty), dict)
+    assert isinstance(dashboard_summaries.execution_view_summary(empty, empty), dict)
 
 
 # === 統合レイヤーのキーが維持されている (機能変更なしの担保) ===
