@@ -98,3 +98,7 @@ date,signal_id,asset,side,rank,type,entry_low,entry_high,sl,tp1,tp2,rr,win_prob,
 - entry系・sl・tp・rr・win_prob・expected_r は空欄のまま（0 で埋めない）
 - regime・no_trade_score・ems・ffs・cds・ias・cbs・mes は**必須**
   （見送り判断の質も採点・較正の対象。スコア欠落は較正分析からの脱落を意味する）
+- `type` の直後から `expected_r` までの空欄は **8列ちょうど**。
+  その次の列が `tq_score`。余分な空欄を1つ入れると、取り込み時に `date` と
+  `signal_id` がずれて全行rejectになる。
+  例: `...,BTC,NONE,NO_TRADE,NO_TRADE,,,,,,,,,42,38,78,,RISK_OFF,...`

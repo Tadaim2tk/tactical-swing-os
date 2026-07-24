@@ -46,6 +46,24 @@ def test_markdown_csv_block_extraction(tmp_path):
     assert "TSO-20260710-001" not in ledger.read_text(encoding="utf-8")
 
 
+def test_repairs_extra_blank_before_tq_score_in_no_trade_rows(tmp_path):
+    # GPTがNO_TRADEの空欄を1つ多く出すと、pandasは先頭dateを暗黙indexにして
+    # date=signal_id のように列をずらす。典型形だけ補正して今日分を全rejectにしない。
+    ledger = _ledger(tmp_path)
+    raw = _raw(tmp_path, asset="BTC", close=65000)
+    text = (
+        f"{HEADER}\n"
+        "2026-07-24,20260724_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,NO_TRADE,"
+        ",,,,,,,,,42,38,78,,RISK_OFF,48,42,46,44,50,41,inv,vt,verified"
+    )
+    r = idl.ingest(text, origin="gpt_terminal", apply=False, run_score=False, ledger_path=ledger, raw_dir=raw)
+    assert r["format"] == "raw_csv"
+    assert r["parsed"] == 1
+    assert r["would_append"] == 1
+    assert r["rejected"] == 0
+    assert r["details"][0]["signal_id"] == "20260724_BTC_NONE_NO_TRADE"
+
+
 def test_apply_appends_with_origin_and_extends_header(tmp_path):
     ledger, raw = _ledger(tmp_path), _raw(tmp_path)
     text = f"{HEADER}\n2026-07-10,TSO-20260710-001,WTI,BUY,B,M,72.5,73.5,70.0,78.0,81.0,2.0,58,0.35,,,,0.25,N,60,,,,70,,i,v,verified"

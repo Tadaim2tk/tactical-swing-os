@@ -125,6 +125,20 @@ def test_append_scores_updates_awaiting_to_scored(tmp_path):
     assert merged.iloc[0]["status"] == "scored"  # 最新で更新
 
 
+def test_append_scores_preserves_timestamp_when_score_content_is_unchanged(tmp_path):
+    path = tmp_path / "scores.csv"
+    old = pd.DataFrame([{**{c: "" for c in spl.SCORE_COLUMNS},
+                         "signal_id": "X1", "date": "2026-06-08", "status": "scored",
+                         "verified_status": np.nan, "scored_at_utc": "old-time"}])
+    same = pd.DataFrame([{**{c: "" for c in spl.SCORE_COLUMNS},
+                          "signal_id": "X1", "date": "2026-06-08", "status": "scored",
+                          "verified_status": "nan", "scored_at_utc": "new-time"}])
+    spl.append_scores(old, path)
+    merged = spl.append_scores(same, path)
+    assert len(merged) == 1
+    assert merged.iloc[0]["scored_at_utc"] == "old-time"
+
+
 # === 集計の正直表示 ===
 
 def test_summary_reports_counts_but_flags_small_n(tmp_path):

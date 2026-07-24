@@ -12,10 +12,10 @@ OUT="inbox/${DATE}_daily_log_gpt.md"
 mkdir -p inbox
 
 echo "== codex exec で日次ログを生成 (web検索有効・read-onlyサンドボックス) =="
-codex exec \
+codex --search exec \
+  --ignore-user-config \
   --sandbox read-only \
   --skip-git-repo-check \
-  --search \
   - < prompts/tso_daily_signal_log.md > "$OUT"
 
 echo ""
