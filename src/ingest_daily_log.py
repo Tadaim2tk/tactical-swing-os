@@ -79,7 +79,8 @@ def _parse_csv_text(text: str) -> pd.DataFrame:
     try:
         first = text.splitlines()[0]
         if first.lower().startswith("date,"):
-            return pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False)
+            df = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False)
+            return _repair_extra_blank_before_tq_score(df)
         # ヘッダ無し: 台帳ヘッダ(origin除く)を仮定して読めるか試す
         ledger_cols = _ledger_columns()
         base_cols = [c for c in ledger_cols if c != "origin"]
@@ -90,6 +91,43 @@ def _parse_csv_text(text: str) -> pd.DataFrame:
         return pd.DataFrame()
     except Exception:  # noqa: BLE001 - 解析失敗は「認識できない形式」として正直に返す
         return pd.DataFrame()
+
+
+def _blank_series(values: pd.Series) -> bool:
+    return values.astype(str).str.strip().eq("").all()
+
+
+def _repair_extra_blank_before_tq_score(df: pd.DataFrame) -> pd.DataFrame:
+    """NO_TRADE行で expected_r と tq_score の間に余分な空欄が1つ入ったCSVを補正する。
+
+    ChatGPT/Codex exec は NO_TRADE の空欄列を数え違え、全行に1フィールド多いCSVを
+    出すことがある。pandas はその場合、先頭の date を暗黙indexとして吸収してしまうため、
+    取り込み側では date=signal_id のように読めて全行rejectになる。典型形だけを狭く補正する。
+    """
+    if isinstance(df.index, pd.RangeIndex):
+        return df
+    cols = list(df.columns)
+    if "tq_score" not in cols or "date" not in cols or "signal_id" not in cols:
+        return df
+
+    reset = df.reset_index()
+    if reset.shape[1] != len(cols) + 1:
+        return df
+
+    drop_at = cols.index("tq_score")
+    if drop_at >= reset.shape[1] or not _blank_series(reset.iloc[:, drop_at]):
+        return df
+
+    candidate_values = pd.concat([reset.iloc[:, :drop_at], reset.iloc[:, drop_at + 1:]], axis=1)
+    if candidate_values.shape[1] != len(cols):
+        return df
+    candidate_values.columns = cols
+
+    dates = pd.to_datetime(candidate_values["date"].astype(str), errors="coerce")
+    signal_ids = candidate_values["signal_id"].astype(str).str.strip()
+    if dates.notna().all() and signal_ids.ne("").all():
+        return candidate_values
+    return df
 
 
 def _ledger_columns(path: Path = LEDGER_PATH) -> list[str]:

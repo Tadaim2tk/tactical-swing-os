@@ -207,8 +207,34 @@ def append_scores(new_scores: pd.DataFrame, path: Path = SCORES_PATH) -> pd.Data
     merged = pd.concat([existing, new_scores], ignore_index=True)
     merged = merged.drop_duplicates(subset=["signal_id"], keep="last")
     merged = merged.reindex(columns=SCORE_COLUMNS).sort_values(["date", "signal_id"]).reset_index(drop=True)
+    merged = _preserve_unchanged_score_timestamps(merged, existing)
     merged.to_csv(path, index=False)
     return merged
+
+
+def _score_value_key(value) -> str:
+    if pd.isna(value):
+        return ""
+    s = str(value).strip()
+    return "" if s.lower() in {"nan", "none"} else s
+
+
+def _preserve_unchanged_score_timestamps(merged: pd.DataFrame, existing: pd.DataFrame) -> pd.DataFrame:
+    """採点内容が同じ行は既存の scored_at_utc を保持し、時刻だけのCSV churnを避ける。"""
+    if existing.empty or "signal_id" not in existing.columns or "scored_at_utc" not in existing.columns:
+        return merged
+    existing_latest = existing.drop_duplicates(subset=["signal_id"], keep="last").set_index("signal_id", drop=False)
+    compare_cols = [c for c in SCORE_COLUMNS if c != "scored_at_utc"]
+    out = merged.copy()
+    for idx, row in out.iterrows():
+        sid = str(row.get("signal_id") or "")
+        if not sid or sid not in existing_latest.index:
+            continue
+        old = existing_latest.loc[sid]
+        unchanged = all(_score_value_key(row.get(c)) == _score_value_key(old.get(c)) for c in compare_cols)
+        if unchanged:
+            out.at[idx, "scored_at_utc"] = old.get("scored_at_utc", "")
+    return out
 
 
 def summarize(scores: pd.DataFrame) -> dict:
