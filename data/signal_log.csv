@@ -271,3 +271,33 @@ date,signal_id,asset,side,rank,type,entry_low,entry_high,sl,tp1,tp2,rr,win_prob,
 2026-07-24,20260724_DXY_NONE_NO_TRADE,DXY,NONE,NO_TRADE,NO_TRADE,,,,,,,,,52,46,70,,DOLLAR_FIRM,56,48,50,44,58,46,dollar-bid-extended-with-event-reversal-risk,5d DXY hold above 101 area,verified,gpt_terminal
 2026-07-24,20260724_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,NO_TRADE,,,,,,,,,53,47,71,,YIELD_UP_SHOCK,57,50,48,43,59,47,oil-inflation-yield-spike-aftershock,5d US10Y follow-through above recent highs,verified,gpt_terminal
 2026-07-24,20260724_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,46,41,75,,VOL_SPIKE,49,45,47,42,51,44,vol-spike-after-equity-selloff-no-entry,5d VIX persistence above 18,verified,gpt_terminal
+2026-07-25,20260725_BTC_NONE_DATA_UNAVAILABLE,BTC,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-25,20260725_DXY_NONE_DATA_UNAVAILABLE,DXY,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-25,20260725_ETH_NONE_DATA_UNAVAILABLE,ETH,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-25,20260725_GOLD_NONE_DATA_UNAVAILABLE,GOLD,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-25,20260725_NASDAQ_NONE_DATA_UNAVAILABLE,NASDAQ,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-25,20260725_SPX_NONE_DATA_UNAVAILABLE,SPX,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-25,20260725_US10Y_NONE_DATA_UNAVAILABLE,US10Y,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-25,20260725_USDJPY_NONE_DATA_UNAVAILABLE,USDJPY,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-25,20260725_VIX_NONE_DATA_UNAVAILABLE,VIX,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-25,20260725_WTI_NONE_DATA_UNAVAILABLE,WTI,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_BTC_NONE_DATA_UNAVAILABLE,BTC,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_DXY_NONE_DATA_UNAVAILABLE,DXY,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_ETH_NONE_DATA_UNAVAILABLE,ETH,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_GOLD_NONE_DATA_UNAVAILABLE,GOLD,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_NASDAQ_NONE_DATA_UNAVAILABLE,NASDAQ,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_SPX_NONE_DATA_UNAVAILABLE,SPX,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_US10Y_NONE_DATA_UNAVAILABLE,US10Y,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_USDJPY_NONE_DATA_UNAVAILABLE,USDJPY,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_VIX_NONE_DATA_UNAVAILABLE,VIX,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-26,20260726_WTI_NONE_DATA_UNAVAILABLE,WTI,NONE,NO_TRADE,DATA_UNAVAILABLE,,,,,,,,,50,50,50,,UNKNOWN,50,50,50,50,50,50,data_unavailable,next_independent_web_search,unverified,chatgpt_app
+2026-07-27,20260727_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,NO_TRADE,,,,,,,,,61,54,72,,NEUTRAL,58,47,51,56,60,44,ETF_CME_confirmation_missing,BTC_ETF_flow_CME_basis_and_5d_close,partially_verified,chatgpt_app
+2026-07-27,20260727_DXY_NONE_NO_TRADE,DXY,NONE,NO_TRADE,NO_TRADE,,,,,,,,,55,44,76,,UNKNOWN,57,55,49,50,55,52,current_price_not_fully_verified,DXY_current_level_and_5d_close,unverified,chatgpt_app
+2026-07-27,20260727_ETH_NONE_NO_TRADE,ETH,NONE,NO_TRADE,NO_TRADE,,,,,,,,,48,43,78,,WEAK,51,42,46,49,53,41,relative_strength_not_confirmed,ETH_BTC_ratio_and_5d_close,partially_verified,chatgpt_app
+2026-07-27,20260727_GOLD_LONG_B-PULLBACK,GOLD,BUY,B,PULLBACK,3990,4020,3900,4140,4230,1.43,0.58,0.41,68,66,34,0.25,NEUTRAL,64,59,62,66,72,61,3900_break_or_US10Y_above_4.80,5d_close_and_MFE_MAE,partially_verified,chatgpt_app
+2026-07-27,20260727_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,NO_TRADE,,,,,,,,,52,58,70,,WEAK_REBOUND,63,51,57,61,62,55,earnings_and_rate_risk,NQ_28500_hold_and_5d_close,verified,chatgpt_app
+2026-07-27,20260727_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,59,55,68,,NEUTRAL,60,56,59,62,64,57,FOMC_and_earnings_event_risk,ES_7470_hold_and_5d_close,verified,chatgpt_app
+2026-07-27,20260727_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,NO_TRADE,,,,,,,,,67,47,74,,HIGH_YIELD,65,62,60,53,59,64,FOMC_and_oil_direction_conflict,4.60_or_4.75_break_and_5d_close,partially_verified,chatgpt_app
+2026-07-27,20260727_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,NO_TRADE,,,,,,,,,66,49,81,,STRONG_UP,62,59,57,48,61,58,intervention_risk_above_163,intervention_and_5d_close,partially_verified,chatgpt_app
+2026-07-27,20260727_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,54,45,69,,ELEVATED,56,52,61,58,60,55,event_risk_without_directional_edge,VIX_17_or_20_break_and_5d_close,verified,chatgpt_app
+2026-07-27,20260727_WTI_SHORT_B-REVERSAL,WTI,SELL,B,REVERSAL,86,88,92.5,80,76,1.33,0.61,0.42,71,69,31,0.25,VOLATILE,67,63,71,64,73,68,92.5_break_or_hostilities_resume,5d_close_MFE_MAE_and_ceasefire_status,partially_verified,chatgpt_app
