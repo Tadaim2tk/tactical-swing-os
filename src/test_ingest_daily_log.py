@@ -137,3 +137,21 @@ def test_win_prob_percent_notation_warned(tmp_path):
     assert by_id["PCT-001"]["verdict"] == "append"  # 広く取り込む(警告は正直に)
     assert any("win_prob" in w and "範囲外" in w for w in by_id["PCT-001"]["warnings"])
     assert not any("win_prob" in w for w in by_id["DEC-001"]["warnings"])
+
+
+def test_stale_raw_data_warned_at_ingest(tmp_path):
+    # data/raw は git 非追跡で CI が毎朝取り直す設計。ローカルで fetch せず採点し
+    # 7/23〜8/1 が全件 awaiting のまま OOS 判定を阻んだ事故 (2026-08-02) の入口検知
+    ledger, raw = _ledger(tmp_path), _raw(tmp_path)  # raw の最終バーは 2026-07-09
+    text = f"{HEADER}\n2026-07-30,STALE-001,WTI,BUY,B,M,72.5,73.5,70.0,78.0,81.0,2.0,0.58,0.35,,,,0.25,N,60,,,,70,,i,v,verified"
+    r = idl.ingest(text, origin="chatgpt_app", apply=False, run_score=False, ledger_path=ledger, raw_dir=raw)
+    assert "fetch_market" in r.get("stale_raw_warning", "")
+    assert "WTI=2026-07-09" in r["stale_raw_warning"]
+
+
+def test_fresh_raw_data_no_stale_warning(tmp_path):
+    # 週末・連休程度の遅れ(6日以内)では警告しない
+    ledger, raw = _ledger(tmp_path), _raw(tmp_path)
+    text = f"{HEADER}\n2026-07-10,FRESH-001,WTI,BUY,B,M,72.5,73.5,70.0,78.0,81.0,2.0,0.58,0.35,,,,0.25,N,60,,,,70,,i,v,verified"
+    r = idl.ingest(text, origin="chatgpt_app", apply=False, run_score=False, ledger_path=ledger, raw_dir=raw)
+    assert "stale_raw_warning" not in r
