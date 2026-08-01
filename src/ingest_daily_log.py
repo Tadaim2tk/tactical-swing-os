@@ -161,6 +161,19 @@ def _anchor_close(asset: str, raw_dir: Path = RAW_DIR) -> float:
         return float("nan")
 
 
+def _raw_last_date(asset: str, raw_dir: Path = RAW_DIR):
+    """資産の価格系列の最終バー日付。無ければ NaT。"""
+    p = raw_dir / f"{asset}.csv"
+    if not p.exists():
+        return pd.NaT
+    try:
+        df = pd.read_csv(p)
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        return pd.to_datetime(df["date"], errors="coerce").max()
+    except Exception:  # noqa: BLE001
+        return pd.NaT
+
+
 def validate_row(row: pd.Series, existing_ids: set[str], raw_dir: Path = RAW_DIR) -> tuple[str, list[str]]:
     """(verdict, warnings) を返す。verdict: append / skip_duplicate / reject。"""
     warnings: list[str] = []
@@ -227,6 +240,24 @@ def ingest(text: str, *, origin: str, apply: bool, run_score: bool = True,
     existing = pd.read_csv(ledger_path, dtype=str, keep_default_na=False)
     existing_ids = set(existing.get("signal_id", pd.Series(dtype=str)).astype(str))
 
+    # 鮮度ガード: 取込む行の日付に対して価格系列が古すぎる場合は入口で大声で警告する。
+    # data/raw は git 非追跡で CI が毎朝取得し直す設計のため、ローカルで fetch せずに
+    # 採点すると古いバーで走る (7/23〜8/1 が全件 awaiting のまま 8/1 の OOS 判定を
+    # 阻んだ事故の入口検知, 2026-08-02)。閾値6日は連休を許容しつつ1週間超の停止を捕まえる。
+    STALE_RAW_MAX_LAG_DAYS = 6
+    max_row_date = pd.to_datetime(rows.get("date"), errors="coerce").max()
+    if pd.notna(max_row_date):
+        stale = []
+        for asset in sorted(set(rows.get("asset", pd.Series(dtype=str)).astype(str).str.strip()) - {""}):
+            last = _raw_last_date(asset, raw_dir)
+            if pd.notna(last) and (max_row_date - last).days > STALE_RAW_MAX_LAG_DAYS:
+                stale.append(f"{asset}={last.date()}")
+        if stale:
+            result["stale_raw_warning"] = (
+                f"価格系列が取込行({max_row_date.date()})より{STALE_RAW_MAX_LAG_DAYS}日超古い: "
+                + ", ".join(stale) + " — このまま採点すると古いバーで走る。先に src/fetch_market.py を実行"
+            )
+
     to_append: list[pd.Series] = []
     for _, row in rows.iterrows():
         verdict, warns = validate_row(row, existing_ids, raw_dir)
@@ -273,6 +304,8 @@ def main() -> int:
     for d in result["details"]:
         mark = {"append": "+", "skip_duplicate": "=", "reject": "!"}[d["verdict"]]
         print(f" {mark} {d['signal_id']}: {d['verdict']}" + (f" | 警告: {'; '.join(d['warnings'])}" if d["warnings"] else ""))
+    if result.get("stale_raw_warning"):
+        print(f"!! STALE RAW DATA: {result['stale_raw_warning']}")
     if result.get("error"):
         print(f"error: {result['error']}")
         return 1
