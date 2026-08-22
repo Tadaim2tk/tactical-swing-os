@@ -72,6 +72,15 @@ def _ordered_union(ledger_columns: list[str], signal_columns: list[str]) -> list
     return out
 
 
+def _latest_signal_date(signals: pd.DataFrame) -> str:
+    if signals.empty or "date" not in signals.columns:
+        return ""
+    latest = pd.to_datetime(signals["date"], errors="coerce").max()
+    if pd.isna(latest):
+        return ""
+    return str(latest.date())
+
+
 def append_generated_signals(
     signals_path: Path = SIGNALS_PATH,
     ledger_path: Path = LEDGER_PATH,
@@ -88,6 +97,7 @@ def append_generated_signals(
         "skipped_duplicates": 0,
         "rejected_rows": 0,
         "origin": origin,
+        "latest_signal_date": "",
         "error": "",
     }
 
@@ -111,6 +121,13 @@ def append_generated_signals(
     rejected = signals.loc[~valid_mask]
     signals = signals.loc[valid_mask].copy()
     result["rejected_rows"] = int(len(rejected))
+    result["latest_signal_date"] = _latest_signal_date(signals)
+
+    if signals.empty:
+        result.update({"status": "failed", "error": "results/signals.csv contained no valid date/signal_id rows"})
+        _write_summary(result, summary_path)
+        print(f"error: {result['error']}")
+        return result
 
     if ledger_path.exists():
         ledger = _read_csv(ledger_path)
@@ -148,7 +165,6 @@ def append_generated_signals(
     result["status"] = "success" if len(new_rows) or final_columns != ledger_columns else "skipped"
     result["ledger_rows_after"] = int(len(merged))
     result["ledger_columns_after"] = int(len(final_columns))
-    result["latest_signal_date"] = str(pd.to_datetime(signals["date"], errors="coerce").max().date())
     _write_summary(result, summary_path)
 
     print(
