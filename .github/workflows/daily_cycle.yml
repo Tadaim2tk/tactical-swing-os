@@ -35,6 +35,9 @@ jobs:
       - name: Generate signals (base + shadow weights)
         run: python src/generate_signal.py
 
+      - name: Append generated signals to official ledger
+        run: python src/append_generated_signals.py
+
       - name: Evaluate signals
         run: python src/evaluate_signal.py || true
 
@@ -56,18 +59,18 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
-      - name: Commit shadow comparison ledger (data append only)
+      - name: Commit daily ledgers (data/results append only)
         if: github.ref == 'refs/heads/main'
         run: |
           git config user.name "tso-actions-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # governance_reform_2026-07: data/ 配下のデータ追記のみ。src/docs/.github は触らない。
-          git add data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv data/execution_simulation.csv
+          # governance_reform_2026-07: data/ results/ 配下のデータ追記のみ。src/docs/.github は触らない。
+          git add data/signal_log.csv data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv data/execution_simulation.csv results/signal_ledger_append_summary.json
           if git diff --cached --quiet; then
             echo "no ledger changes to commit"
           else
-            git commit -m "Append shadow weight comparison ledger [skip ci]" \
-              -m "Data-append commit permitted by governance_reform_2026-07 (data/ only, no code/docs/workflow changes)."
+            git commit -m "Append daily TSO ledgers [skip ci]" \
+              -m "Data/results append commit permitted by governance_reform_2026-07 (data/results only, no code/docs/workflow changes)."
             git pull --rebase origin main
             git push origin main
           fi
