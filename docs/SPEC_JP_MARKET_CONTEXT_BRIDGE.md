@@ -219,8 +219,38 @@ Phase 29.3 の Ablation 評価フレームを流用し、次の2系統を比較�
 |---|---|---|---|
 | 27.3-a | `src/export_market_context_snapshot.py` + `data/market_context_daily.csv` + daily_cycle への組み込み | なし | ✅ 実装済 |
 | 27.3-b1 | 新規 JP swing signal と snapshot の結合（参照列 + 結合規則 + lookahead 監査登録） | 27.3-a + JP の dry-run 開始 | ⏳ |
-| 27.3-b2 | 旧 `earnings-research-os` 254 件と、**当時保存された** TSO 記録の historical join 可能性調査 | 27.3-a | ⏳ |
+| 27.3-b2 | 旧 `earnings-research-os` 254 件と、**当時保存された** TSO 記録の historical join | 27.3-a | ✅ 実装済 |
 | 27.3-c | Ablation による検証 → ゲート判断。新規 JP データに加え、可能なら旧決算研究データも研究用サンプルとして使う | 27.3-b1 / b2 | ⏳ |
+
+### 27.3-b2 の成果物（2026-08-25 実装済み）
+
+| ファイル | 内容 |
+|---|---|
+| `data/market_context_historical.csv` | 過去アーティファクト88件から復元した市場コンテキスト（27.3-a と同スキーマ + provenance 4列） |
+| `data/ers_legacy_context_link.csv` | 旧ERS 254件 ↔ snapshot の対応表（provenance 付き） |
+
+生成: `python src/build_historical_market_context.py --artifacts-dir <dir> --artifact-index <tsv> --records <ERSのrecords.csv>`
+
+**実装時に固定した4条件**:
+
+1. **provenance を全件に残す** — `source_artifact_id` / `source_artifact_name` /
+   `artifact_created_at_utc` / `source_market_run_ts_utc` を全行に記録。254件すべてで空欄ゼロ。
+2. **「寄り前の最新」を機械的に保証** — `usable_from_utc < 判断時刻（09:00 JST）` を満たす最新1行のみ。
+   検証: 違反0件、より新しい使用可能行の取りこぼし0件。
+3. **週末の空きは除外しない** — 数日空いても「当時利用可能だった最新記録」として採用する。
+   `lag_hours` を記録するので、消費側が必要なら自分で絞れる。実績: 中央値 1.3 時間、
+   24時間超が20件、最大 73.9 時間（3.1日 = 週末）。
+4. **native と historical を区別** — `provenance` 列で `native_point_in_time` /
+   `historical_artifact_join` を機械的に分離。ファイルも分けている。
+
+**`usable_from_utc` は保守側に倒す**: 値が算出されたのは `run_ts` だが、確実に手元にあったと
+言えるのはアーティファクト確定時刻なので、後者を「使ってよい最早時刻」とする。
+
+**結果**: 254/254 件が結合可能、全件 `snapshot_status = ok`。
+
+復元した88行のうち **4行が `stale`**（最古資産基準で 7〜9 日）、1行は 8/9 資産のみ。
+これは 27.3-a の監査修正（最古資産基準の鮮度判定）が過去分にも効いていることを示す。
+旧実装の最新日基準なら、この4行は新鮮に見えていた。
 
 ### 27.3-b2 の前提調査（2026-08-25 実施済み）
 

@@ -69,10 +69,10 @@ GitHub Actions による自動デイリーサイクルとして稼働済み:
 | — | Determinism cleanup（evaluation_summary / asset_performance が共有 UTC as_of） | — | [#66](https://github.com/Tadaim2tk/tactical-swing-os/pull/66) | ✅ |
 | 27.x | JP-EVAL-001 rev2（jp_swing_evaluate スキーマ整合 + lag cost attribution） | — | [#68](https://github.com/Tadaim2tk/tactical-swing-os/pull/68) | ✅ |
 | — | Dashboard 投資判断ファースト日本語レイアウト（バナー + 4ティア） | — | [#69](https://github.com/Tadaim2tk/tactical-swing-os/pull/69) | ✅ |
-| 27.3 | JP Market Context Bridge（TSO 市場コンテキストを point-in-time feature store として保存 / 判断は未活性） | [SPEC-JMCB-001](SPEC_JP_MARKET_CONTEXT_BRIDGE.md) | — | 🔄 (a のみ完了) |
+| 27.3 | JP Market Context Bridge（TSO 市場コンテキストを point-in-time feature store として保存 / 判断は未活性） | [SPEC-JMCB-001](SPEC_JP_MARKET_CONTEXT_BRIDGE.md) | — | 🔄 (a / b2 完了) |
 | 27.3-a | 日次スナップショット `data/market_context_daily.csv` 生成（蓄積開始。データを待たない） | SPEC-JMCB-001 | — | ✅ |
 | 27.3-b1 | 新規 JP swing signal と snapshot の結合 + lookahead 監査登録 | SPEC-JMCB-001 | — | ⏳ (JP dry-run 待ち) |
-| 27.3-b2 | 旧 earnings-research-os 254件 × TSO アーティファクト(74日分)の historical join 調査。前提調査で 254/254 結合可能を確認 | SPEC-JMCB-001 | — | ⏳ |
+| 27.3-b2 | 旧 earnings-research-os 254件 × TSO アーティファクト88件の historical join。254/254 結合・provenance 付き | SPEC-JMCB-001 | — | ✅ |
 | 27.3-c | Ablation 検証（jp_technical_only vs jp_plus_market_context）→ ゲート判断 | SPEC-JMCB-001 | — | ⏳ |
 
 ---

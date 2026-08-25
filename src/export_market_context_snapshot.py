@@ -55,8 +55,14 @@ MIN_ASSETS_FOR_OK = 7
 # 4 日以上離れていれば取得が止まっている可能性が高いので stale とする。
 MAX_STALENESS_DAYS = 4
 
+# 由来。27.3-a が日々生成する行と、27.3-b2 が過去アーティファクトから復元した行を
+# 機械的に区別するための列。両者を混ぜて「全部 point-in-time」と扱わないための歯止め。
+PROVENANCE_NATIVE = "native_point_in_time"
+PROVENANCE_HISTORICAL = "historical_artifact_join"
+
 META_COLUMNS = [
     "snapshot_id",
+    "provenance",
     "context_date",
     "generated_at_utc",
     "generated_at_jst",
@@ -156,6 +162,7 @@ def build_snapshot_row(market: pd.DataFrame, generated_dt=None) -> dict:
 
     row: dict = {column: "" for column in SNAPSHOT_COLUMNS}
     row["snapshot_id"] = "MCTX-" + generated_dt.strftime("%Y%m%dT%H%M%SZ")
+    row["provenance"] = PROVENANCE_NATIVE
     row["generated_at_utc"] = generated_utc
     row["generated_at_jst"] = format_jst(generated_dt)
     # 判断に使ってよい最早時刻。この時刻より前の判断がこの行を参照したら lookahead。
