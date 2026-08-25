@@ -32,6 +32,10 @@ jobs:
       - name: Fetch market data
         run: python src/fetch_market.py
 
+      - name: Record market context snapshot (point-in-time feature store)
+        run: |
+          python src/export_market_context_snapshot.py || echo "warning - market context snapshot failed; continuing"
+
       - name: Generate signals (base + shadow weights)
         run: python src/generate_signal.py
 
@@ -68,7 +72,7 @@ jobs:
           # 機械生成分は data/generated_signal_log.csv へ隔離(予測台帳 data/signal_log.csv はGPT判断専用、
           # 2026-08-25 人間決定)。summary json は results/*.json が gitignore のため add しない(#112由来の
           # 3日連続コミット失敗の原因。診断はアーティファクトで配布)。
-          git add data/generated_signal_log.csv data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv data/execution_simulation.csv
+          git add data/generated_signal_log.csv data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv data/execution_simulation.csv data/market_context_daily.csv
           if git diff --cached --quiet; then
             echo "no ledger changes to commit"
           else

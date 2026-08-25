@@ -15,21 +15,35 @@ Phase 27.3。TSO 本体の日次実行結果（市場コンテキストのスコ
 受ける。TSO 本体はその市場レジームを既に毎日数値化しているので、日本株側が同じものを
 再発明せず**借りられる**状態にする。
 
-### 目的でないもの（重要）
+借りるのは **TSO の観測結果（特徴量）** であって、TSO の判断そのものではない。
+TSO が「BTC を買い」と判断したことを日本株に持ち込むのではなく、その判断の材料になった
+市場環境の数値だけを、日本株側の銘柄固有分析と**掛け合わせる**。
+
+```
+日本株側（銘柄固有）              TSO 側（市場レベル）
+企業業績 / 決算 / 材料             リスク選好 / 円ドル環境
+銘柄固有ナラティブ        ×        ボラティリティ / 金利
+需給 / バリュエーション            米株環境 / マクロ市場ナラティブ
+                        ↓
+                 日本株の最終評価
+```
+
+### 役割分担（層を混同しないための整理）
 
 **TSO 本体は「銘柄ごとのナラティブ」を持っていない。** `data/narrative_memory.csv` の
 `asset_tags` に実在する値は BTC / SPX / NASDAQ / US10Y / DXY / WTI のみで、日本の個別銘柄も
 セクターも一切含まれない。
 
-したがって借りられるのは**市場レベルの文脈**であって、銘柄固有のナラティブではない。構造は次の通り。
+これは**本設計を否定する材料ではない**。銘柄固有の層は日本株側が既に持っているので、
+TSO からは市場レベルの層だけを借りればよい、という役割分担の確認である。
 
 | 層 | 担当 | 既存の置き場所 |
 |---|---|---|
 | 銘柄固有のナラティブ | **JP 側が既に保持** | `jp_swing_signals.csv` の `narrative` / `catalyst_type` / `market_misread` / `narrative_edge` |
-| 市場レジーム | **TSO 本体から借用**（本仕様） | `data/market_context_daily.csv`（新設） |
+| 市場レベルの文脈 | **TSO 本体から借用**（本仕様） | `data/market_context_daily.csv`（新設） |
 
-この2つを混同すると「TSO のナラティブ分析が日本株の銘柄選定に効いている」という誤った説明に
-なる。効きうるのは市場レジームの層だけである。
+この2つを混同すると「TSO のナラティブ分析が日本株の**銘柄選定**に効いている」という誤った
+説明になる。効きうるのは市場レベルの層である。
 
 ---
 
@@ -64,28 +78,55 @@ equity_momentum_score / volatility_stress_score / narrative_confidence
 
 ---
 
-## 4. 出力: `data/market_context_daily.csv`
+## 4. 出力: `data/market_context_daily.csv`（point-in-time feature store）
 
-`results/` 配下は `.gitignore` 対象で永続しないため、JP 側が後から参照する台帳は **`data/` に置き
-git 管理下とする**。1日1行の append-only。同一 `context_date` の再実行は冪等（上書きせず同値確認）。
+`results/` 配下は `.gitignore` 対象で永続しないため、後続研究が参照する台帳は **`data/` に置き
+git 管理下とする**。**append-only、1 run 1 行**。同一 run の再実行は冪等（`generated_at_utc` が
+一致すれば何もしない）。同じ日に複数 run があれば複数行が並ぶ — 消費側は §6 の結合規則で
+「判断時刻より前の最新行」を選ぶため、行が増えても曖昧さは生じない。
+
+### 保存する変数と、検証に投入する変数は別である
+
+これが本仕様の中心的な設計判断。
+
+| | 方針 | 理由 |
+|---|---|---|
+| **保存** | その日に得られた観測を**多めに**残す（10 スコア + 主要9資産の生の変化率・終値 = 全39列） | 後から「実は US10Y の方が効いていた」と分かっても、当時の値を保存していなければ**取り返せない** |
+| **検証投入** | **少なめに**絞る（初期は3変数、§6） | 日本株の想定サンプル数に対して変数が多すぎるとノイズを拾う（過学習） |
+
+point-in-time で保存する情報は多め、モデルに入れる変数は少なめ。この2つは矛盾しない。
+**保存 ≠ 採用**であり、保存されていること自体は「その変数を使ってよい」根拠にはならない。
+
+### 列（全39列）
 
 | 列 | 型 | 説明 |
 |---|---|---|
-| `snapshot_id` | str | `MCTX-YYYY-MM-DD` |
-| `context_date` | date | 対象営業日 |
-| `generated_at_utc` | datetime | 実際に生成された時刻 |
+| `snapshot_id` | str | `MCTX-YYYYMMDDTHHMMSSZ`（生成時刻ベース） |
+| `context_date` | date | スナップショットが記述している営業日（元バーの日付） |
+| `generated_at_utc` / `generated_at_jst` | datetime | 実際に生成された時刻 |
 | `usable_from_utc` | datetime | **この行を判断に使ってよい最早時刻**。lookahead 防止の要 |
-| `source_run_id` | str | GitHub Actions の run id（追跡用） |
+| `source_run_id` | str | GitHub Actions の run id（ローカル実行は `local`） |
 | `risk_on_score` 〜 `narrative_confidence` | float | §2 の 10 スコア |
-| `input_assets_available` | int | `KEY_ASSETS` 9件のうち実際に取得できた数 |
-| `staleness_days` | int | 元になった価格バーの鮮度（PR #107 の鮮度ガードを流用） |
+| `chg_pct_<ASSET>` | float | 主要9資産それぞれの当日変化率（生値） |
+| `close_<ASSET>` | float | 主要9資産それぞれの終値（生値） |
+| `input_assets_available` / `input_assets_expected` | int | 取得できた資産数 / 期待数（9） |
+| `staleness_days` | int | 元になった価格バーの鮮度 |
 | `status` | enum | `ok` / `stale` / `insufficient_data` |
+| `status_reason` | str | `ok` 以外のときの理由（空欄は理由なし） |
 
 ### status の判定
 
-- `ok`: `input_assets_available >= 7` かつ `staleness_days <= 1`
-- `stale`: 取得はできたが鮮度が落ちている（`staleness_days >= 2`）
-- `insufficient_data`: 上記を満たさない。**値を推測で埋めない**
+- `insufficient_data`: `input_assets_available < 7`、またはバー日付が判定できない。**値を推測で埋めない**
+- `stale`: `staleness_days >= 4`
+- `ok`: 上記以外
+
+**閾値 4 日の根拠**: 通常の週末は金→日で 2 日、3 連休で 3 日空くのが正常。ここを 2 日にすると
+毎週月曜が `stale` になり警告が意味を失う。4 日以上空いていれば取得が止まっている可能性が高い。
+`staleness_days` の生値も保存されるので、消費側が独自にもっと厳しく判定することもできる。
+
+なお `status` が `ok` でなくてもスコアは算出できる分だけ記録する。資産が欠けると
+`narrative_confidence` が自動的に下がるため、消費側は `status` と `narrative_confidence` を
+併せて見る。
 
 ---
 
@@ -121,9 +162,10 @@ JP の判断時刻（`decision_date` の寄り前）より **`usable_from_utc` �
 `cutoff_violation` と同じ思想であり、既存の `src/audit_narrative_lookahead.py` の監査対象に
 本ファイルを追加して機械的に検査する。
 
-### 取り込む変数は最初から全部入れない
+### 検証に投入する変数は最初から全部入れない
 
-10 スコアすべてを説明変数にすると、日本株の想定サンプル数（1銘柄スイングで年間数十件規模）に
+§4 のとおり**保存は 39 列すべて**行う。そのうえで、モデルに投入する変数は絞る。
+保存された全変数を説明変数にすると、日本株の想定サンプル数（1銘柄スイングで年間数十件規模）に
 対して変数が多すぎ、ノイズを拾う。**事前に理由で 3 個に絞る**（後から成績を見て選ぶと後知恵）。
 
 初期採用候補と、その理由:
@@ -158,11 +200,11 @@ Phase 29.3 の Ablation 評価フレームを流用し、次の2系統を比較�
 
 ## 9. 実装順序
 
-| 段階 | 内容 | 前提 |
-|---|---|---|
-| 27.3-a | `src/export_market_context_snapshot.py` + `data/market_context_daily.csv` + daily_cycle への組み込み | なし（**今すぐ着手可能**） |
-| 27.3-b | JP 側の参照列追加と結合規則、lookahead 監査への登録 | 27.3-a |
-| 27.3-c | Ablation による検証 | JP closed 評価 30 件 |
+| 段階 | 内容 | 前提 | 状態 |
+|---|---|---|---|
+| 27.3-a | `src/export_market_context_snapshot.py` + `data/market_context_daily.csv` + daily_cycle への組み込み | なし | ✅ 実装済 |
+| 27.3-b | JP 側の参照列追加と結合規則、lookahead 監査への登録 | 27.3-a + JP の dry-run 開始 | ⏳ |
+| 27.3-c | Ablation による検証 → ゲート判断 | JP closed 評価 30 件 | ⏳ |
 
 ### 27.3-a を先に、かつ早く着手すべき理由
 
@@ -175,6 +217,14 @@ Phase 29.3 の Ablation 評価フレームを流用し、次の2系統を比較�
 
 これは「実装はデータを待たない」（SPEC_CROSS_ASSET_REGIME.md §7）と同じ判断。
 
+### 他プロジェクトへの適用（将来）
+
+同じ「市場環境を point-in-time で保存し、後から個別要因と分離して検証する」構造は、
+決算研究（ERS / earnings-research-system）にもそのまま使える。
+「決算は良かったのに地合いで売られた」を、銘柄要因と市場要因に分けて研究できるようになる。
+本仕様は日本株スイングを最初の消費者として書いているが、`data/market_context_daily.csv` 自体は
+特定の消費者に依存しない汎用の feature store として設計してある。
+
 ---
 
 ## 10. 現時点の既知の制約
@@ -182,6 +232,8 @@ Phase 29.3 の Ablation 評価フレームを流用し、次の2系統を比較�
 - **`data/jp_swing_signals.csv` は 0 行**（2026-08-25 時点）。JP 側の判断実績がまだ存在しないため、
   「市場コンテキストを足すと精度が上がる」という仮説は**現時点では検証不能**。
   27.3-a の価値は蓄積開始であって、精度改善の実証ではない。
+- 27.3-a の初回行は**ローカル実行**で記録されている（`source_run_id=local`）。
+  2 行目以降は daily cycle（21:55 UTC）が記録する。
 - 借用できるのは市場レベルの文脈のみ（§1）。銘柄固有ナラティブの自動化は本仕様の範囲外。
 - コスト値は `config/jp_cost_model.json` が unconfigured のままであり、net-R 基準の評価は
   依然として使えない（Phase 26.2 と同じ制約）。
