@@ -1,8 +1,13 @@
-"""Append generated daily signals into the official signal ledger.
+"""Append generated daily signals into the dedicated generated-signal ledger.
 
 This bridges the automated daily generator output (`results/signals.csv`) into
-`data/signal_log.csv`, which is the durable input used by weekly reviews and
-prediction scoring. The append is intentionally conservative:
+`data/generated_signal_log.csv` — a ledger SEPARATE from `data/signal_log.csv`.
+data/signal_log.csv は「GPT判断の予測台帳」であり、機械生成行を混ぜると
+(1) NO_TRADE系signal_idの完全一致衝突で後続のGPT取込が静かに捨てられる
+(2) 採点・較正・執行simはoriginで絞らないため統計がGPT/機械無区別に汚染される
+(3) ヘッダが29列→41列へ拡張され28列契約が壊れる
+ため、隔離ファイルへ書く(2026-08-25 人間決定、経緯はdocs/gpt_prompt_changelog.md (11))。
+The append is intentionally conservative:
 
 - append only new `signal_id` values
 - preserve existing ledger rows
@@ -20,7 +25,7 @@ import pandas as pd
 
 
 SIGNALS_PATH = Path("results/signals.csv")
-LEDGER_PATH = Path("data/signal_log.csv")
+LEDGER_PATH = Path("data/generated_signal_log.csv")
 SUMMARY_PATH = Path("results/signal_ledger_append_summary.json")
 DEFAULT_ORIGIN = "daily_cycle"
 
