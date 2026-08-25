@@ -154,3 +154,36 @@ def test_column_order_is_stable():
     assert list(ledger.columns) == mcs.SNAPSHOT_COLUMNS
     assert mcs.SNAPSHOT_COLUMNS[0] == "snapshot_id"
     assert "usable_from_utc" in mcs.SNAPSHOT_COLUMNS
+
+
+def test_divergent_asset_dates_do_not_hide_a_stale_feed():
+    """一部の資産だけ古い状態を、全体の最新日で隠さない(false-green 防止)。
+
+    実データで確認された事象: 2026-08-25 の snapshot は US10Y だけ 1 日古く、
+    2026-06-10 の記録では DXY が 1 日古い一方 USDJPY は 1 日進んでいた。
+    """
+    frame = market_frame()
+    frame.loc[frame["asset"] == "US10Y", "date"] = "2026-08-20"
+    row = mcs.build_snapshot_row(frame, generated_dt=GENERATED)
+
+    # 最新バーは当日なので context_date と staleness_days は 0 のまま
+    assert row["context_date"] == "2026-08-26"
+    assert row["staleness_days"] == 0
+    # だが最古資産は 6 日前。ここが隠れないこと
+    assert row["oldest_asset_date"] == "2026-08-20"
+    assert row["max_asset_staleness_days"] == 6
+    assert row["asset_date_spread_days"] == 6
+    assert row["status"] == "stale"
+    assert "最も古い資産" in row["status_reason"]
+
+
+def test_asset_dated_ahead_does_not_break_freshness():
+    """FX が米株より 1 日先の日付を持つのは正常。これで stale にしない。"""
+    frame = market_frame()
+    frame.loc[frame["asset"] == "USDJPY", "date"] = "2026-08-27"
+    row = mcs.build_snapshot_row(frame, generated_dt=GENERATED)
+    assert row["context_date"] == "2026-08-27"
+    assert row["staleness_days"] == -1
+    assert row["max_asset_staleness_days"] == 0
+    assert row["asset_date_spread_days"] == 1
+    assert row["status"] == "ok"

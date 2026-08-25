@@ -34,7 +34,11 @@ jobs:
 
       - name: Record market context snapshot (point-in-time feature store)
         run: |
-          python src/export_market_context_snapshot.py || echo "warning - market context snapshot failed; continuing"
+          rm -f results/.mctx_failed
+          python src/export_market_context_snapshot.py || {
+            echo "::error::market context snapshot failed; no point-in-time row recorded for this run"
+            mkdir -p results && touch results/.mctx_failed
+          }
 
       - name: Generate signals (base + shadow weights)
         run: python src/generate_signal.py
@@ -81,6 +85,17 @@ jobs:
             git pull --rebase origin main
             git push origin main
           fi
+
+      - name: Fail if the point-in-time snapshot was not recorded
+        if: always()
+        run: |
+          # この欠落は後から埋められない(当時の値は再構成すると lookahead 汚染になる)。
+          # 日次サイクル自体は最後まで走らせたうえで、ジョブは赤にして通知を出す。
+          if [ -f results/.mctx_failed ]; then
+            echo "::error::point-in-time market context snapshot missing for this run - this gap cannot be backfilled later"
+            exit 1
+          fi
+          echo "market context snapshot recorded"
 
       - name: Upload TSO artifacts
         if: always()

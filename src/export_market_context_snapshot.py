@@ -67,6 +67,9 @@ QUALITY_COLUMNS = [
     "input_assets_available",
     "input_assets_expected",
     "staleness_days",
+    "oldest_asset_date",
+    "max_asset_staleness_days",
+    "asset_date_spread_days",
     "status",
     "status_reason",
 ]
@@ -116,25 +119,33 @@ def latest_rows_by_asset(market: pd.DataFrame) -> dict[str, dict]:
     return out
 
 
-def context_date_of(rows: dict[str, dict]) -> pd.Timestamp | None:
-    """スナップショットが記述している営業日。主要資産の最新バー日付の最大値。"""
+def asset_date_bounds(rows: dict[str, dict]) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """主要資産のバー日付の (最新, 最古)。
+
+    資産ごとに配信の進みが違う(FX は米株より 1 日先、指数系は 1 日遅れることがある)ため、
+    最新日だけを見ると「一部の資産だけ古い」状態が隠れる。鮮度判定には**最古**を使う。
+    """
     dates = [row.get("_date") for asset, row in rows.items() if asset in KEY_ASSETS]
     dates = [d for d in dates if d is not None and not pd.isna(d)]
     if not dates:
         return None
-    return max(dates)
+    return max(dates), min(dates)
 
 
-def classify_status(available: int, staleness_days: int | None) -> tuple[str, str]:
+def classify_status(available: int, max_asset_staleness_days: int | None) -> tuple[str, str]:
+    """鮮度判定は**最も古い資産**を基準にする(一部だけ古い状態を隠さないため)。"""
     if available < MIN_ASSETS_FOR_OK:
         return (
             "insufficient_data",
             f"主要資産 {available}/{len(KEY_ASSETS)} 件のみ取得(必要 {MIN_ASSETS_FOR_OK} 件)",
         )
-    if staleness_days is None:
+    if max_asset_staleness_days is None:
         return "insufficient_data", "バー日付が判定できない"
-    if staleness_days >= MAX_STALENESS_DAYS:
-        return "stale", f"最新バーが {staleness_days} 日前(許容 {MAX_STALENESS_DAYS - 1} 日)"
+    if max_asset_staleness_days >= MAX_STALENESS_DAYS:
+        return (
+            "stale",
+            f"最も古い資産のバーが {max_asset_staleness_days} 日前(許容 {MAX_STALENESS_DAYS - 1} 日)",
+        )
     return "ok", ""
 
 
@@ -156,12 +167,18 @@ def build_snapshot_row(market: pd.DataFrame, generated_dt=None) -> dict:
     available_assets = [asset for asset in KEY_ASSETS if asset in rows_by_asset]
     row["input_assets_available"] = len(available_assets)
 
-    context_date = context_date_of(rows_by_asset)
-    staleness_days: int | None = None
-    if context_date is not None:
-        row["context_date"] = context_date.date().isoformat()
-        staleness_days = (generated_dt.date() - context_date.date()).days
-        row["staleness_days"] = staleness_days
+    bounds = asset_date_bounds(rows_by_asset)
+    max_asset_staleness_days: int | None = None
+    if bounds is not None:
+        newest, oldest = bounds
+        row["context_date"] = newest.date().isoformat()
+        row["oldest_asset_date"] = oldest.date().isoformat()
+        # staleness_days は最新バー基準(この行が「いつの市場」を描いているか)
+        row["staleness_days"] = (generated_dt.date() - newest.date()).days
+        # 鮮度判定に使うのは最古バー基準。一部の資産だけ古い状態を隠さない
+        max_asset_staleness_days = (generated_dt.date() - oldest.date()).days
+        row["max_asset_staleness_days"] = max_asset_staleness_days
+        row["asset_date_spread_days"] = (newest.date() - oldest.date()).days
 
     for asset in KEY_ASSETS:
         source = rows_by_asset.get(asset)
@@ -174,7 +191,7 @@ def build_snapshot_row(market: pd.DataFrame, generated_dt=None) -> dict:
         if close is not None and open_ not in (None, 0):
             row[f"chg_pct_{asset}"] = round((close - open_) / open_ * 100.0, 6)
 
-    status, reason = classify_status(len(available_assets), staleness_days)
+    status, reason = classify_status(len(available_assets), max_asset_staleness_days)
     row["status"] = status
     row["status_reason"] = reason
 
