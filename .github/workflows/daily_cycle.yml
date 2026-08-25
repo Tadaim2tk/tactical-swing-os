@@ -32,6 +32,14 @@ jobs:
       - name: Fetch market data
         run: python src/fetch_market.py
 
+      - name: Record market context snapshot (point-in-time feature store)
+        run: |
+          rm -f results/.mctx_failed
+          python src/export_market_context_snapshot.py || {
+            echo "::error::market context snapshot failed; no point-in-time row recorded for this run"
+            mkdir -p results && touch results/.mctx_failed
+          }
+
       - name: Generate signals (base + shadow weights)
         run: python src/generate_signal.py
 
@@ -68,7 +76,7 @@ jobs:
           # 機械生成分は data/generated_signal_log.csv へ隔離(予測台帳 data/signal_log.csv はGPT判断専用、
           # 2026-08-25 人間決定)。summary json は results/*.json が gitignore のため add しない(#112由来の
           # 3日連続コミット失敗の原因。診断はアーティファクトで配布)。
-          git add data/generated_signal_log.csv data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv data/execution_simulation.csv
+          git add data/generated_signal_log.csv data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv data/execution_simulation.csv data/market_context_daily.csv
           if git diff --cached --quiet; then
             echo "no ledger changes to commit"
           else
@@ -77,6 +85,17 @@ jobs:
             git pull --rebase origin main
             git push origin main
           fi
+
+      - name: Fail if the point-in-time snapshot was not recorded
+        if: always()
+        run: |
+          # この欠落は後から埋められない(当時の値は再構成すると lookahead 汚染になる)。
+          # 日次サイクル自体は最後まで走らせたうえで、ジョブは赤にして通知を出す。
+          if [ -f results/.mctx_failed ]; then
+            echo "::error::point-in-time market context snapshot missing for this run - this gap cannot be backfilled later"
+            exit 1
+          fi
+          echo "market context snapshot recorded"
 
       - name: Upload TSO artifacts
         if: always()
