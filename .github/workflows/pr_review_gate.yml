@@ -1,0 +1,43 @@
+name: Codex review gate
+
+# レビュー到着前マージ事故(#115-#117, 2026-08-25: 作成13秒後にマージ、Codexレビューは
+# 3分後着=指摘が「PRの修正」でなく「mainの負債」になった)の構造対策。
+#
+# 設計判断: ブランチ保護のrequired checkにはしない。mainへは日次CIボットが直接pushする
+# 設計(daily_cycle等)のため、保護を有効化するとボットのpushが弾かれ夜間パイプラインが
+# 止まる。代わりにこのcheckをPRに常設し、マージ手順側の恒久ルール
+# 「全checks完了を待ってからマージ」(メモリ: autonomous-merge-authorization)で効かせる。
+# チェックが黄色の間はマージしない、が運用上の合意。
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  wait-for-codex-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for Codex review (arrival = green early, max 20 min)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # chatgpt-codex-connector[bot] のレビューが届いたら即成功。
+          # 20分待っても届かなければ「レビューなしPR」として成功にする
+          # (Codex側の停止で全マージが詰まるのを防ぐ。締め切りは緩く、既定は待つ)。
+          for i in $(seq 1 40); do
+            n=$(gh api "repos/$REPO/pulls/$PR/reviews" \
+              --jq '[.[] | select(.user.login=="chatgpt-codex-connector[bot]")] | length')
+            if [ "$n" -gt 0 ]; then
+              echo "Codex review arrived: $n review(s). Read it before merging."
+              exit 0
+            fi
+            echo "waiting for Codex review... ($i/40)"
+            sleep 30
+          done
+          echo "No Codex review within 20 min — gate passes as a no-review PR."
