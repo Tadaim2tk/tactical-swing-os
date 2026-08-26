@@ -224,7 +224,22 @@ def load_existing() -> pd.DataFrame:
 
 
 def append_snapshot(row: dict, existing: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
-    """append-only。同一 generated_at_utc が既にあれば何もしない(再実行の冪等性)。"""
+    """append-only。同一 generated_at_utc が既にあれば何もしない(再実行の冪等性)。
+
+    schema enforcement: 既存ファイルに SNAPSHOT_COLUMNS 外の列があれば例外で落とす。
+    黙って温存すると concat の列和集合が自己増殖し、「新行は大文字列だけ・旧行は
+    小文字列だけが埋まる」片側欠損が毎日1行ずつ増える(2026-08-25 の close_btc/close_BTC
+    事故)。列を変えたいときは明示的な移行コミットで先にヘッダを契約へ一致させること
+    (行の append-only と列の schema enforcement は別の不変条件)。
+    """
+    unknown = [c for c in existing.columns if c not in SNAPSHOT_COLUMNS]
+    if unknown:
+        raise ValueError(
+            "market_context_daily.csv に契約外の列: "
+            + ", ".join(sorted(unknown))
+            + " — 追記を拒否。明示的な移行コミットで列を SNAPSHOT_COLUMNS に一致させてから再実行"
+        )
+
     if not existing.empty and "generated_at_utc" in existing.columns:
         already = existing["generated_at_utc"].astype(str) == str(row["generated_at_utc"])
         if bool(already.any()):
@@ -234,8 +249,7 @@ def append_snapshot(row: dict, existing: pd.DataFrame) -> tuple[pd.DataFrame, bo
     for column in SNAPSHOT_COLUMNS:
         if column not in combined.columns:
             combined[column] = ""
-    ordered = [c for c in SNAPSHOT_COLUMNS] + [c for c in combined.columns if c not in SNAPSHOT_COLUMNS]
-    return combined[ordered], True
+    return combined[list(SNAPSHOT_COLUMNS)], True
 
 
 def export_snapshot() -> pd.DataFrame:
