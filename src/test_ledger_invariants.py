@@ -73,3 +73,19 @@ def test_snapshot_append_only_vs_parent_commit():
     p = prev.set_index("snapshot_id").loc[prev_ids]
     c = cur.set_index("snapshot_id").loc[prev_ids]
     pd.testing.assert_frame_equal(p, c, check_like=True, obj="既存行の値")
+
+
+def test_exporter_loads_committed_ledger_case_sensitively():
+    # Codex事後レビューP1(#118): calibration_io.read_csv経由の読込は全ヘッダを小文字化し、
+    # schema enforcementが契約列を「契約外」と誤認して日次スナップショットが恒久失敗する。
+    # コミット済み台帳を実際にload→appendして例外が出ないことを固定する。
+    if not LEDGER.exists():
+        pytest.skip("台帳未作成")
+    import export_market_context_snapshot as ex
+    existing = ex.load_existing()
+    assert list(existing.columns) == list(SNAPSHOT_COLUMNS), "読込時に列ケースが変わっている"
+    row = {c: "" for c in SNAPSHOT_COLUMNS}
+    row["generated_at_utc"] = "9999-01-01T00:00:00Z"
+    row["snapshot_id"] = "MCTX-TEST-CASE-SENSITIVE"
+    combined, appended = ex.append_snapshot(row, existing)
+    assert appended and list(combined.columns) == list(SNAPSHOT_COLUMNS)

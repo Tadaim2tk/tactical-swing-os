@@ -217,8 +217,21 @@ def build_snapshot_row(market: pd.DataFrame, generated_dt=None) -> dict:
 
 
 def load_existing() -> pd.DataFrame:
-    existing = read_csv(SNAPSHOT_CSV)
-    if existing.empty:
+    """台帳を**ヘッダの大文字小文字を保存したまま**読む。
+
+    calibration_io.read_csv は normalize_headers で全ヘッダを小文字化するため、
+    契約列 close_BTC が close_btc として読まれ、(1) 旧実装では concat の列和集合で
+    大小両ケースが併存する自己増殖(2026-08-25事故の真の発生機構)、(2) #118 の
+    schema enforcement では契約列18本が「契約外」と誤認され追記が恒久失敗する
+    (Codex事後レビューP1)。ここは生の pandas で大文字小文字を保存して読む。
+    """
+    if not SNAPSHOT_CSV.exists():
+        return pd.DataFrame(columns=SNAPSHOT_COLUMNS)
+    try:
+        existing = pd.read_csv(SNAPSHOT_CSV, dtype=str, keep_default_na=False)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame(columns=SNAPSHOT_COLUMNS)
+    if existing.empty and len(existing.columns) == 0:
         return pd.DataFrame(columns=SNAPSHOT_COLUMNS)
     return existing
 
