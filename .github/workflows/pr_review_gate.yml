@@ -26,13 +26,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # chatgpt-codex-connector[bot] のレビューが届いたら即成功。
           # 20分待っても届かなければ「レビューなしPR」として成功にする
           # (Codex側の停止で全マージが詰まるのを防ぐ。締め切りは緩く、既定は待つ)。
+          # レビューは現在のhead SHAに対するものだけを数える(Codex P1指摘への対応:
+          # synchronize時に旧コミットへの古いレビューで即グリーンになるのを防ぐ。
+          # Codexが更新コミットを再レビューしない場合はタイムアウト通過となる)。
           for i in $(seq 1 40); do
             n=$(gh api "repos/$REPO/pulls/$PR/reviews" \
-              --jq '[.[] | select(.user.login=="chatgpt-codex-connector[bot]")] | length')
+              --jq --arg head "$HEAD_SHA" \
+              '[.[] | select(.user.login=="chatgpt-codex-connector[bot]" and .commit_id==$head)] | length')
             if [ "$n" -gt 0 ]; then
               echo "Codex review arrived: $n review(s). Read it before merging."
               exit 0
