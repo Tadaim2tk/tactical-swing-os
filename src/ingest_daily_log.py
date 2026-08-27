@@ -222,6 +222,18 @@ def validate_row(row: pd.Series, existing_ids: set[str], raw_dir: Path = RAW_DIR
                         f"記録水準 {ref} が実価格 {anchor:.2f} と桁違い (x{ratio:.2f}) — "
                         "別商品の水準を記録していないか要確認 (採点では scale_mismatch 隔離)"
                     )
+            # rr 自己整合検算 (#122 Codex P2: 2026-08-27 の3行で申告rrが記帳水準からの
+            # 再計算(中点基準)と最大0.14乖離。過大側は B+ の RR>=1.5 条件を偽って満たす。
+            # 台帳は申告値のまま記録し、乖離は取込時に警告として顕在化させる)
+            tp1 = pd.to_numeric(row.get("tp1"), errors="coerce")
+            rr = pd.to_numeric(row.get("rr"), errors="coerce")
+            if pd.notna(tp1) and pd.notna(rr) and abs(ref - float(sl)) > 0:
+                rr_calc = abs(float(tp1) - ref) / abs(ref - float(sl))
+                if abs(rr_calc - float(rr)) > 0.10:
+                    warnings.append(
+                        f"rr {float(rr):.2f} が記帳水準からの再計算 {rr_calc:.2f} と乖離 (中点基準・許容0.10) — "
+                        "申告のまま記録するが、RR条件(B+/A級)の判定には再計算値を優先すること"
+                    )
     return "append", warnings
 
 

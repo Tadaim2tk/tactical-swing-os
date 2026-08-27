@@ -155,3 +155,22 @@ def test_fresh_raw_data_no_stale_warning(tmp_path):
     text = f"{HEADER}\n2026-07-10,FRESH-001,WTI,BUY,B,M,72.5,73.5,70.0,78.0,81.0,2.0,0.58,0.35,,,,0.25,N,60,,,,70,,i,v,verified"
     r = idl.ingest(text, origin="chatgpt_app", apply=False, run_score=False, ledger_path=ledger, raw_dir=raw)
     assert "stale_raw_warning" not in r
+
+
+def test_rr_inconsistency_warned_at_ingest(tmp_path):
+    # #122 Codex P2: 申告rrが記帳水準(中点基準)からの再計算と乖離したら取込時に警告する。
+    # 記録自体は申告値のまま許可(record-as-is)。整合行には警告を出さない。
+    ledger = _ledger(tmp_path)
+    raw = _raw(tmp_path, asset="BTC", close=77000)
+    text = (
+        f"{HEADER}\n"
+        # mid=77750, risk=5250, reward=7250 -> rr_calc=1.38。申告1.50は乖離>0.10で警告
+        "2026-08-27,RRX-001,BTC,BUY,B,PULLBACK,76500,79000,72500,85000,89000,1.50,0.62,0.40,97,72,45,0.25,R,80,93,82,79,83,89,inv,vt,verified\n"
+        # mid=77750, risk=5250, reward=7250 -> 申告1.38は整合(乖離0.00)
+        "2026-08-27,RRX-002,BTC,BUY,B,PULLBACK,76500,79000,72500,85000,89000,1.38,0.62,0.40,97,72,45,0.25,R,80,93,82,79,83,89,inv,vt,verified"
+    )
+    r = idl.ingest(text, origin="chatgpt_app", apply=False, run_score=False, ledger_path=ledger, raw_dir=raw)
+    by_id = {d["signal_id"]: d for d in r["details"]}
+    assert r["rejected"] == 0 and r["would_append"] == 2
+    assert any("再計算" in w and "乖離" in w for w in by_id["RRX-001"]["warnings"])
+    assert not any("再計算" in w for w in by_id["RRX-002"]["warnings"])
