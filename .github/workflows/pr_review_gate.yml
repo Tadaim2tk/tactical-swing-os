@@ -3,11 +3,11 @@ name: Codex review gate
 # レビュー到着前マージ事故(#115-#117, 2026-08-25: 作成13秒後にマージ、Codexレビューは
 # 3分後着=指摘が「PRの修正」でなく「mainの負債」になった)の構造対策。
 #
-# 設計判断: ブランチ保護のrequired checkにはしない。mainへは日次CIボットが直接pushする
-# 設計(daily_cycle等)のため、保護を有効化するとボットのpushが弾かれ夜間パイプラインが
-# 止まる。代わりにこのcheckをPRに常設し、マージ手順側の恒久ルール
-# 「全checks完了を待ってからマージ」(メモリ: autonomous-merge-authorization)で効かせる。
-# チェックが黄色の間はマージしない、が運用上の合意。
+# 設計判断(2026-08-27改定): ruleset "main-merge-gate" がこのcheckをmainの必須チェックに
+# しており、チェック完了前のマージはGitHub側で物理的に弾かれる(人側手順ルールから機構へ移管、
+# governance_reform_2026-07 §6)。日次CIボットのmain直接pushはDeploy key認証に切替えて
+# bypass指定済みのため、夜間パイプラインは止まらない。fail-open(20分timeoutで成功)は維持:
+# Codex停止時にマージ不能で詰まらせないため。
 
 on:
   pull_request:

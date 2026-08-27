@@ -18,6 +18,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # mainへpushするためDeploy key認証(main-merge-gate bypass、§6)
+          ssh-key: ${{ secrets.TSO_BOT_DEPLOY_KEY }}
 
       - name: Set up Python
         uses: actions/setup-python@v5

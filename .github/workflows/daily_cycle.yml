@@ -20,6 +20,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # main-merge-gate ruleset (2026-08-27): mainへの直接pushはDeploy keyのみbypass可。
+          # 既定のGITHUB_TOKENでは必須チェックに弾かれるため、pushするワークフローは
+          # この鍵でcheckout/pushする(governance_reform_2026-07 §6)。
+          ssh-key: ${{ secrets.TSO_BOT_DEPLOY_KEY }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
