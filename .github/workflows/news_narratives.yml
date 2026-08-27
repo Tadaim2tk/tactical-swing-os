@@ -18,9 +18,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # mainへpushするためDeploy key認証(main-merge-gate bypass、§6)
-          ssh-key: ${{ secrets.TSO_BOT_DEPLOY_KEY }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -50,6 +47,8 @@ jobs:
 
       - name: Commit narrative memory store (data append only)
         if: github.ref == 'refs/heads/main'
+        env:
+          TSO_BOT_DEPLOY_KEY: ${{ secrets.TSO_BOT_DEPLOY_KEY }}
         run: |
           git config user.name "tso-actions-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -60,7 +59,12 @@ jobs:
             git commit -m "Append narrative memory store [skip ci]" \
               -m "Data-append commit permitted by governance_reform_2026-07 (data/ only)."
             git pull --rebase origin main
-            git push origin main
+            # main-merge-gate ruleset (§6): 鍵はpush直前に書き込み直後に破棄(#121 Codex P1)。
+            key_file=$(mktemp)
+            trap 'rm -f "$key_file"' EXIT
+            printf '%s\n' "$TSO_BOT_DEPLOY_KEY" > "$key_file"
+            GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+              git push "git@github.com:$GITHUB_REPOSITORY.git" HEAD:main
           fi
 
       - name: Upload news narrative artifacts

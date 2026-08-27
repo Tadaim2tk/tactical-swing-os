@@ -20,9 +20,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # mainへpushするためDeploy key認証(main-merge-gate bypass、§6)
-          ssh-key: ${{ secrets.TSO_BOT_DEPLOY_KEY }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,12 +41,24 @@ jobs:
         run: python src/build_narrative_reliability.py
 
       - name: Commit narrative artifacts
+        env:
+          TSO_BOT_DEPLOY_KEY: ${{ secrets.TSO_BOT_DEPLOY_KEY }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add results/signal_narrative_alignment.csv results/narrative_reliability.csv results/narrative_reliability.json reports/narrative/ 2>/dev/null || true
-          git diff --cached --quiet || git commit -m "chore: narrative alignment + reliability artifacts [skip ci]"
-          git push || echo "warning: push failed (possibly no changes or concurrent update)"
+          if git diff --cached --quiet; then
+            echo "no narrative changes to commit"
+          else
+            git commit -m "chore: narrative alignment + reliability artifacts [skip ci]"
+            # main-merge-gate ruleset (§6): 鍵はpush直前に書き込み直後に破棄(#121 Codex P1)。
+            key_file=$(mktemp)
+            trap 'rm -f "$key_file"' EXIT
+            printf '%s\n' "$TSO_BOT_DEPLOY_KEY" > "$key_file"
+            GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+              git push "git@github.com:$GITHUB_REPOSITORY.git" "HEAD:$GITHUB_REF_NAME" \
+              || echo "warning: push failed (possibly concurrent update)"
+          fi
 
       - name: Upload narrative artifacts
         uses: actions/upload-artifact@v4
