@@ -14,6 +14,8 @@ import evaluation_loader
 
 RESULTS_DIR = Path("results")
 REPORTS_DIR = Path("reports/weekly")
+PREDICTION_LEDGER_PATH = Path("data/signal_log.csv")
+PREDICTION_SCORES_PATH = Path("data/prediction_log_scores.csv")
 REVIEW_COLUMNS = [
     "week_start",
     "week_end",
@@ -40,6 +42,10 @@ REVIEW_COLUMNS = [
     "evaluation_source",
     "latest_evaluations_available",
     "fallback_used",
+    "signal_source",
+    "prediction_log_rows",
+    "prediction_score_rows",
+    "prediction_awaiting_rows",
 ]
 DATE_COLUMNS = ["date", "signal_date", "evaluation_date", "hit_date", "run_ts"]
 SHEET_MAPPINGS = {
@@ -150,6 +156,13 @@ def load_from_local_csv() -> dict[str, pd.DataFrame]:
     return data
 
 
+def load_prediction_log_data() -> dict[str, pd.DataFrame]:
+    return {
+        "signal_log": normalize_headers(read_csv(PREDICTION_LEDGER_PATH)),
+        "prediction_scores": normalize_headers(read_csv(PREDICTION_SCORES_PATH)),
+    }
+
+
 def load_input_data() -> dict[str, pd.DataFrame]:
     sheets_data = load_from_sheets()
     if sheets_data is not None:
@@ -196,6 +209,60 @@ def enrich_evaluations(evaluations: pd.DataFrame, signals: pd.DataFrame) -> pd.D
     if "date_signal" in out.columns and "date" not in out.columns:
         out["date"] = out["date_signal"]
     return out.drop(columns=[col for col in ["date_signal"] if col in out.columns])
+
+
+def prediction_scores_to_evaluations(scores: pd.DataFrame) -> pd.DataFrame:
+    """Map manual prediction-log scores into the weekly review evaluation shape."""
+    if scores.empty:
+        return pd.DataFrame()
+    out = scores.copy()
+    status = out.get("status", pd.Series([""] * len(out), index=out.index)).astype(str).str.lower()
+    out["evaluation_status"] = "pending"
+    out.loc[status == "scored", "evaluation_status"] = "closed"
+    out.loc[status.isin(["invalid_data", "invalid"]), "evaluation_status"] = "skipped"
+    if "r_result" not in out.columns:
+        if "r_close_5d" in out.columns:
+            out["r_result"] = out["r_close_5d"]
+        elif "r_close_10d" in out.columns:
+            out["r_result"] = out["r_close_10d"]
+        else:
+            out["r_result"] = ""
+    if "error_type" not in out.columns:
+        out["error_type"] = status.mask(status == "", "未分類")
+    return out
+
+
+def select_weekly_inputs(
+    signals: pd.DataFrame,
+    evaluations: pd.DataFrame,
+    prediction_signals: pd.DataFrame,
+    prediction_scores: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Prefer the GPT prediction ledger for the weekly human-facing review.
+
+    The live SIGNALS/EVALUATIONS path is still kept as a fallback. This avoids
+    showing a false zero-signal week when the primary Phase-29 learning ledger
+    has accumulated rows but the legacy results/SHEETS signal snapshot is stale.
+    """
+    if not prediction_signals.empty:
+        return (
+            prediction_signals,
+            prediction_scores_to_evaluations(prediction_scores),
+            {
+                "signal_source": "prediction_log",
+                "evaluation_source_override": "prediction_log_scores",
+                "fallback_used_override": True,
+            },
+        )
+    return (
+        signals,
+        evaluations,
+        {
+            "signal_source": "signals",
+            "evaluation_source_override": "",
+            "fallback_used_override": None,
+        },
+    )
 
 
 def numeric_r(df: pd.DataFrame) -> pd.Series:
@@ -342,6 +409,11 @@ def best_worst_asset(asset_table: pd.DataFrame) -> tuple[str, str]:
     if asset_table.empty or "total_r" not in asset_table.columns:
         return "", ""
     scored = asset_table.copy()
+    if "closed" in scored.columns:
+        closed = pd.to_numeric(scored["closed"], errors="coerce").fillna(0)
+        scored = scored[closed > 0]
+        if scored.empty:
+            return "", ""
     scored["total_r"] = pd.to_numeric(scored["total_r"], errors="coerce")
     scored = scored.dropna(subset=["total_r"])
     if scored.empty:
@@ -370,7 +442,13 @@ def next_week_decision(metrics: dict, closed_count: int) -> tuple[str, float, li
     return mode, risk, notes
 
 
-def rule_changes(metrics: dict, rank_table: pd.DataFrame, pending_count: int, mode_notes: list[str]) -> list[str]:
+def rule_changes(
+    metrics: dict,
+    rank_table: pd.DataFrame,
+    pending_count: int,
+    mode_notes: list[str],
+    pending_note: str = "",
+) -> list[str]:
     changes = []
     if metrics["total_r"] > 0 and metrics["win_rate"] >= 0.45:
         changes.append("現行ルール維持")
@@ -383,7 +461,7 @@ def rule_changes(metrics: dict, rank_table: pd.DataFrame, pending_count: int, mo
             changes.append("A級判定条件を再検証")
 
     if pending_count >= 3:
-        changes.append("評価期間またはentry条件の見直し")
+        changes.append(pending_note or "評価期間またはentry条件の見直し")
     changes.extend(mode_notes)
     while len(changes) < 3:
         changes.append("")
@@ -447,12 +525,35 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
     signals = filter_period(input_data["signals"], start, end)
     evaluations = filter_period(input_data["evaluations"], start, end)
     market_snapshot = filter_period(input_data["market_snapshot"], start, end)
+
+    prediction_data = load_prediction_log_data()
+    prediction_signals = filter_period(prediction_data["signal_log"], start, end)
+    prediction_scores = filter_period(prediction_data["prediction_scores"], start, end)
+    signals, evaluations, weekly_source_meta = select_weekly_inputs(
+        signals,
+        evaluations,
+        prediction_signals,
+        prediction_scores,
+    )
+    if weekly_source_meta["evaluation_source_override"]:
+        evaluation_meta = {
+            **evaluation_meta,
+            "evaluation_source": weekly_source_meta["evaluation_source_override"],
+            "latest_evaluations_available": False,
+            "fallback_used": bool(weekly_source_meta["fallback_used_override"]),
+        }
+
     evaluations = enrich_evaluations(evaluations, signals)
 
     metrics = r_metrics(evaluations)
     closed_count = metrics["closed_count"]
     pending_count = count_status(evaluations, "pending")
     skipped_count = count_status(evaluations, "skipped")
+    prediction_awaiting_rows = (
+        int((prediction_scores["status"].astype(str) == "awaiting_horizon").sum())
+        if "status" in prediction_scores.columns and not prediction_scores.empty
+        else 0
+    )
 
     rank_table = rank_stats(signals, evaluations)
     asset_table = group_stats(signals, evaluations, "asset") if (not signals.empty or not evaluations.empty) else pd.DataFrame()
@@ -461,7 +562,10 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
     missed_table, missed_note = missed_audit(signals, evaluations)
     best_asset, worst_asset = best_worst_asset(asset_table)
     mode, max_daily_risk_pct, mode_notes = next_week_decision(metrics, closed_count)
-    changes = rule_changes(metrics, rank_table, pending_count, mode_notes)
+    pending_note = ""
+    if weekly_source_meta["signal_source"] == "prediction_log" and pending_count and pending_count == prediction_awaiting_rows:
+        pending_note = "予測ログは評価期間中（awaiting_horizon）"
+    changes = rule_changes(metrics, rank_table, pending_count, mode_notes, pending_note)
     reason_analysis, no_trade_analysis = load_reason_code_analysis()
     reason_positive, reason_negative, reason_missed, reason_note = reason_code_weekly_summary(reason_analysis, no_trade_analysis)
 
@@ -491,6 +595,10 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
         "evaluation_source": evaluation_meta["evaluation_source"],
         "latest_evaluations_available": evaluation_meta["latest_evaluations_available"],
         "fallback_used": evaluation_meta["fallback_used"],
+        "signal_source": weekly_source_meta["signal_source"],
+        "prediction_log_rows": len(prediction_signals),
+        "prediction_score_rows": len(prediction_scores),
+        "prediction_awaiting_rows": prediction_awaiting_rows,
     }
     review = pd.DataFrame([review_row], columns=REVIEW_COLUMNS)
 
@@ -520,6 +628,8 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
 {markdown_table(review)}
 
 評価データソース: {evaluation_meta["evaluation_source"]} / latest_evaluations_available: {evaluation_meta["latest_evaluations_available"]} / fallback_used: {evaluation_meta["fallback_used"]}
+
+シグナル集計ソース: {weekly_source_meta["signal_source"]} / prediction_log_rows: {len(prediction_signals)} / prediction_score_rows: {len(prediction_scores)}
 
 ## 3. Rank別成績
 
