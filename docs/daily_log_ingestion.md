@@ -80,3 +80,13 @@ ChatGPT アプリ側のプロジェクト指示も v2 の内容に差し替え�
 
 経路1（アプリ貼り付け）・経路2（gpt_terminal）とも同一契約。signal_id は台帳の既存形式
 `YYYYMMDD_ASSET_SIDE_TYPE` に統一（旧 TSO-YYYYMMDD-NNN 連番は廃止）。
+
+## 主役申告の記録（2026-09-01 changelog(13)）
+
+route-3 取込の際、GPT本文の「本日の市場の主役」1語を追記型台帳へ記録する（LOG28列は不変のため本文からの転記が必要。10月月次でコーパスの機械判定LEADER_V1との一致率を比較する）:
+
+```
+python tools/record_leader.py <日付> <資産名>
+```
+
+記録先: data/leader_observations.csv（append-only、同日重複は拒否）。
