@@ -206,6 +206,10 @@ def append_note(notes: str | None, note: str) -> str:
 def future_bars(df: pd.DataFrame, signal_date: pd.Timestamp | None, horizon: int) -> pd.DataFrame:
     if signal_date is None or df.empty:
         return pd.DataFrame()
+    # 厳密不等号(>)は意図的: この評価器が扱う機械生成シグナル(results/signals.csv)の
+    # dateは「シグナルを導出した元バー」の日付で、そのバーを窓に入れると自己参照
+    # (元バーで約定・決着を偽認定)になる(#128 Codex P1)。GPT予測台帳(dateがJST判断日)の
+    # 遡及採点は score_prediction_log 側で、資産の暦に応じた別のアンカー規約を使う。
     future = df[df["date"] > signal_date].copy()
     if horizon > 0:
         future = future.head(horizon)

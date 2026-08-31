@@ -59,17 +59,55 @@ def test_all_ranks_scored_including_no_trade(tmp_path):
 # === 2. 反後知恵の R 計算 ===
 
 def test_actionable_r_uses_recorded_reference_and_risk(tmp_path):
-    dates, close = _prices(tmp_path)  # 6/8=index5, close=75.0
+    dates, close = _prices(tmp_path)  # 6/8=index5 close=75.0, アンカー=前営業日6/5=index4 close=74.0
     scores = spl.score_ledger(pd.DataFrame([_row()]), raw_dir=tmp_path, scored_at="t")
     r = scores.iloc[0]
     assert r["side"] == "LONG"  # BUY正規化
     assert abs(r["reference_price"] - 72.5) < 1e-9
     assert abs(r["risk_unit"] - 3.0) < 1e-9
-    # +5営業日: index10 close=80.0 -> R = (80-72.5)/3
-    assert abs(r["r_close_5d"] - round((80.0 - 72.5) / 3.0, 4)) < 1e-9
+    # +5バー(アンカー基準): index9 close=79.0 -> R = (79-72.5)/3
+    assert abs(r["r_close_5d"] - round((79.0 - 72.5) / 3.0, 4)) < 1e-9
     assert r["result_5d"] == "success"
     assert r["status"] == "scored"
     assert r["entry_touched_5d"] in (True, False)
+
+
+def test_anchor_is_last_bar_known_at_decision_time(tmp_path):
+    # 監査P1-3: 台帳dateはJST朝7時の判断日。同ラベルのバーは判断後に確定するため、
+    # アンカーは前営業日バー。fwd_return_1d は「判断直後の第1セッション」のリターンになる。
+    _prices(tmp_path)  # 6/5=close74.0, 6/8=close75.0
+    scores = spl.score_ledger(pd.DataFrame([_row()]), raw_dir=tmp_path, scored_at="t")
+    r = scores.iloc[0]
+    assert abs(r["anchor_close"] - 74.0) < 1e-9
+    assert abs(r["fwd_return_1d"] - round(75.0 / 74.0 - 1.0, 6)) < 1e-9
+
+
+def test_seven_day_asset_anchor_steps_back_one_more_bar(tmp_path):
+    # #128 Codex P1: 暗号資産のUTC日足は、前日ラベルのキャンドルが判断(JST朝7時)の
+    # 2時間後まで閉まらない。アンカーはさらに1本遡り(k-2)、結果窓は当日ラベルの
+    # キャンドル(k)から始まる。境界は定数でなく資産の暦から導く。
+    dates = pd.date_range("2026-06-01", periods=14)  # 週7日カレンダー
+    close = 100.0 + np.arange(14)
+    df = pd.DataFrame({"date": dates.strftime("%Y-%m-%d"), "open": close,
+                       "high": close + 0.5, "low": close - 0.5, "close": close, "volume": 1})
+    (tmp_path / "BTC.csv").write_text(df.to_csv(index=False), encoding="utf-8")
+    # 6/8(月)判断: k=index7, アンカー=index5(6/6土 close=105), fwd_1=index7(6/8 close=107)
+    scores = spl.score_ledger(
+        pd.DataFrame([_row(asset="BTC", entry_low=104.0, entry_high=106.0, sl=100.0)]),
+        raw_dir=tmp_path, scored_at="t")
+    r = scores.iloc[0]
+    assert abs(r["anchor_close"] - 105.0) < 1e-9
+    assert abs(r["fwd_return_1d"] - round(107.0 / 105.0 - 1.0, 6)) < 1e-9
+
+
+def test_entry_touch_on_decision_day_is_detected(tmp_path):
+    # known-bias #9 の解消: 判断当日バーでしか触らないentryも entry_touched_5d=True。
+    # 6/8 バー(low74.5-high75.5)だけがゾーン[74.4,74.6]に重なり、以降は上放れる。
+    _prices(tmp_path)
+    scores = spl.score_ledger(
+        pd.DataFrame([_row(entry_low=74.4, entry_high=74.6, sl=73.0)]),
+        raw_dir=tmp_path, scored_at="t")
+    assert bool(scores.iloc[0]["entry_touched_5d"]) is True
 
 
 def test_short_direction_r(tmp_path):
@@ -123,6 +161,29 @@ def test_append_scores_updates_awaiting_to_scored(tmp_path):
     merged = spl.append_scores(b, path)
     assert len(merged) == 1
     assert merged.iloc[0]["status"] == "scored"  # 最新で更新
+
+
+def test_append_scores_refuses_downgrade_of_confirmed_results(tmp_path):
+    # 監査P1-4b: 2026-08-19に一過性のデータ障害で scored 16行が invalid_data に
+    # 上書き消去された実発生への回帰テスト。確定は取得不能で消えない。
+    path = tmp_path / "scores.csv"
+    base = {c: "" for c in spl.SCORE_COLUMNS}
+    spl.append_scores(pd.DataFrame([
+        {**base, "signal_id": "A", "date": "2026-06-08", "status": "scored"},
+        {**base, "signal_id": "B", "date": "2026-06-08", "status": "awaiting_horizon"},
+    ]), path)
+    merged = spl.append_scores(pd.DataFrame([
+        {**base, "signal_id": "A", "date": "2026-06-08", "status": "invalid_data"},   # 障害日
+        {**base, "signal_id": "B", "date": "2026-06-08", "status": "invalid_data"},   # 障害日
+    ]), path)
+    by_id = merged.set_index("signal_id")
+    assert by_id.loc["A", "status"] == "scored"            # 確定は保持
+    assert by_id.loc["B", "status"] == "awaiting_horizon"  # 窓待ちも取得不能では消えない
+    # 正当な前進(awaiting→scored)は従来どおり更新される
+    merged = spl.append_scores(pd.DataFrame([
+        {**base, "signal_id": "B", "date": "2026-06-08", "status": "scored"},
+    ]), path)
+    assert merged.set_index("signal_id").loc["B", "status"] == "scored"
 
 
 def test_append_scores_preserves_timestamp_when_score_content_is_unchanged(tmp_path):

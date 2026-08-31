@@ -128,10 +128,21 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
     signal_date = pd.to_datetime(str(row.get("date") or ""), errors="coerce")
     if ohlcv.empty or pd.isna(signal_date):
         return out
-    idx = int(ohlcv["date"].searchsorted(signal_date.normalize(), side="right")) - 1
-    if idx < 0:
+    # アンカー=判断時(JST朝7時)に「閉まっていた」最後のバー。境界は資産の暦の関数
+    # (2026-08-31監査P1-3 + #128 Codex P1: 定数で持たない):
+    # - 週5日資産(米先物・指数・FX): 前日ラベルのバーは判断1時間前(06:00 JST)にclose済 → k-1
+    # - 週7日資産(暗号資産のUTC日足): 前日ラベルのキャンドルは判断2時間後(09:00 JST)まで
+    #   閉まらない=未来情報 → さらに1本遡って k-2
+    # 結果窓は k(判断後に始まる最初のバー)起点: 週5日資産は当日ラベルのバー(セッションは
+    # 判断直後に開始)、週7日資産は当日ラベルのキャンドル(09:00 JST開始。進行中キャンドルの
+    # 判断前レンジで約定を偽認定しない=不利側原則)。
+    # 旧side="right"実装はfwd_return_1dの符号を51%反転させていた(known-bias#9も同時解消)。
+    k = int(ohlcv["date"].searchsorted(signal_date.normalize(), side="left"))
+    seven_day_calendar = bool((ohlcv["date"].dt.dayofweek >= 5).any())
+    anchor_idx = k - (2 if seven_day_calendar else 1)
+    if anchor_idx < 0:
         return out
-    anchor_close = float(ohlcv.iloc[idx]["close"])
+    anchor_close = float(ohlcv.iloc[anchor_idx]["close"])
     out["anchor_close"] = round(anchor_close, 6)
 
     # データ品質ガード(反後知恵: 補正はしない・採点から正直に外すだけ):
@@ -151,7 +162,7 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
     direction = 1.0 if side == "LONG" else -1.0 if side == "SHORT" else 0.0
     incomplete = False
     for h in HORIZONS:
-        j = idx + h
+        j = k - 1 + h  # fwd_1 = 判断後最初のバー(k)のclose
         if j >= len(ohlcv):
             incomplete = True
             continue
@@ -169,7 +180,7 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
         out["actionable"] = False
 
     if actionable:
-        window5 = ohlcv.iloc[idx + 1: idx + 6]
+        window5 = ohlcv.iloc[k: k + 5]  # 判断後に始まる5バー(週5日資産は当日バーを含む)
         if not window5.empty:
             touched = ((window5["low"] <= entry_high) & (window5["high"] >= entry_low)).any()
             out["entry_touched_5d"] = bool(touched)
@@ -194,8 +205,12 @@ def score_ledger(ledger: pd.DataFrame, *, raw_dir: Path = RAW_DIR, scored_at: st
     return pd.DataFrame(rows, columns=SCORE_COLUMNS)
 
 
+# status の情報量順位: 確定 > 窓待ち > 取得不能。降格方向の上書きを禁止するために使う。
+_STATUS_RANK = {"scored": 2, "awaiting_horizon": 1, "invalid_data": 0}
+
+
 def append_scores(new_scores: pd.DataFrame, path: Path = SCORES_PATH) -> pd.DataFrame:
-    """signal_id で重複排除(最新優先=awaiting→確定の更新)して保存。"""
+    """signal_id で重複排除(awaiting→確定の更新は許可・確定→取得不能の降格は禁止)して保存。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         try:
@@ -205,7 +220,14 @@ def append_scores(new_scores: pd.DataFrame, path: Path = SCORES_PATH) -> pd.Data
     else:
         existing = pd.DataFrame(columns=SCORE_COLUMNS)
     merged = pd.concat([existing, new_scores], ignore_index=True)
-    merged = merged.drop_duplicates(subset=["signal_id"], keep="last")
+    # 確定の消去禁止(監査P1-4b): 2026-08-19に一過性のUS10Yデータ障害で scored 16行が
+    # invalid_data で上書きされた実発生への対策。新しい採点が情報量で劣化する場合
+    # (scored→awaiting_horizon/invalid_data)は既存行を保持する。同格なら新しい方を採る。
+    status_rank = merged["status"].map(_STATUS_RANK).fillna(0)
+    merged = (merged.assign(_rank=status_rank, _ord=range(len(merged)))
+              .sort_values(["_rank", "_ord"], kind="stable")
+              .drop_duplicates(subset=["signal_id"], keep="last")
+              .drop(columns=["_rank", "_ord"]))
     merged = merged.reindex(columns=SCORE_COLUMNS).sort_values(["date", "signal_id"]).reset_index(drop=True)
     merged = _preserve_unchanged_score_timestamps(merged, existing)
     merged.to_csv(path, index=False)

@@ -45,7 +45,7 @@ COST_SENSITIVITY_R = (0.02, 0.05, 0.10)
 COLUMNS = [
     "date", "signal_id", "asset", "side", "rank", "risk_pct",
     "entry_low", "entry_high", "sl", "tp1",
-    "status",        # filled_sl / filled_tp1 / filled_time_exit / no_fill / open / excluded_scale / excluded_bad_levels / invalid_data
+    "status",        # filled_sl / filled_tp1 / filled_time_exit / no_fill / open / excluded_scale / excluded_bad_levels / invalid_data / data_window_expired
     "fill_date", "fill_price", "risk_unit", "exit_date", "exit_price",
     "r_result", "capital_pct", "simulated_at_utc",
 ]
@@ -81,6 +81,11 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
         return out
     sig_date = pd.to_datetime(out["date"], errors="coerce")
     if pd.isna(sig_date):
+        return out
+    # 価格窓が信号日より後に始まる場合は約定探索をしない(監査P1-4a: rawは直近240日で
+    # 上書きされるため、放置すると2027-02頃から古い判断が窓先頭のバーで「約定」する)。
+    if sig_date.normalize() < pd.to_datetime(ohlcv["date"].iloc[0]):
+        out["status"] = "data_window_expired"
         return out
     idx0 = int(ohlcv["date"].searchsorted(sig_date.normalize(), side="left"))
     if idx0 >= len(ohlcv):
@@ -173,7 +178,7 @@ def summarize(sim: pd.DataFrame) -> dict:
     out = {
         "orders": int(len(sim)),
         "excluded_scale": 0, "excluded_bad_levels": 0, "invalid_data": 0,
-        "no_fill": 0, "open": 0, "fills_resolved": 0,
+        "no_fill": 0, "open": 0, "data_window_expired": 0, "fills_resolved": 0,
         "exit_breakdown": {}, "win_rate": None,
         "gross_total_r": None, "avg_r": None, "gross_capital_pct": None,
         "cost_sensitivity_r": {},
@@ -189,7 +194,9 @@ def summarize(sim: pd.DataFrame) -> dict:
     if sim.empty:
         return out
     counts = sim["status"].value_counts()
-    for k in ("excluded_scale", "excluded_bad_levels", "invalid_data", "no_fill", "open"):
+    # data_window_expired もサマリーで数える(#128 Codex P2: 表示カテゴリから消えると
+    # ガード発動時に注文内訳が照合不能になる)
+    for k in ("excluded_scale", "excluded_bad_levels", "invalid_data", "no_fill", "open", "data_window_expired"):
         out[k] = int(counts.get(k, 0))
     resolved = sim[sim["status"].isin(resolved_status)].copy()
     out["fills_resolved"] = int(len(resolved))
