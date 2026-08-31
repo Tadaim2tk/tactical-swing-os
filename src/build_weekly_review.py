@@ -27,6 +27,7 @@ REVIEW_COLUMNS = [
     "closed_signals",
     "pending_signals",
     "skipped_signals",
+    "not_applicable_signals",
     "win_rate",
     "profit_factor",
     "total_r",
@@ -561,6 +562,9 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
     closed_count = metrics["closed_count"]
     pending_count = count_status(evaluations, "pending")
     skipped_count = count_status(evaluations, "skipped")
+    # scoredだが方向Rを持たない行(NO_TRADE等)。closedから除外した分をここで可視化し、
+    # total = closed+pending+skipped+not_applicable の照合を保つ(#131 Codex P2)
+    not_applicable_count = count_status(evaluations, "not_applicable")
     prediction_awaiting_rows = (
         int((prediction_scores["status"].astype(str) == "awaiting_horizon").sum())
         if "status" in prediction_scores.columns and not prediction_scores.empty
@@ -591,6 +595,7 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
         "closed_signals": closed_count,
         "pending_signals": pending_count,
         "skipped_signals": skipped_count,
+        "not_applicable_signals": not_applicable_count,
         "win_rate": round(metrics["win_rate"], 4),
         "profit_factor": "inf" if math.isinf(metrics["profit_factor"]) else round(metrics["profit_factor"], 4),
         "total_r": round(metrics["total_r"], 4),

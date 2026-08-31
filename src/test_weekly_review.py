@@ -123,6 +123,9 @@ def test_prediction_scores_non_actionable_rows_do_not_enter_closed_metrics():
     assert by_id["B"] == "not_applicable"
     assert by_id["C"] == "pending"
     assert by_id["D"] == "skipped"
+    # 除外分は不可視にしない: total = closed+pending+skipped+not_applicable が照合できる
+    assert weekly.count_status(ev, "not_applicable") == 1
+    assert "not_applicable_signals" in weekly.REVIEW_COLUMNS
 
 
 def test_ledger_sides_normalized_before_side_table():
