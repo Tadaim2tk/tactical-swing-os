@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 import evaluation_loader
+from score_prediction_log import normalize_side
 
 
 RESULTS_DIR = Path("results")
@@ -217,9 +218,6 @@ def prediction_scores_to_evaluations(scores: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     out = scores.copy()
     status = out.get("status", pd.Series([""] * len(out), index=out.index)).astype(str).str.lower()
-    out["evaluation_status"] = "pending"
-    out.loc[status == "scored", "evaluation_status"] = "closed"
-    out.loc[status.isin(["invalid_data", "invalid"]), "evaluation_status"] = "skipped"
     if "r_result" not in out.columns:
         if "r_close_5d" in out.columns:
             out["r_result"] = out["r_close_5d"]
@@ -227,6 +225,14 @@ def prediction_scores_to_evaluations(scores: pd.DataFrame) -> pd.DataFrame:
             out["r_result"] = out["r_close_10d"]
         else:
             out["r_result"] = ""
+    # closed = scored かつ 方向Rが数値で在る行のみ(#125 Codex P2: NO_TRADE等の非actionable行も
+    # status=scored になるため、そのままclosedに写すと勝率の分母が空白Rの行で薄まり
+    # next_week_mode の判定まで歪む)。非actionableのscored行は not_applicable として区別する。
+    r_numeric = pd.to_numeric(out["r_result"], errors="coerce")
+    out["evaluation_status"] = "pending"
+    out.loc[(status == "scored") & r_numeric.notna(), "evaluation_status"] = "closed"
+    out.loc[(status == "scored") & r_numeric.isna(), "evaluation_status"] = "not_applicable"
+    out.loc[status.isin(["invalid_data", "invalid"]), "evaluation_status"] = "skipped"
     if "error_type" not in out.columns:
         out["error_type"] = status.mask(status == "", "未分類")
     return out
@@ -245,8 +251,14 @@ def select_weekly_inputs(
     has accumulated rows but the legacy results/SHEETS signal snapshot is stale.
     """
     if not prediction_signals.empty:
+        # 台帳の side は BUY/SELL 表記。集計表は LONG/SHORT/NONE を要求するため、
+        # 採点系と同じ正規化を通してから渡す(#125 Codex P2: 生のまま渡すと
+        # actionable な判断が side 別集計で全て0件に化ける)。
+        ledger_signals = prediction_signals.copy()
+        if "side" in ledger_signals.columns:
+            ledger_signals["side"] = ledger_signals["side"].map(normalize_side)
         return (
-            prediction_signals,
+            ledger_signals,
             prediction_scores_to_evaluations(prediction_scores),
             {
                 "signal_source": "prediction_log",
