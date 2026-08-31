@@ -1,0 +1,11 @@
+{
+ "model_repo": "mlx-community/Qwen3-8B-4bit",
+ "model_commit": "545dc4251c05440727734bcd94334791f6ab0192",
+ "mlx_lm_version": "0.29.1",
+ "temperature": 0.0,
+ "max_tokens": 320,
+ "prompt_sha256": "3d1fde2138ff2668a0ddbf615caf6c885dd867058d864af8f92729653ffdc892",
+ "thinking": false,
+ "preprocess": "market_daily row + top8 gdelt headlines(title only, 120c cut)",
+ "digest": "be7c3f4685aa277d"
+}
