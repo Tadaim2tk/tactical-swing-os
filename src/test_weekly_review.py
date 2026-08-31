@@ -104,3 +104,36 @@ def test_best_worst_asset_ignores_assets_without_closed_results():
     )
 
     assert weekly.best_worst_asset(table) == ("", "")
+
+
+def test_prediction_scores_non_actionable_rows_do_not_enter_closed_metrics():
+    # #125 Codex P2: NO_TRADE等もstatus=scoredになるため、空白Rのままclosedに写すと
+    # 勝率の分母が薄まる。closed=scoredかつ数値Rの行のみ。
+    scores = pd.DataFrame([
+        {"signal_id": "A", "status": "scored", "r_close_5d": 0.5},
+        {"signal_id": "B", "status": "scored", "r_close_5d": ""},        # NO_TRADE行
+        {"signal_id": "C", "status": "awaiting_horizon", "r_close_5d": ""},
+        {"signal_id": "D", "status": "invalid_data", "r_close_5d": ""},
+    ])
+    ev = weekly.prediction_scores_to_evaluations(scores)
+    m = weekly.r_metrics(ev)
+    assert m["closed_count"] == 1
+    assert m["win_rate"] == 1.0
+    by_id = ev.set_index("signal_id")["evaluation_status"]
+    assert by_id["B"] == "not_applicable"
+    assert by_id["C"] == "pending"
+    assert by_id["D"] == "skipped"
+
+
+def test_ledger_sides_normalized_before_side_table():
+    # #125 Codex P2: 台帳はBUY/SELL表記、集計表はLONG/SHORT/NONEを要求。
+    # 正規化せずに渡すとactionableな判断がside別集計で全て0件になる。
+    ledger = pd.DataFrame([
+        {"signal_id": "A", "side": "BUY"},
+        {"signal_id": "B", "side": "SELL"},
+        {"signal_id": "C", "side": "NONE"},
+    ])
+    out_sig, _, meta = weekly.select_weekly_inputs(
+        pd.DataFrame(), pd.DataFrame(), ledger, pd.DataFrame())
+    assert meta["signal_source"] == "prediction_log"
+    assert list(out_sig["side"]) == ["LONG", "SHORT", "NONE"]
