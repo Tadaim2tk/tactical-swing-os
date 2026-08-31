@@ -43,7 +43,7 @@ jobs:
       - name: Generate signals (base + shadow weights)
         run: python src/generate_signal.py
 
-      - name: Append generated signals to official ledger
+      - name: Append generated signals to generated ledger
         run: python src/append_generated_signals.py
 
       - name: Evaluate signals

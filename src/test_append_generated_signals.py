@@ -21,7 +21,7 @@ LEDGER_HEADER = (
 
 def test_append_generated_signals_dedupes_and_preserves_phase6_columns(tmp_path: Path):
     signals_path = tmp_path / "results" / "signals.csv"
-    ledger_path = tmp_path / "data" / "signal_log.csv"
+    ledger_path = tmp_path / "data" / "generated_signal_log.csv"
     summary_path = tmp_path / "results" / "signal_ledger_append_summary.json"
     signals_path.parent.mkdir(parents=True)
     ledger_path.parent.mkdir(parents=True)
@@ -64,7 +64,7 @@ def test_append_generated_signals_dedupes_and_preserves_phase6_columns(tmp_path:
 
 def test_append_generated_signals_skips_empty_signal_file(tmp_path: Path):
     signals_path = tmp_path / "results" / "signals.csv"
-    ledger_path = tmp_path / "data" / "signal_log.csv"
+    ledger_path = tmp_path / "data" / "generated_signal_log.csv"
     summary_path = tmp_path / "results" / "signal_ledger_append_summary.json"
 
     result = ags.append_generated_signals(signals_path, ledger_path, summary_path)
@@ -76,7 +76,7 @@ def test_append_generated_signals_skips_empty_signal_file(tmp_path: Path):
 
 def test_append_generated_signals_fails_when_no_valid_rows(tmp_path: Path):
     signals_path = tmp_path / "results" / "signals.csv"
-    ledger_path = tmp_path / "data" / "signal_log.csv"
+    ledger_path = tmp_path / "data" / "generated_signal_log.csv"
     summary_path = tmp_path / "results" / "signal_ledger_append_summary.json"
     signals_path.parent.mkdir(parents=True)
     signals_path.write_text("date,signal_id,asset\n,,GOLD\n", encoding="utf-8")
