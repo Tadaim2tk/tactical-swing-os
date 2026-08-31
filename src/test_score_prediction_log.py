@@ -257,3 +257,18 @@ def test_same_family_index_confusion_quarantined(tmp_path):
     near = scores[scores["signal_id"] == "NEAR"].iloc[0]
     assert near["data_quality"] == "ok"
     assert pd.notna(near["r_close_5d"])
+
+
+def test_finalized_anchor_change_is_warned(tmp_path, capsys):
+    # #136 Codex P1: 確定行のanchorが再採点で変わるとき、黙って通さず件数を警告する
+    path = tmp_path / "scores.csv"
+    base = {c: "" for c in spl.SCORE_COLUMNS}
+    spl.append_scores(pd.DataFrame([
+        {**base, "signal_id": "A", "date": "2026-06-08", "status": "scored", "anchor_close": 100.0},
+    ]), path)
+    capsys.readouterr()
+    spl.append_scores(pd.DataFrame([
+        {**base, "signal_id": "A", "date": "2026-06-08", "status": "scored", "anchor_close": 95.0},
+    ]), path)
+    out = capsys.readouterr().out
+    assert "anchor_close" in out and "1 行" in out

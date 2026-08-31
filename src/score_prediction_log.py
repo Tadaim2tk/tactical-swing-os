@@ -230,8 +230,36 @@ def append_scores(new_scores: pd.DataFrame, path: Path = SCORES_PATH) -> pd.Data
               .drop(columns=["_rank", "_ord"]))
     merged = merged.reindex(columns=SCORE_COLUMNS).sort_values(["date", "signal_id"]).reset_index(drop=True)
     merged = _preserve_unchanged_score_timestamps(merged, existing)
+    _warn_if_finalized_anchors_changed(merged, existing)
     merged.to_csv(path, index=False)
     return merged
+
+
+def _warn_if_finalized_anchors_changed(merged: pd.DataFrame, existing: pd.DataFrame) -> int:
+    """確定済み(scored)行のanchor_closeが再採点で変わったら黙って通さず警告する。
+
+    #136 Codex P1: 2026-08-31の再採点は、日曜Globexセッション境界に取得した価格系列の
+    日付ラベル1本ズレにより、先物系5資産の確定311行を無警告で書き換えていた(今回は
+    「誤→正」方向だったが、逆方向でも同じく無音になる)。値の更新自体はデータ成熟として
+    正当なので禁止はせず、件数と最大変化率を実行ログへ必ず出す。
+    """
+    if existing.empty or "signal_id" not in existing.columns:
+        return 0
+    old = existing[existing["status"].astype(str) == "scored"].set_index("signal_id")
+    if old.empty:
+        return 0
+    new = merged.set_index("signal_id")
+    common = old.index.intersection(new.index)
+    ao = pd.to_numeric(old.loc[common, "anchor_close"], errors="coerce")
+    an = pd.to_numeric(new.loc[common, "anchor_close"], errors="coerce")
+    both = ao.notna() & an.notna() & (ao > 0)
+    rel = ((an[both] - ao[both]).abs() / ao[both])
+    changed = rel[rel > 0.001]
+    if len(changed):
+        print(f"::warning::確定済み {len(changed)} 行の anchor_close が再採点で変化 "
+              f"(最大 {changed.max()*100:.2f}%)。価格系列の日付ラベルずれ・改訂の疑いがあれば "
+              f"data/raw の取得時刻とセッション境界を確認すること")
+    return int(len(changed))
 
 
 def _score_value_key(value) -> str:
