@@ -37,6 +37,12 @@ THRESHOLDS_V1 = {
     "vol_calm": 16.0, "vol_stressed": 24.0,
 }
 
+# 主役アセット判定 v1 (2026-08-31 人間発案「その時市場の主役だったアセットを切り替えながら
+# 見る」。式は事前宣言・層別用・未検証。当てはめ探索で選んでいない):
+#   dominance = (直近W日の他資産との|相関|平均) × (直近W日の自身の活発度 / 直近BASE日の平常活発度)
+#   leader = dominance 最大の資産。相関は両資産にバーがある日だけで計算(埋めない)。
+LEADER_V1 = {"window": 20, "min_periods": 12, "activity_base": 120}
+
 
 def fetch_asset(asset: str, ticker: str) -> pd.DataFrame:
     df = yf.download(ticker, period=PERIOD, interval="1d", auto_adjust=False, progress=False)
@@ -137,6 +143,35 @@ def build_daily(prices: pd.DataFrame) -> pd.DataFrame:
             return "stressed"
         return "elevated"
 
+    # 主役アセット(LEADER_V1)。wide表はリターン計算には使わない(ERS#1) — 相関の観測にだけ使う。
+    # pandas rolling corr は「両方に観測がある日」だけで計算する(min_periods未満はNaN)。
+    lw, lmp, lbase = LEADER_V1["window"], LEADER_V1["min_periods"], LEADER_V1["activity_base"]
+    wide = daily.set_index("date")[[f"ret_{a}" for a in frames]].rename(
+        columns=lambda c: c.replace("ret_", ""))
+    abs_ret = wide.abs()
+    activity = abs_ret.rolling(lw, min_periods=lmp).mean() / abs_ret.rolling(
+        lbase, min_periods=lw * 2).mean()
+    corr_sum = pd.DataFrame(0.0, index=wide.index, columns=wide.columns)
+    corr_n = pd.DataFrame(0, index=wide.index, columns=wide.columns)
+    cols = list(wide.columns)
+    for i, a in enumerate(cols):
+        for b in cols[i + 1:]:
+            c = wide[a].rolling(lw, min_periods=lmp).corr(wide[b]).abs()
+            corr_sum[a] = corr_sum[a] + c.fillna(0)
+            corr_sum[b] = corr_sum[b] + c.fillna(0)
+            corr_n[a] = corr_n[a] + c.notna().astype(int)
+            corr_n[b] = corr_n[b] + c.notna().astype(int)
+    mean_corr = corr_sum / corr_n.replace(0, np.nan)
+    dominance = (mean_corr * activity).round(4)
+    valid_cnt = dominance.notna().sum(axis=1)
+    leader = dominance.idxmax(axis=1, skipna=True)
+    leader[valid_cnt < 3] = "none"
+    daily["leader_asset"] = leader.fillna("none").values
+    dmax = dominance.max(axis=1)
+    d2nd = dominance.apply(lambda r: r.nlargest(2).iloc[-1] if r.notna().sum() >= 2 else np.nan, axis=1)
+    daily["leader_score"] = dmax.round(4).values
+    daily["leader_margin"] = (dmax - d2nd).round(4).values  # 2位との差=主役の明確さ
+
     daily["risk_state"] = daily.apply(risk_state, axis=1)
     daily["vol_state"] = daily.apply(vol_state, axis=1)
     daily["yield_move"] = daily.get("chg_US10Y_pt", pd.Series(np.nan, index=daily.index)).apply(
@@ -151,6 +186,18 @@ def build_daily(prices: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # 取得は一度きり(SPEC-RNC-001): 既に取得済みなら再フェッチせず、派生の再計算だけ行う
+    cached = OUT_DIR / "prices_long.csv"
+    if cached.exists():
+        prices = pd.read_csv(cached, parse_dates=["date"])
+        fetched_at = str(prices["fetched_at"].iloc[0]) if "fetched_at" in prices.columns else "unknown"
+        print(f"using cached prices_long.csv ({len(prices)} rows, fetched_at={fetched_at})")
+        daily = build_daily(prices)
+        daily["fetched_at"] = fetched_at
+        daily.to_csv(OUT_DIR / "market_daily.csv", index=False)
+        print(f"daily: {len(daily)} rows -> {OUT_DIR/'market_daily.csv'}")
+        print("thresholds_v1:", THRESHOLDS_V1, "| leader_v1:", LEADER_V1)
+        return 0
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     parts = []
     for asset, ticker in TICKERS.items():

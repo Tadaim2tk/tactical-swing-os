@@ -42,12 +42,13 @@ PROMPT_TEMPLATE = """あなたは市場の観察記録係。以下は{date}({dow
 
 ## ルール判定(参考。あなたが書き換えることは禁止)
 risk_state={risk_state} / vol_state={vol_state} / yield_move={yield_move} / usd_move={usd_move} / crypto_move={crypto_move}
+この期間の市場の主役(直近20営業日の連動度×活発度で機械判定): {leader_asset} (明確さ margin={leader_margin})
 
 ## この日の見出し(GDELT上位。無い場合は「なし」)
 {news_block}
 
 ## 出力(JSONのみ。他の文を書かない)
-{{"narrative": "この日の相場を2〜4文の日本語で。何が動き、何が主導したか", "leader": "主導した資産または要因を1語〜1句", "anomaly": "資産間で通常と逆・特異な乖離があれば1文、なければ「なし」"}}
+{{"narrative": "この日の相場を2〜4文の日本語で。期間の主役({leader_asset})を軸に、この日の値動きが主役の構図を追認したか崩したかを含める", "leader": "この日を主導した資産または要因を1語〜1句", "anomaly": "資産間で通常と逆・特異な乖離、または主役交代の兆しがあれば1文、なければ「なし」"}}
 /no_think"""
 
 ASSETS = ["SPX", "NASDAQ", "VIX", "US10Y", "DXY", "USDJPY", "GOLD", "WTI", "BTC", "ETH"]
@@ -99,12 +100,15 @@ def day_prompt(row: pd.Series, news: list[str]) -> str:
     if pd.notna(prev):
         lines.append(f"直近の米株セッション(前営業日まで累積): {prev*100:+.2f}%")
     news_block = "\n".join(f"- {t[:120]}" for t in news[:8]) if news else "なし"
+    lm = row.get("leader_margin")
     return PROMPT_TEMPLATE.format(
         date=str(pd.Timestamp(row["date"]).date()), dow=pd.Timestamp(row["date"]).strftime("%a"),
         market_block="\n".join(lines), news_block=news_block,
         risk_state=row.get("risk_state"), vol_state=row.get("vol_state"),
         yield_move=row.get("yield_move"), usd_move=row.get("usd_move"),
-        crypto_move=row.get("crypto_move"))
+        crypto_move=row.get("crypto_move"),
+        leader_asset=row.get("leader_asset", "none"),
+        leader_margin=("不明" if pd.isna(lm) else f"{lm:.2f}"))
 
 
 def parse_output(text: str) -> tuple[dict, bool]:
@@ -183,6 +187,9 @@ def main() -> int:
                 "risk_state": row.get("risk_state"), "vol_state": row.get("vol_state"),
                 "yield_move": row.get("yield_move"), "usd_move": row.get("usd_move"),
                 "crypto_move": row.get("crypto_move"),
+                "leader_asset": row.get("leader_asset"),
+                "leader_score": row.get("leader_score"),
+                "leader_margin": row.get("leader_margin"),
                 **parsed, "parse_ok": ok,
                 "n_headlines": len(news_by_day.get(d, [])),
                 "instrument_digest": digest,
