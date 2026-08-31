@@ -98,8 +98,12 @@ def main_daily() -> int:
     fields = ["date", "seendate", "title", "domain", "url", "fetched_at", "provenance"]
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     n = 0
+    new_file = not OUT.exists() or OUT.stat().st_size == 0  # 単独起動でもヘッダを書く(#130 Codex P2)
+    OUT.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        if new_file:
+            w.writeheader()
         d = START
         while d <= END:
             key = d.isoformat()
