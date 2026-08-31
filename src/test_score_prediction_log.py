@@ -82,6 +82,24 @@ def test_anchor_is_last_bar_known_at_decision_time(tmp_path):
     assert abs(r["fwd_return_1d"] - round(75.0 / 74.0 - 1.0, 6)) < 1e-9
 
 
+def test_seven_day_asset_anchor_steps_back_one_more_bar(tmp_path):
+    # #128 Codex P1: 暗号資産のUTC日足は、前日ラベルのキャンドルが判断(JST朝7時)の
+    # 2時間後まで閉まらない。アンカーはさらに1本遡り(k-2)、結果窓は当日ラベルの
+    # キャンドル(k)から始まる。境界は定数でなく資産の暦から導く。
+    dates = pd.date_range("2026-06-01", periods=14)  # 週7日カレンダー
+    close = 100.0 + np.arange(14)
+    df = pd.DataFrame({"date": dates.strftime("%Y-%m-%d"), "open": close,
+                       "high": close + 0.5, "low": close - 0.5, "close": close, "volume": 1})
+    (tmp_path / "BTC.csv").write_text(df.to_csv(index=False), encoding="utf-8")
+    # 6/8(月)判断: k=index7, アンカー=index5(6/6土 close=105), fwd_1=index7(6/8 close=107)
+    scores = spl.score_ledger(
+        pd.DataFrame([_row(asset="BTC", entry_low=104.0, entry_high=106.0, sl=100.0)]),
+        raw_dir=tmp_path, scored_at="t")
+    r = scores.iloc[0]
+    assert abs(r["anchor_close"] - 105.0) < 1e-9
+    assert abs(r["fwd_return_1d"] - round(107.0 / 105.0 - 1.0, 6)) < 1e-9
+
+
 def test_entry_touch_on_decision_day_is_detected(tmp_path):
     # known-bias #9 の解消: 判断当日バーでしか触らないentryも entry_touched_5d=True。
     # 6/8 バー(low74.5-high75.5)だけがゾーン[74.4,74.6]に重なり、以降は上放れる。

@@ -178,7 +178,7 @@ def summarize(sim: pd.DataFrame) -> dict:
     out = {
         "orders": int(len(sim)),
         "excluded_scale": 0, "excluded_bad_levels": 0, "invalid_data": 0,
-        "no_fill": 0, "open": 0, "fills_resolved": 0,
+        "no_fill": 0, "open": 0, "data_window_expired": 0, "fills_resolved": 0,
         "exit_breakdown": {}, "win_rate": None,
         "gross_total_r": None, "avg_r": None, "gross_capital_pct": None,
         "cost_sensitivity_r": {},
@@ -194,7 +194,9 @@ def summarize(sim: pd.DataFrame) -> dict:
     if sim.empty:
         return out
     counts = sim["status"].value_counts()
-    for k in ("excluded_scale", "excluded_bad_levels", "invalid_data", "no_fill", "open"):
+    # data_window_expired もサマリーで数える(#128 Codex P2: 表示カテゴリから消えると
+    # ガード発動時に注文内訳が照合不能になる)
+    for k in ("excluded_scale", "excluded_bad_levels", "invalid_data", "no_fill", "open", "data_window_expired"):
         out[k] = int(counts.get(k, 0))
     resolved = sim[sim["status"].isin(resolved_status)].copy()
     out["fills_resolved"] = int(len(resolved))

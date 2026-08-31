@@ -128,15 +128,21 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
     signal_date = pd.to_datetime(str(row.get("date") or ""), errors="coerce")
     if ohlcv.empty or pd.isna(signal_date):
         return out
-    # アンカー=判断時に既知の最後のバー(信号日より前の直近バー)。台帳dateはJST朝7時の
-    # 判断日で、同ラベルのバー(米先物は判断1時間後開始・暗号資産は同日24時UTC close)は
-    # 判断後に確定する未来情報のため使わない。side="left"-1 で当日バーを結果窓側に落とす
-    # (2026-08-31監査P1-3: 旧side="right"はfwd_return_1dの符号を51%反転させていた。
-    #  entry窓 idx+1.. が判断当日バー起点になり、known-bias#9=当日タッチ非検知も同時解消)。
-    idx = int(ohlcv["date"].searchsorted(signal_date.normalize(), side="left")) - 1
-    if idx < 0:
+    # アンカー=判断時(JST朝7時)に「閉まっていた」最後のバー。境界は資産の暦の関数
+    # (2026-08-31監査P1-3 + #128 Codex P1: 定数で持たない):
+    # - 週5日資産(米先物・指数・FX): 前日ラベルのバーは判断1時間前(06:00 JST)にclose済 → k-1
+    # - 週7日資産(暗号資産のUTC日足): 前日ラベルのキャンドルは判断2時間後(09:00 JST)まで
+    #   閉まらない=未来情報 → さらに1本遡って k-2
+    # 結果窓は k(判断後に始まる最初のバー)起点: 週5日資産は当日ラベルのバー(セッションは
+    # 判断直後に開始)、週7日資産は当日ラベルのキャンドル(09:00 JST開始。進行中キャンドルの
+    # 判断前レンジで約定を偽認定しない=不利側原則)。
+    # 旧side="right"実装はfwd_return_1dの符号を51%反転させていた(known-bias#9も同時解消)。
+    k = int(ohlcv["date"].searchsorted(signal_date.normalize(), side="left"))
+    seven_day_calendar = bool((ohlcv["date"].dt.dayofweek >= 5).any())
+    anchor_idx = k - (2 if seven_day_calendar else 1)
+    if anchor_idx < 0:
         return out
-    anchor_close = float(ohlcv.iloc[idx]["close"])
+    anchor_close = float(ohlcv.iloc[anchor_idx]["close"])
     out["anchor_close"] = round(anchor_close, 6)
 
     # データ品質ガード(反後知恵: 補正はしない・採点から正直に外すだけ):
@@ -156,7 +162,7 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
     direction = 1.0 if side == "LONG" else -1.0 if side == "SHORT" else 0.0
     incomplete = False
     for h in HORIZONS:
-        j = idx + h
+        j = k - 1 + h  # fwd_1 = 判断後最初のバー(k)のclose
         if j >= len(ohlcv):
             incomplete = True
             continue
@@ -174,7 +180,7 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
         out["actionable"] = False
 
     if actionable:
-        window5 = ohlcv.iloc[idx + 1: idx + 6]
+        window5 = ohlcv.iloc[k: k + 5]  # 判断後に始まる5バー(週5日資産は当日バーを含む)
         if not window5.empty:
             touched = ((window5["low"] <= entry_high) & (window5["high"] >= entry_low)).any()
             out["entry_touched_5d"] = bool(touched)
