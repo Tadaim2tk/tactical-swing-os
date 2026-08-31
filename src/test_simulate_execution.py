@@ -97,6 +97,16 @@ def test_scale_mismatch_excluded():
     assert r["status"] == "excluded_scale"
 
 
+def test_signal_before_price_window_gets_typed_status_not_fake_fill():
+    # 2026-08-31監査P1-4a: rawは直近240日で上書きされるため、信号日が窓外に落ちた行を
+    # 窓先頭のバーへ静かにアンカーすると「6月の判断が8月のバーで約定」する(符号反転の
+    # 実例を確認済み)。typed status で正直に返し、偽の約定を作らない。
+    bars = _ohlcv([("2026-08-0%d" % d, 74, 76.5, 72.5, 74.0) for d in range(3, 8)])
+    r = se.simulate_row(_row(date="2026-07-01"), bars, "t")  # 窓は8/3開始、信号は7/1
+    assert r["status"] == "data_window_expired"
+    assert r["fill_date"] == "" and pd.isna(r["r_result"])
+
+
 def test_ledger_filter_only_priced_orders(tmp_path):
     led = pd.DataFrame([
         _row().to_dict(),

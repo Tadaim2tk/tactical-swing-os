@@ -45,7 +45,7 @@ COST_SENSITIVITY_R = (0.02, 0.05, 0.10)
 COLUMNS = [
     "date", "signal_id", "asset", "side", "rank", "risk_pct",
     "entry_low", "entry_high", "sl", "tp1",
-    "status",        # filled_sl / filled_tp1 / filled_time_exit / no_fill / open / excluded_scale / excluded_bad_levels / invalid_data
+    "status",        # filled_sl / filled_tp1 / filled_time_exit / no_fill / open / excluded_scale / excluded_bad_levels / invalid_data / data_window_expired
     "fill_date", "fill_price", "risk_unit", "exit_date", "exit_price",
     "r_result", "capital_pct", "simulated_at_utc",
 ]
@@ -81,6 +81,11 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
         return out
     sig_date = pd.to_datetime(out["date"], errors="coerce")
     if pd.isna(sig_date):
+        return out
+    # 価格窓が信号日より後に始まる場合は約定探索をしない(監査P1-4a: rawは直近240日で
+    # 上書きされるため、放置すると2027-02頃から古い判断が窓先頭のバーで「約定」する)。
+    if sig_date.normalize() < pd.to_datetime(ohlcv["date"].iloc[0]):
+        out["status"] = "data_window_expired"
         return out
     idx0 = int(ohlcv["date"].searchsorted(sig_date.normalize(), side="left"))
     if idx0 >= len(ohlcv):

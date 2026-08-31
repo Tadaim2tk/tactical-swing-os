@@ -206,7 +206,9 @@ def append_note(notes: str | None, note: str) -> str:
 def future_bars(df: pd.DataFrame, signal_date: pd.Timestamp | None, horizon: int) -> pd.DataFrame:
     if signal_date is None or df.empty:
         return pd.DataFrame()
-    future = df[df["date"] > signal_date].copy()
+    # >= : 判断当日のバー(米先物は判断1時間後に開始するセッション)も評価窓に含める。
+    # 土日シグナルは当日バーが無いため挙動不変(2026-08-31監査P1-3と同型の窓ズレ対策)。
+    future = df[df["date"] >= signal_date].copy()
     if horizon > 0:
         future = future.head(horizon)
     return future
