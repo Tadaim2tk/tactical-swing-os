@@ -272,3 +272,23 @@ def test_finalized_anchor_change_is_warned(tmp_path, capsys):
     ]), path)
     out = capsys.readouterr().out
     assert "anchor_close" in out and "1 行" in out
+
+
+def test_in_progress_bar_is_not_scored_as_completed_return(tmp_path, monkeypatch):
+    # #137 Codex P2: 暗号資産のUTC日足は当日ラベルのキャンドルが翌00:00 UTCまで閉じない。
+    # 朝の採点で日中値を「+1日リターン」として確定させない(awaiting_horizonに留める)。
+    dates = pd.date_range("2026-06-01", periods=10)  # 週7日カレンダー
+    close = 100.0 + np.arange(10)
+    df = pd.DataFrame({"date": dates.strftime("%Y-%m-%d"), "open": close,
+                       "high": close + 0.5, "low": close - 0.5, "close": close, "volume": 1})
+    (tmp_path / "BTC.csv").write_text(df.to_csv(index=False), encoding="utf-8")
+    row = pd.DataFrame([_row(asset="BTC", date="2026-06-08",
+                             entry_low=104.0, entry_high=106.0, sl=100.0)])
+    # 6/8 判断・現在も6/8(UTC): k=6/8のバーはまだ形成途中 -> fwd_1 は確定させない
+    monkeypatch.setattr(spl, "_current_utc_date", lambda: pd.Timestamp("2026-06-08"))
+    r = spl.score_ledger(row, raw_dir=tmp_path, scored_at="t").iloc[0]
+    assert pd.isna(r["fwd_return_1d"]) and r["status"] == "awaiting_horizon"
+    # 翌日(6/9)に走らせれば 6/8 バーは確定済み -> 記録される
+    monkeypatch.setattr(spl, "_current_utc_date", lambda: pd.Timestamp("2026-06-09"))
+    r2 = spl.score_ledger(row, raw_dir=tmp_path, scored_at="t").iloc[0]
+    assert pd.notna(r2["fwd_return_1d"])

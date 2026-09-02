@@ -31,7 +31,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from score_prediction_log import MAX_REFERENCE_ANCHOR_DEVIATION, load_ohlcv_frame, normalize_side
+from score_prediction_log import (
+    MAX_REFERENCE_ANCHOR_DEVIATION,
+    _current_utc_date,
+    load_ohlcv_frame,
+    normalize_side,
+)
 from time_utils import format_utc, now_utc
 
 LEDGER_PATH = Path("data/signal_log.csv")
@@ -148,8 +153,11 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
             if tp_hit:
                 return finish("filled_tp1", i, tp1)
     if deadline < len(ohlcv):
-        return finish("filled_time_exit", deadline, float(ohlcv.iloc[deadline]["close"]))
-    out["status"] = "open"  # 期限バー未到来 — 正直に進行中
+        # 期限バーが形成途中(ラベル日がUTCでまだ過ぎていない)なら時間決済を確定しない
+        # (#137 Codex P2と同型: 日中値を終値決済として記録しない)。
+        if pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+            return finish("filled_time_exit", deadline, float(ohlcv.iloc[deadline]["close"]))
+    out["status"] = "open"  # 期限バー未到来/未確定 — 正直に進行中
     return out
 
 

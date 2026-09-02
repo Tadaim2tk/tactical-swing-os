@@ -96,6 +96,11 @@ def load_ohlcv_frame(asset: str, raw_dir: Path = RAW_DIR) -> pd.DataFrame:
     return df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
 
 
+def _current_utc_date() -> pd.Timestamp:
+    """現在のUTC日付(正規化)。ラベル日がこれ以上のバーはまだ閉じていない。"""
+    return pd.Timestamp(now_utc()).tz_localize(None).normalize()
+
+
 def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
     """台帳1行を採点する（純関数）。反後知恵: reference/risk は記録値のみ。"""
     side = normalize_side(row.get("side"))
@@ -161,9 +166,16 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
 
     direction = 1.0 if side == "LONG" else -1.0 if side == "SHORT" else 0.0
     incomplete = False
+    today_utc = _current_utc_date()
     for h in HORIZONS:
         j = k - 1 + h  # fwd_1 = 判断後最初のバー(k)のclose
         if j >= len(ohlcv):
+            incomplete = True
+            continue
+        # 形成途中のバーで確定リターンを名乗らない(#137 Codex P2: 暗号資産のUTC日足は
+        # 当日ラベルのキャンドルが翌00:00 UTCまで閉じないため、朝の採点では日中値が
+        # +1日リターンとして記録されていた)。ラベル日がUTCで過ぎるまでは awaiting。
+        if pd.Timestamp(ohlcv.iloc[j]["date"]).normalize() >= today_utc:
             incomplete = True
             continue
         close_h = float(ohlcv.iloc[j]["close"])
