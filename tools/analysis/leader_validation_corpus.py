@@ -1,94 +1,82 @@
-# 主役レンズの遡及検証その2: 5年コーパス(1,830日)で市場構造の仮説として検定する。
-# 台帳(3か月・独立16クラスタ)では検出力が足りないため、判断の当否ではなく
-# 「主役という区分が、その後の値動きについて何か言えるか」を直接測る。
-# 全て as-of(D-1までの情報で主役を決め、Dから先のリターンを見る)。
-# 有意性は月ブロック入れ替え(同月内の相関を壊さない)で判定する。
+"""主役レンズの5年検証（v2: #139 Codex P1×2+P2 修正版）。
+
+修正点:
+1. 月ブロック入れ替えを「ブロック順の入れ替え」へ（日次ラベル構造を保つ。旧実装は
+   各月を多数決1ラベルに潰しており、観測統計量と帰無分布が別推定量だった）
+2. 5日先リターンを**各資産の営業日カレンダー**で数える（旧実装は暦の和集合の行を5つ
+   進めており、週5日資産では5営業日にならなかった）
+3. ブートストラップを報告値と同じ推定量（観測数重み）で行う
+
+as-of厳守: 主役は前日までで確定した値を使い、リターンは当日以降を見る。
+usage: python tools/analysis/leader_validation_corpus.py  (repo rootで実行・読み取り専用)
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-RISK_ON = {"BTC", "ETH", "NASDAQ", "SPX"}
-mk = pd.read_csv("data/retro/market_daily.csv", parse_dates=["date"]).sort_values("date").reset_index(drop=True)
-mk["ym"] = mk["date"].dt.to_period("M").astype(str)
-assets = [c[4:] for c in mk.columns if c.startswith("ret_")]
+sys.path.insert(0, str(Path(__file__).parent))
+from block_perm import block_permutation, forward_return_on_own_calendar  # noqa: E402
 
-# 主役は前日までで確定 → 当日以降のリターンを見る(未来参照なし)
-mk["ldr"] = mk["leader_asset"].shift(1)
+RISK_ON = {"BTC", "ETH", "NASDAQ", "SPX"}
+
+mk = pd.read_csv("data/retro/market_daily.csv", parse_dates=["date"]).sort_values("date").reset_index(drop=True)
+prices = pd.read_csv("data/retro/prices_long.csv", parse_dates=["date"]).sort_values(["asset", "date"])
+mk["ym"] = mk["date"].dt.to_period("M").astype(str)
+assets = sorted(prices["asset"].unique())
+
+mk["ldr"] = mk["leader_asset"].shift(1)            # 前日までで確定した主役
 mk["ldr_margin"] = mk["leader_margin"].shift(1)
 mk = mk[mk["ldr"].notna() & (mk["ldr"] != "none")].reset_index(drop=True)
-print(f"母集団: {len(mk)}日 ({mk['date'].min().date()}..{mk['date'].max().date()}) / 月ブロック={mk['ym'].nunique()}")
-print(f"主役の分布(上位): {mk['ldr'].value_counts().head(6).to_dict()}\n")
-
-def block_perm(values, labels, blocks, n=5000, seed=1):
-    """月ブロック単位でラベルを入れ替える。ブロック内の相関を壊さない。"""
-    obs = values[labels == 1].mean() - values[labels == 0].mean()
-    df = pd.DataFrame({"v": values, "l": labels, "b": blocks})
-    bl = df.groupby("b")["l"].mean().round().astype(int)
-    rng = np.random.default_rng(seed)
-    keys = bl.index.values
-    out = []
-    for _ in range(n):
-        perm = pd.Series(rng.permutation(bl.values), index=keys)
-        lab = df["b"].map(perm).values
-        if lab.sum() == 0 or (1 - lab).sum() == 0:
-            continue
-        out.append(df["v"].values[lab == 1].mean() - df["v"].values[lab == 0].mean())
-    return obs, float(np.mean(np.abs(out) >= abs(obs)))
+print(f"母集団: {len(mk)}日 ({mk['date'].min().date()}..{mk['date'].max().date()}) 月ブロック={mk['ym'].nunique()}")
 
 results = []
 
-# 仮説1: 主役が攻め資産の期間は、株の翌5日リターンが高い(レジーム判定として使えるか)
+# 仮説1: 主役が攻め資産の期間は株の翌5営業日リターンが高い
 for tgt in ["SPX", "NASDAQ"]:
-    fwd = mk[f"close_{tgt}"].pct_change(5, fill_method=None).shift(-5)
-    m = fwd.notna()
-    lab = mk.loc[m, "ldr"].isin(RISK_ON).astype(int).values
-    obs, p = block_perm(fwd[m].values, lab, mk.loc[m, "ym"].values, seed=11)
-    print(f"[仮説1] 主役=攻め資産 → {tgt}の翌5日リターン差: {obs*100:+.3f}% (p={p:.3f}) n={m.sum()}")
-    results.append(("H1-" + tgt, abs(obs), p))
+    fwd = mk["date"].map(lambda d: forward_return_on_own_calendar(prices, tgt, d, 5))
+    lab = mk["ldr"].isin(RISK_ON).astype(int).values
+    obs, p, nb = block_permutation(fwd.values, lab, mk["ym"].values, seed=11)
+    print(f"[H1-{tgt}] 主役=攻め資産 → {tgt}翌5営業日の差: {obs*100:+.3f}% (p={p:.3f}, ブロック{nb})")
+    results.append((f"H1-{tgt}", obs, p))
 
-# 仮説2: 主役アセット自身の翌5日モメンタムは、非主役より継続しやすいか
-rows = []
+# 仮説2: 主役アセット自身の翌5営業日の変動幅は他資産平均より大きい（各資産の暦で計算）
+lead_abs, other_abs, ym_keep = [], [], []
 for _, r in mk.iterrows():
-    a = r["ldr"]
-    if f"close_{a}" not in mk.columns:
+    a, d = r["ldr"], r["date"]
+    lf = forward_return_on_own_calendar(prices, a, d, 5)
+    if np.isnan(lf):
         continue
-    rows.append(r["date"])
-idx = mk.set_index("date")
-lead_fwd, other_fwd, ym_l = [], [], []
-for i in range(len(mk) - 5):
-    r = mk.iloc[i]
-    a = r["ldr"]
-    col = f"close_{a}"
-    if col not in mk.columns:
+    vals = [forward_return_on_own_calendar(prices, x, d, 5) for x in assets if x != a]
+    vals = [abs(v) for v in vals if not np.isnan(v)]
+    if not vals:
         continue
-    c0, c1 = mk.iloc[i][col], mk.iloc[i + 5][col]
-    if pd.notna(c0) and pd.notna(c1) and c0 > 0:
-        lead_fwd.append(abs(c1 / c0 - 1.0))
-        ym_l.append(r["ym"])
-        others = [x for x in assets if x != a and f"close_{x}" in mk.columns]
-        vals = []
-        for x in others:
-            d0, d1 = mk.iloc[i][f"close_{x}"], mk.iloc[i + 5][f"close_{x}"]
-            if pd.notna(d0) and pd.notna(d1) and d0 > 0:
-                vals.append(abs(d1 / d0 - 1.0))
-        other_fwd.append(np.mean(vals) if vals else np.nan)
-lf, of_ = np.array(lead_fwd), np.array(other_fwd)
-ok = ~np.isnan(of_)
-diff = (lf[ok] - of_[ok])
-dfb = pd.DataFrame({"d": diff, "b": np.array(ym_l)[ok]})
-bm = dfb.groupby("b")["d"].mean()
+    lead_abs.append(abs(lf))
+    other_abs.append(float(np.mean(vals)))
+    ym_keep.append(r["ym"])
+diff = np.array(lead_abs) - np.array(other_abs)
+ym_keep = np.array(ym_keep)
+point = diff.mean()
+# 報告値と同じ観測数重みでブートストラップ（月ブロックを再抽出し、月内の観測をそのまま使う）
+dfb = pd.DataFrame({"d": diff, "b": ym_keep})
+groups = [g["d"].values for _, g in dfb.groupby("b", sort=True)]
 rng = np.random.default_rng(3)
-boot = [bm.sample(len(bm), replace=True, random_state=int(s)).mean() for s in rng.integers(0, 1e6, 5000)]
+boot = [np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))]).mean()
+        for _ in range(5000)]
 lo, hi = np.percentile(boot, [2.5, 97.5])
-print(f"[仮説2] 主役アセットの翌5日変動幅 − 他資産平均: {diff.mean()*100:+.3f}%pt "
-      f"(月ブロックbootstrap 95%CI [{lo*100:+.3f}, {hi*100:+.3f}]) n={ok.sum()}日")
-results.append(("H2", abs(diff.mean()), 0.0 if (lo > 0 or hi < 0) else 1.0))
+print(f"[H2] 主役アセットの翌5営業日変動幅 − 他資産平均: {point*100:+.3f}%pt "
+      f"(観測数重みブートストラップ95%CI [{lo*100:+.3f}, {hi*100:+.3f}]) n={len(diff)}日/{len(groups)}ブロック")
+results.append(("H2", point, 0.0 if (lo > 0 or hi < 0) else 1.0))
 
-# 仮説3: 主役の明確さが高い日ほど、その後の値動きは主役に連動しやすいか
-hi_m = mk["ldr_margin"] > mk["ldr_margin"].median()
-fwd_spx = mk["close_SPX"].pct_change(5, fill_method=None).shift(-5)
-m = fwd_spx.notna() & mk["ldr_margin"].notna()
-obs, p = block_perm(fwd_spx[m].abs().values, hi_m[m].astype(int).values, mk.loc[m, "ym"].values, seed=7)
-print(f"[仮説3] 明確さ上位 → SPXの翌5日変動幅の差: {obs*100:+.3f}%pt (p={p:.3f}) n={m.sum()}")
-results.append(("H3", abs(obs), p))
+# 仮説3: 主役が明確な日ほどその後の変動が大きい
+fwd_spx = mk["date"].map(lambda d: forward_return_on_own_calendar(prices, "SPX", d, 5)).abs()
+m = mk["ldr_margin"].notna()
+lab = (mk.loc[m, "ldr_margin"] > mk.loc[m, "ldr_margin"].median()).astype(int).values
+obs, p, nb = block_permutation(fwd_spx[m].values, lab, mk.loc[m, "ym"].values, seed=7)
+print(f"[H3] 明確さ上位 → SPX翌5営業日の変動幅の差: {obs*100:+.3f}%pt (p={p:.3f}, ブロック{nb})")
+results.append(("H3", obs, p))
 
-print(f"\n試した仮説 = {len(results)}件。うち有意(p<0.05)は {sum(1 for _,_,p in results if p < 0.05)}件")
+print(f"\n試した仮説={len(results)}件 / 有意(p<0.05)={sum(1 for _, _, p in results if p < 0.05)}件")
