@@ -188,6 +188,38 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     # 取得は一度きり(SPEC-RNC-001): 既に取得済みなら再フェッチせず、派生の再計算だけ行う
     cached = OUT_DIR / "prices_long.csv"
+    if cached.exists() and "--extend" in sys.argv:
+        # 主役判定の継続比較のため、既存の一度きり取得へ最新分だけ足す(全取得はしない)。
+        # 既存行は書き換えず、新しい日付のバーだけ追記して派生を作り直す。
+        old = pd.read_csv(cached, parse_dates=["date"])
+        # 資産ごとに cutoff を持つ(#138 Codex P1: 全体の最大日で切ると、週7日の暗号資産が
+        # 先に進んだ分だけ週5日資産の新しいバーが落ちる)。
+        cutoffs = old.groupby("asset")["date"].max().to_dict()
+        # 形成途中のバーを凍結しない(#138 Codex P1): ラベル日がUTCで過ぎたバーだけ確定として
+        # 保存し、当日ラベルは保存しない。前回入った未確定バーは捨てて取り直す。
+        today_utc = pd.Timestamp(datetime.now(timezone.utc).date())
+        fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        old = old[old["date"] < today_utc]
+        parts = [old]
+        for asset, ticker in TICKERS.items():
+            df = fetch_asset(asset, ticker)
+            if df.empty:
+                continue
+            cut = cutoffs.get(asset, pd.Timestamp.min)
+            add = df[(df["date"] > cut) & (df["date"] < today_utc)].copy()
+            if not add.empty:
+                add["fetched_at"] = fetched_at
+                add["provenance"] = "retrospective_derived"
+                parts.append(add)
+        prices = pd.concat(parts, ignore_index=True).drop_duplicates(
+            subset=["asset", "date"], keep="last").sort_values(["asset", "date"])
+        prices.to_csv(cached, index=False)
+        daily = build_daily(prices)
+        daily["fetched_at"] = fetched_at
+        daily.to_csv(OUT_DIR / "market_daily.csv", index=False)
+        print(f"extended: prices {len(old)}→{len(prices)} rows, daily {len(daily)} rows "
+              f"(資産別cutoff: {min(cutoffs.values()).date()}..{max(cutoffs.values()).date()})")
+        return 0
     if cached.exists():
         prices = pd.read_csv(cached, parse_dates=["date"])
         fetched_at = str(prices["fetched_at"].iloc[0]) if "fetched_at" in prices.columns else "unknown"
