@@ -100,3 +100,4 @@ inbox/
 # 取得ジョブ実行中はこれが追記され続け、追跡していると毎回のpullが衝突する(2026-09-03に実害)。
 data/retro/.gdelt_days_done
 data/retro/.gdelt_weeks_done
+.DS_Store

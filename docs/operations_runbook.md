@@ -48,17 +48,37 @@ GitHub Actions が毎日この順で走る（UTC cron を JST 換算）。
 
 GitHub Actions とは別に、ChatGPT のスケジュール実行が判断そのものを生む。
 **正本は必ず `prompts/` に置き、タスク本文と同時に改定する**（片方だけ直すと乖離が静かに残る）。
+下表は 2026-09-03 にブラウザで実査した全数（アクティブ4・一時停止1・完了1）。
 
-| 時刻(JST) | タスク | 正本 | 取込先 |
+### アクティブ
+
+| 時刻(JST) | タスク名（ChatGPT上の表記） | 正本 | 着地先 |
 |---|---|---|---|
-| 毎日 07:00 | 日次シグナル判断（10資産） | `prompts/tso_daily_signal_log.md` | `data/signal_log.csv` ほか |
-| 土 11:30 | crypto 文脈（マクロか固有要因か） | `prompts/tso_weekly_crypto_context.md` | `data/crypto_context_weekly.csv` |
-| 1日 12:30 | 月次較正 | （タスク本文のみ） | `docs/monthly_calibration_*.md` |
+| 毎日 07:00 | TSO Daily Signal Log v2 | `prompts/tso_daily_signal_log.md` | `data/signal_log.csv` ほか |
+| 土 12:00 | レビューする短期スイングモデル（TSO週次レビュー） | （タスク本文のみ・未作成） | 会話のみ |
+| 日 20:30 | Weekly Sunday crypto-theme dashboard | `prompts/tso_weekly_crypto_context.md` | `data/crypto_context_weekly.csv` / `data/crypto_predictions_weekly.csv` |
+| 月 | 週次決算ウォッチ（監視9銘柄） | （TSO対象外・日本株監視） | 会話のみ |
 
-**この表に無いChatGPTタスクは作らない**。2026-09-03 に、台帳へ1行も着地していない
-日次タスク（"Crypto market update: macro vs regulation dynamics"）が発見され廃止された
-（changelog(14)）。着地先の無い定期実行は、検証もできないまま人間の判断だけに影響する。
+### 停止中・完了（放置されているもの）
 
+| 状態 | タスク名 | 最終実行 |
+|---|---|---|
+| 一時停止中 | Check for strong lagging-asset buy signals | 2025-12-13 |
+| 完了 | Provide strong asset update | 2025-12-05 |
+
+### 実査で分かったこと（2026-09-03）
+
+1. **会話スレッドの題名をタスク名と取り違えない**。サイドバーの
+   「Crypto market update: macro vs regulation dynamics」はタスクではなく、
+   日曜タスクが生成した会話の題名だった。廃止しかけた（changelog(14)）。
+2. **月次較正タスク（1日12:30）は存在しない**。`docs/monthly_calibration_2026-09.md` は
+   「GPT側月次タスクにこの文書を渡す」と書いているが、その受け手が無い。
+   月次較正は現状**人間が会話で都度実行している**。→ 定時タスク化するか、
+   ドキュメントの記述を実態へ合わせるかは要判断。
+3. **土12:00の週次レビューに正本が無い**。台帳CSVをGitHubのrawから直接読む良い設計だが、
+   本文がChatGPT側にしか存在せず、変更履歴が残らない。→ `prompts/` への写しが必要。
+4. **この表に無いChatGPTタスクは作らない**。着地先の無い定期実行は、検証もできないまま
+   人間の判断だけに影響する。新規に作るときは正本と着地先を同時に用意する。
 
 ---
 
