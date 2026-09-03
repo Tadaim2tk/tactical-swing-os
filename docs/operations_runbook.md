@@ -48,7 +48,7 @@ GitHub Actions が毎日この順で走る（UTC cron を JST 換算）。
 
 GitHub Actions とは別に、ChatGPT のスケジュール実行が判断そのものを生む。
 **正本は必ず `prompts/` に置き、タスク本文と同時に改定する**（片方だけ直すと乖離が静かに残る）。
-下表は 2026-09-03 にブラウザで実査した全数（アクティブ4・一時停止1・完了1）。
+下表は 2026-09-03 にブラウザで実査した全数（アクティブ5・一時停止16・完了2＝計23）。
 
 ### アクティブ
 
@@ -57,30 +57,51 @@ GitHub Actions とは別に、ChatGPT のスケジュール実行が判断その
 | 毎日 07:00 | TSO Daily Signal Log v2 | `prompts/tso_daily_signal_log.md` | `data/signal_log.csv` ほか |
 | 土 12:00 | レビューする短期スイングモデル（TSO週次レビュー） | `prompts/tso_weekly_review.md` | 会話のみ（REVIEW_LOG の取込先は未整備） |
 | 日 20:30 | Weekly Sunday crypto-theme dashboard | `prompts/tso_weekly_crypto_context.md` | `data/crypto_context_weekly.csv` / `data/crypto_predictions_weekly.csv` |
+| 1日 12:30 | 較正する短期スイングモデル（月次較正） | `prompts/tso_monthly_calibration.md` | `docs/monthly_calibration_YYYY-MM.md` |
 | 月 | 週次決算ウォッチ（監視9銘柄） | （TSO対象外・日本株監視） | 会話のみ |
-| **1日 12:30** | **TSO月次較正（未作成・要人間操作）** | `prompts/tso_monthly_calibration.md` | `docs/monthly_calibration_YYYY-MM.md` |
 
-### 停止中・完了（放置されているもの）
+### 一時停止中（16本）— 放置されているもの
 
-| 状態 | タスク名 | 最終実行 |
+TSO関連で、再開の可否を判断すべきもの:
+
+| タスク名 | 最終実行 | メモ |
 |---|---|---|
-| 一時停止中 | Check for strong lagging-asset buy signals | 2025-12-13 |
-| 完了 | Provide strong asset update | 2025-12-05 |
+| TSO Daily Signal Log | （毎日設定） | v2 の前身。**停止のままでよい**（v2が現役） |
+| Weekly Saturday crypto-sentiment dashboard | 2026-07-04 | 日曜版に統合済みと思われる。停止のままでよい |
+| Weekly Archive Pack | （毎週設定） | **要確認**。監査P1-7「一次データの時限消失」と関係する可能性 |
+| Observation Review | （毎週設定） | 要確認 |
+| Daily Market Observation | 2026-06-27 | |
+| Provide daily asset regime analysis | 2026-06-04 | |
+| Rebalance portfolio quarterly | 2026-07-01 | TSO対象外（長期ポートフォリオ） |
+
+残り9本はTSO以前の系列。USDJPY系4本（Analyze USDJPY / Weekly USDJPY hybrid model review /
+Run USDJPY daily diagnostic / Check USDJPY strong entry signals、いずれも2026-05〜06で停止）と、
+2025年12月前後で止まっている5本（Check for strong lagging-asset buy signals /
+Weekly Saturday crypto-news initial analysis / Weekly Sunday crypto-news final analysis /
+Check strong assets morning / Check strong assets）。
+内訳の合計: 表7本 + USDJPY 4本 + 旧系列5本 = 16本。
+
+### 完了（2本）
+
+SOXX Read Review（2026-07-07）/ Provide strong asset update（2025-12-05）
 
 ### 実査で分かったこと（2026-09-03）
 
 1. **会話スレッドの題名をタスク名と取り違えない**。サイドバーの
    「Crypto market update: macro vs regulation dynamics」はタスクではなく、
    日曜タスクが生成した会話の題名だった。廃止しかけた（changelog(14)）。
-2. **月次較正タスク（1日12:30）が存在しなかった**。`docs/monthly_calibration_2026-09.md` は
-   「GPT側月次タスクにこの文書を渡す」と書いているが、その受け手が無く、月次較正は
-   人間が会話で都度実行していた。→ 本文を設計して `prompts/tso_monthly_calibration.md`
-   に置いた。**ChatGPT側のタスク作成はチャット送信欄への入力が必要で自動化できないため、
-   作成だけ人間が行う**（作成後の本文・スケジュール設定は編集ダイアログ経由で自動化可能）。
+2. **月次較正タスクは存在した。停止されていただけだった。**
+   「較正する短期スイングモデル」（毎月1日12:30、最終実行 2026-08-01）が一時停止中だった。
+   9/1 に月次較正が動かなかったのはタスクが無かったからではなく停止されていたから。
+   → 本文を全面改定して再開した（次回 10月1日）。
+   **一度「存在しない」と報告したのは実査の読み取りミス**（下記4）。
 3. **土12:00の週次レビューに正本が無かった** → `prompts/tso_weekly_review.md` に写した。
    写す過程で本文側の課題が3つ見つかっている（同ファイルの「既知の課題」節）。
    うち1つは**「決着nが5未満は判定不能」が行数の閾値でクラスタ数を見ていない**こと。
-4. **この表に無いChatGPTタスクは作らない**。着地先の無い定期実行は、検証もできないまま
+4. **一覧の読み取りには全 article を列挙すること**。`get_page_text` は最初の1件しか返さず、
+   一時停止中を「1本」と誤読した（実際は16本）。実査するときは
+   `[...document.querySelectorAll('article')].map(...)` で全件を数える。
+5. **この表に無いChatGPTタスクは作らない**。着地先の無い定期実行は、検証もできないまま
    人間の判断だけに影響する。新規に作るときは正本と着地先を同時に用意する。
 
 ---
