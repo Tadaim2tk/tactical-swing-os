@@ -44,6 +44,24 @@ GitHub Actions が毎日この順で走る（UTC cron を JST 換算）。
 
 ---
 
+## 1b. ChatGPT側の定期タスク（JST）
+
+GitHub Actions とは別に、ChatGPT のスケジュール実行が判断そのものを生む。
+**正本は必ず `prompts/` に置き、タスク本文と同時に改定する**（片方だけ直すと乖離が静かに残る）。
+
+| 時刻(JST) | タスク | 正本 | 取込先 |
+|---|---|---|---|
+| 毎日 07:00 | 日次シグナル判断（10資産） | `prompts/tso_daily_signal_log.md` | `data/signal_log.csv` ほか |
+| 土 11:30 | crypto 文脈（マクロか固有要因か） | `prompts/tso_weekly_crypto_context.md` | `data/crypto_context_weekly.csv` |
+| 1日 12:30 | 月次較正 | （タスク本文のみ） | `docs/monthly_calibration_*.md` |
+
+**この表に無いChatGPTタスクは作らない**。2026-09-03 に、台帳へ1行も着地していない
+日次タスク（"Crypto market update: macro vs regulation dynamics"）が発見され廃止された
+（changelog(14)）。着地先の無い定期実行は、検証もできないまま人間の判断だけに影響する。
+
+
+---
+
 ## 2. 毎朝の確認順序（上から順に5分）
 
 Dashboard を開いて、**この順番**で見る。上ほど「土台の健全性」、下ほど「中身」。

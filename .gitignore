@@ -95,3 +95,8 @@ reports/narrative/*_narrative_similarity_evaluation.md
 reports/ablation/*.md
 reports/prediction_log/*.md
 inbox/
+
+# GDELT一度きり取得の再開マーカー(ローカル専用・CI実行なし)。
+# 取得ジョブ実行中はこれが追記され続け、追跡していると毎回のpullが衝突する(2026-09-03に実害)。
+data/retro/.gdelt_days_done
+data/retro/.gdelt_weeks_done
