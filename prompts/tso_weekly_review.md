@@ -69,7 +69,10 @@ next_week_mode,max_daily_risk_pct,rule_change_1,rule_change_2,rule_change_3
    B+印のときのような直接の内生化ではないが、閾値がプロンプトに常駐する構図は同じ。
    閾値を取り込み側へ移す案（changelog(13)の宿題）と一緒に扱う。
 3. REVIEW_LOG の出力先が会話のみで、**台帳に着地していない**。
-   `best_module` / `next_week_mode` などは他に記録が無い。取込先の新設は要検討。
+   Actions側の週次レビュー（土12:10）も `results/weekly_review.csv` が .gitignore 済みで、
+   実体は retention 指定の無いCI artifact（既定90日）だけ。**2系統あってどちらも残らない**
+   （runbook §1c）。かつては `data/prediction_log_archive/` に手動アーカイブされていたが
+   2026-07-05 で止まっている（Weekly Archive Pack を停止した時期と一致）。
 
 ## 着地先
 
