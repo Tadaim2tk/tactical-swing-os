@@ -20,6 +20,10 @@ from dashboard_io import latest_date, latest_file_date, normalize_headers, numer
 # daily=36h, weekly≈8.5日=204h, monthly≈35日=840h。
 LAYER_HEALTH_REGISTRY = [
     {"label": "signals", "ts": ("date", "latest_signal_date"), "rows": "signals", "threshold_hours": 36, "cadence": "daily"},
+    # GPT判断台帳は機械生成(results/signals.csv)とは別経路(route-3の人手取込)で更新される。
+    # 別々に監査しないと「機械生成が動いているので一見正常」というfalse greenになる
+    # (2026-09-05 の週次レビューで実際に発生: signal_log.csv が9/3で停止していたのに health は緑)。
+    {"label": "gpt_signal_ledger", "ts": ("date", "latest_gpt_ledger_date"), "rows": "signal_ledger", "threshold_hours": 36, "cadence": "daily"},
     {"label": "evaluations", "ts": ("date", "latest_evaluation_date"), "rows": "evaluations", "threshold_hours": 48, "cadence": "daily"},
     {"label": "latest_evaluations", "ts": ("json", "latest_evaluations_summary_json", "generated_at_utc"), "rows": "latest_evaluations", "threshold_hours": 36, "cadence": "daily"},
     {"label": "weekly_review", "ts": ("date", "latest_weekly_review_date"), "rows": "weekly_review", "threshold_hours": 204, "cadence": "weekly"},

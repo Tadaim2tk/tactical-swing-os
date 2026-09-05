@@ -143,6 +143,7 @@ def build_dashboard() -> tuple[dict, str]:
     row_counts = {
         "market_snapshot": len(snapshot),
         "signals": len(signals),
+        "signal_ledger": len(extras["signal_ledger"]),
         "evaluations": len(evaluations),
         "raw_evaluations": len(raw_evaluations),
         "latest_evaluations": len(extras["latest_evaluations"]),
@@ -171,10 +172,13 @@ def build_dashboard() -> tuple[dict, str]:
         "pending_reevaluations": len(extras["pending_reevaluations"]),
     }
     latest_signal_date = latest_date(signals, ["signal_date", "date"])
+    # GPT判断台帳の鮮度は機械生成とは別に測る(片方だけ動いていても緑にしない)
+    latest_gpt_ledger_date = latest_date(extras["signal_ledger"], ["date"])
     latest_evaluation_date = latest_date(evaluations, ["evaluation_date", "hit_date", "signal_date"])
     data_reference_date = latest_signal_date or latest_evaluation_date or latest_date(snapshot, ["date", "timestamp", "run_ts"])
     latest_dates = {
         "latest_signal_date": latest_signal_date,
+        "latest_gpt_ledger_date": latest_gpt_ledger_date,
         "latest_evaluation_date": latest_evaluation_date,
         "latest_daily_report_date": latest_file_date("reports/*.md"),
         "latest_weekly_review_date": latest_file_date("reports/weekly/*_weekly_review.md"),
