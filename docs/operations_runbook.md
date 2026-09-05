@@ -64,15 +64,15 @@ GitHub Actions とは別に、ChatGPT のスケジュール実行が判断その
 
 TSO関連で、再開の可否を判断すべきもの:
 
-| タスク名 | 最終実行 | メモ |
+| タスク名 | 設定 | 判断（2026-09-03 に本文を確認） |
 |---|---|---|
-| TSO Daily Signal Log | （毎日設定） | v2 の前身。**停止のままでよい**（v2が現役） |
-| Weekly Saturday crypto-sentiment dashboard | 2026-07-04 | 日曜版に統合済みと思われる。停止のままでよい |
-| Weekly Archive Pack | （毎週設定） | **要確認**。監査P1-7「一次データの時限消失」と関係する可能性 |
-| Observation Review | （毎週設定） | 要確認 |
-| Daily Market Observation | 2026-06-27 | |
-| Provide daily asset regime analysis | 2026-06-04 | |
-| Rebalance portfolio quarterly | 2026-07-01 | TSO対象外（長期ポートフォリオ） |
+| TSO Daily Signal Log | 毎日 | v2 の前身。**停止のままでよい**（v2が現役） |
+| Weekly Saturday crypto-sentiment dashboard | 2026-07-04 最終 | 日曜版に統合済み。**停止のままでよい** |
+| Observation Review | 毎週 21:30 | **停止のままでよい（供給元が死んでいる）**。過去7日分の「TSO Daily Signal Log(v1)」と「Daily Market Observation」の出力を材料にする設計だが、その2本とも停止中。機能は土12:00の週次レビューが引き継いでいる（しかも会話ログでなく台帳CSVを直接読む、より良い設計） |
+| Weekly Archive Pack | 毎週 22:15 | **停止のままでよい**。Observation Review の出力を「Codexに貼るプロンプト」に整形してObsidian/GitHubへ反映させるためのもの。PROTO-0001 / Issue #27 / Idea Freezer という旧設計語彙に依存。ただし**これが止まったことで副作用がある**（下記§1c） |
+| Daily Market Observation | 2026-06-27 最終 | 上記2本の供給元。旧Observationループ本体。`data/observation_log.csv` も1行しか無く、ループ自体が既に死んでいる |
+| Provide daily asset regime analysis | 2026-06-04 最終 | 旧系列 |
+| Rebalance portfolio quarterly | 2026-07-01 最終 | TSO対象外（長期ポートフォリオ） |
 
 残り9本はTSO以前の系列。USDJPY系4本（Analyze USDJPY / Weekly USDJPY hybrid model review /
 Run USDJPY daily diagnostic / Check USDJPY strong entry signals、いずれも2026-05〜06で停止）と、
@@ -103,6 +103,33 @@ SOXX Read Review（2026-07-07）/ Provide strong asset update（2025-12-05）
    `[...document.querySelectorAll('article')].map(...)` で全件を数える。
 5. **この表に無いChatGPTタスクは作らない**。着地先の無い定期実行は、検証もできないまま
    人間の判断だけに影響する。新規に作るときは正本と着地先を同時に用意する。
+
+## 1c. 週次レビューには耐久的な着地先が無い（2026-09-03 判明）
+
+土曜の週次レビューは2系統あるが、**どちらも残らない**。
+
+| 系統 | 出力先 | 寿命 |
+|---|---|---|
+| ChatGPT 12:00「レビューする短期スイングモデル」 | 会話のみ | ChatGPTの会話が残る限り |
+| GitHub Actions 12:10 `weekly_review` | `results/weekly_review.csv` / `reports/weekly/*.md` | **どちらも .gitignore 済み**。実体はCI artifact のみで、retention-days の指定がゼロなので**既定の90日で消える** |
+
+つまり `best_module` / `next_week_mode` / `missed_r` といった週次でしか作られない値は、
+90日より前のものが既に取り出せない。これは監査 P1-7「一次データの時限消失」と同じ構造で、
+週次レビューにも同じ穴が空いていた。
+
+**過去には残っていた**: `data/prediction_log_archive/` に 2026-06-20〜2026-07-05 の
+GPT出力（日次シグナルログ・週次レビュー・crypto週末レビュー）が手動アーカイブされている。
+**2026-07-05 で止まっている**のは、これを作っていた「Weekly Archive Pack」を
+同時期に停止したためと考えられる。つまり**GPTの散文出力は7月上旬から誰も保存していない**。
+台帳CSVは構造化された行を保つが、判断の理由・因果モデル・主役の申告根拠は文章側にしかない。
+
+対策の候補（未着手・要判断）:
+1. `weekly_review` workflow に、`results/weekly_review.csv` を
+   `data/weekly_review_log.csv` へ追記コミットする段を足す（deploy key の既存パターンを流用）
+2. route-3 取込のときに、その日のGPT本文を `data/prediction_log_archive/` へ保存する手順を足す
+3. 全workflowに `retention-days` を明示する（90日→最大値）。応急策にすぎない
+
+---
 
 ---
 
