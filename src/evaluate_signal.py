@@ -239,10 +239,28 @@ def no_trade_result(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
     if future.empty:
         # OHLCはあるが signal_date 以降のバーがまだ無い = ホライズン未到達。
         # no_trade の正否(correct/missed)はまだ判定不能。欠損(data_missing)とは区別する。
+        # 監査F2の同型: 旧実装は outcome="no_trade"/status="no_trade"/evaluation_status="skipped"
+        # を返していたが、この3つは reevaluate_pending_signals の FINAL_OUTCOMES にも
+        # OPEN_OUTCOMES/OPEN_STATUSES にも無く、has_open_latest_evaluation が False を返す。
+        # つまりバーが届いても**永久に再評価されない**行になっていた。
+        # evaluate_trade 側と同じ pending/open_unresolved へ揃える。
         result["r_multiple"] = 0.0
         result["r_result"] = 0.0
-        return finish(result, status="no_trade", evaluation_status="skipped", outcome="no_trade", error_type="awaiting_horizon", note="No-trade signal newer than latest OHLC bar; correctness not yet assessable")
+        return finish(result, status="pending", evaluation_status="pending", outcome="open_unresolved", error_type="awaiting_horizon", note="No-trade signal newer than latest OHLC bar; correctness not yet assessable")
 
+    if len(future) < horizon:
+        # 監査F2 (2026-09-06): ここで分類すると「10バー評価の見送りを1バーで確定」する。
+        # 1バーでも future があれば全期間を見終えたように no_trade_correct/missed へ落ち、
+        # その結果は FINAL_OUTCOMES に入るため reevaluate_pending_signals の
+        # has_open_latest_evaluation が再評価対象から外す。残り9バーで大きく動いても
+        # 見送りの採点は二度と検証されない。
+        # evaluate_trade 側は同じ状況で pending/open_unresolved を返しており、
+        # 見送りだけ早期確定していた。評価期間を満たすまで未確定で保持する。
+        result["r_multiple"] = 0.0
+        result["r_result"] = 0.0
+        return finish(result, status="pending", evaluation_status="pending", outcome="open_unresolved",
+                      error_type="awaiting_horizon",
+                      note=f"No-trade horizon not yet elapsed ({len(future)}/{horizon} bars)")
     price_range = float(future["high"].max() - future["low"].min())
     atr_series = df[df["date"] <= future.iloc[0]["date"]]["atr14"].dropna()
     atr14 = float(atr_series.iloc[-1]) if not atr_series.empty else math.nan

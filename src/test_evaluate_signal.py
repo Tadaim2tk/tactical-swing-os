@@ -90,12 +90,17 @@ def test_evaluate_one_data_missing_for_asset_without_raw(monkeypatch):
 # === no_trade も同じ区別を行う ===
 
 def test_no_trade_awaiting_horizon_when_signal_newer_than_data():
+    # このテストが本来守っていたのは awaiting_horizon と data_missing の区別であり、
+    # そこは不変。outcome/evaluation_status の期待値は監査F2 (2026-09-06) で変更した:
+    # 旧値 outcome="no_trade" / evaluation_status="skipped" は FINAL_OUTCOMES にも
+    # OPEN_OUTCOMES/OPEN_STATUSES にも属さず、has_open_latest_evaluation が False を
+    # 返すため、バーが届いても永久に再評価されない行になっていた。
     sig = _no_trade_signal("2026-01-31")
     df = _ohlcv([(100, 101, 99, 100), (105, 106, 100, 104)])
     res = ev.no_trade_result(sig, df, horizon=10)
     assert res["error_type"] == "awaiting_horizon"
-    assert res["outcome"] == "no_trade"
-    assert res["evaluation_status"] == "skipped"
+    assert res["outcome"] == "open_unresolved"
+    assert res["evaluation_status"] == "pending"
 
 
 def test_no_trade_data_missing_when_no_ohlc():
