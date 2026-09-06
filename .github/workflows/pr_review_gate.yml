@@ -62,6 +62,26 @@ jobs:
               fi
               echo "Codex review arrived; unresolved finding threads: $unresolved — address them in this PR. ($i/40)"
             else
+              # Codexが「レビュー枠を使い切った」とコメントしている場合、待っても永久に来ない
+              # (2026-09-06に実際に発生: 一晩で10本出して枠が尽き、6本が未レビューでマージ)。
+              # レビュー本体ではなく issue comment として来るため reviews API では見えない。
+              # 20分待ってから開けるのではなく、理由を明示して即座に開ける。
+              quota=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+                --jq '[.[] | select((.user.login // "") | startswith("chatgpt-codex-connector")) | select(.body | test("usage limits for code reviews"))] | length' \
+                2>/dev/null | awk '{s+=$1} END {print s+0}')
+              if [ "${quota:-0}" -gt 0 ]; then
+                echo "Codex has run out of code-review quota — gate passes without review."
+                {
+                  echo "### ゲート: **Codexのレビュー枠切れのまま通過(fail-open)**"
+                  echo ""
+                  echo "Codexが利用上限に達しており、待っても来ない。理由を明示して即座に通した。"
+                  echo "この緑は「レビュー済み・指摘なし」を意味しない。"
+                } >> "$GITHUB_STEP_SUMMARY"
+                gh pr comment "$PR" --repo "$REPO" --body \
+                  "🔴 **Codexのレビュー枠切れのまま通過しました(fail-open)**。Codexが「usage limits for code reviews」に達しており、待ってもレビューは来ません。この緑は「レビュー済み・指摘なし」ではありません。**枠が回復するまで、全てのPRが未レビューでマージされます。** 評価・選別の定義に触るPRを出す前に、枠の回復か追加クレジットを確認してください。" \
+                  || echo "warning: could not post the quota notice comment"
+                exit 0
+              fi
               echo "waiting for Codex review... ($i/40)"
             fi
             sleep 30
