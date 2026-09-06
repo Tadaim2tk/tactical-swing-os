@@ -78,3 +78,51 @@ def test_all_unevaluable_frame_reports_zero_sample_not_zero_performance():
     assert m["recorded_count"] == 12
     assert m["unevaluable_count"] == 12
     assert ms.direction_from_metrics(m["sample_count"], m["avg_r"], m["win_rate"]) == "hold"
+
+
+# === #145 Codex P1: 確定した見送り評価を母集団から落とさない ===================
+# no_trade_result は no_trade_correct / no_trade_missed にも evaluation_status="skipped"
+# を付ける(evaluate_signal.py)。skipped を一律に評価不能とすると、正しく採点できた
+# 見送りまで消え、NONE/NO_TRADE の side・rank・type 提案が insufficient_samples になる。
+
+def _finalized_no_trade_rows(n=6, outcome="no_trade_correct"):
+    return [{"outcome": outcome, "evaluation_status": "skipped", "status": "no_trade",
+             "error_type": "no_trade", "r_multiple": 0.0, "missed_opportunity": outcome == "no_trade_missed"}
+            for _ in range(n)]
+
+
+@pytest.mark.parametrize("outcome", ["no_trade_correct", "no_trade_missed"])
+def test_finalized_no_trade_stays_measurable(outcome):
+    df = pd.DataFrame(_finalized_no_trade_rows(6, outcome))
+    assert int(ms.unevaluable_mask(df).sum()) == 0, "skipped だけを理由に落とさない"
+    m = ms.metrics_from_frame(df)
+    assert m["sample_count"] == 6
+    assert m["unevaluable_count"] == 0
+
+
+def test_finalized_no_trade_reaches_confidence_and_direction():
+    """観測された見送りの結果がモデル更新に届く（提案が insufficient_data で死なない）。"""
+    df = pd.DataFrame(_finalized_no_trade_rows(12))
+    m = ms.metrics_from_frame(df)
+    assert ms.confidence_level(m["sample_count"]) != "insufficient_data"
+    assert ms.max_allowed_delta(m["sample_count"]) > 0.0
+
+
+def test_unresolved_rows_are_not_measurable():
+    """まだ決着していない行は「測れなかった」ではなく「これから測る」。母集団に入れない。"""
+    rows = [{"outcome": "open_unresolved", "evaluation_status": "pending", "status": "pending",
+             "error_type": "awaiting_horizon", "r_multiple": 0.0, "missed_opportunity": False}
+            for _ in range(9)]
+    df = pd.DataFrame(_win_rows(4) + rows)
+    m = ms.metrics_from_frame(df)
+    assert m["sample_count"] == 4
+    assert m["unevaluable_count"] == 9
+    assert m["win_rate"] == 1.0
+
+
+def test_mixed_frame_keeps_no_trade_and_drops_only_unevaluable():
+    df = pd.DataFrame(_win_rows(3) + _finalized_no_trade_rows(4) + _unevaluable_rows(5))
+    m = ms.metrics_from_frame(df)
+    assert m["sample_count"] == 7, "勝ち3 + 確定見送り4"
+    assert m["unevaluable_count"] == 5
+    assert m["recorded_count"] == 12

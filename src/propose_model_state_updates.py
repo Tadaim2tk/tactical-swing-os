@@ -183,6 +183,15 @@ def weight_lookup(weights: dict[str, Any], category: str, target: str) -> tuple[
 # confidence=high 提案 decrease -0.0507 で、**提案の向きが反転する**。
 UNEVALUABLE_ERROR_TYPES = {"invalid_signal_date", "data_missing", "awaiting_horizon"}
 
+# 確定した見送り評価。no_trade_result はこれらにも evaluation_status="skipped" を付けるため、
+# skipped を一律に評価不能とすると**正しく採点できた見送りまで母集団から消える**
+# (#145 Codex P1)。その場合 NONE/NO_TRADE の side・rank・type 提案が
+# insufficient_samples になり、観測された結果がモデル更新に届かなくなる。
+FINALIZED_NO_TRADE_OUTCOMES = {"no_trade_correct", "no_trade_missed"}
+
+# まだ決着していない行。測れなかったのではなく「これから測る」。
+UNRESOLVED_OUTCOMES = {"open_unresolved", "no_trade"}
+
 
 def _lower_col(df: pd.DataFrame, name: str) -> pd.Series:
     return df.get(name, pd.Series("", index=df.index)).fillna("").astype(str).str.lower()
@@ -197,14 +206,18 @@ def unevaluable_mask(df: pd.DataFrame) -> pd.Series:
     if df.empty:
         return pd.Series(dtype=bool)
     err = _lower_col(df, "error_type")
-    ev = _lower_col(df, "evaluation_status")
     st = _lower_col(df, "status")
     outcome = _lower_col(df, "outcome")
+    # evaluation_status=="skipped" を単独の条件にしない(#145 Codex P1)。
+    # 確定した no_trade_correct / no_trade_missed も skipped を持つため、
+    # 一律に外すと正しく採点できた見送りが母集団から消える。
+    # 評価不能かどうかは error_type と outcome/status の組み合わせで判定する。
     return (
         err.isin(UNEVALUABLE_ERROR_TYPES)
-        | (ev == "skipped")
         | (st == "invalid")
         | (outcome == "invalid")
+        | (outcome.isin(UNRESOLVED_OUTCOMES) & ~outcome.isin(FINALIZED_NO_TRADE_OUTCOMES))
+        | (st.isin({"pending", "open", "unresolved"}))
     )
 
 
