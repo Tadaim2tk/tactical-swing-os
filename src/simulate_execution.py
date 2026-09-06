@@ -46,7 +46,19 @@ OUT_CSV = Path("data/execution_simulation.csv")
 RESULTS_DIR = Path("results")
 
 FILL_WINDOW_BARS = 5   # 判断日を含む約定待ちバー数
-EXIT_DEADLINE_BARS = 5  # 判断日からの決済期限(バー) — このバーの終値で時間切れ決済
+# 判断日ラベルのバーを起点(0本目)として EXIT_DEADLINE_BARS 本先、つまり**6本目**の
+# 終値で時間切れ決済する。採点側の r_close_5d は判断後**5本目**の終値であり、
+# **1バー違う別の量**である(監査F5, 2026-09-06)。
+#
+# 2026-09-07 の人間の言明で、どちらも「実際の手仕舞い」ではないことが確定した:
+#   「何日目とかそういうものを具体的に決めるわけではなく、SLやTPまで引っ張らなくても
+#     シナリオ崩壊が確認できれば手仕舞いにしています」
+# したがってこれは現実に合わせるべき数ではなく、**測定規約**である。合わせるべきは
+# 現実ではなく名前の方で、同じ「5日」で呼ぶのをやめる。
+#   - r_close_5d           = 5営業日後の終値で測った方向リターン(決済を含意しない)
+#   - filled_time_exit     = 6本目の終値で強制決済したときの執行R(ベンチマーク)
+# 実際の手仕舞い(シナリオ崩壊)は invalidation_check として別に記録し始めた(changelog(15))。
+EXIT_DEADLINE_BARS = 5  # 判断日ラベルのバーを0本目とした決済期限。実質6本目の終値
 COST_SENSITIVITY_R = (0.02, 0.05, 0.10)
 
 COLUMNS = [
@@ -54,6 +66,7 @@ COLUMNS = [
     "entry_low", "entry_high", "sl", "tp1",
     "status",        # filled_sl / filled_tp1 / filled_time_exit / no_fill / open / excluded_scale / excluded_bad_levels / invalid_data / data_window_expired
     "reference_deviation",  # reference/anchor-1。隔離の可否を後から検算できるよう常に残す
+    "exit_bar_offset",  # 時間決済したバーの位置(判断日ラベル=0本目)。「5日」の曖昧さを列で解消する
     "scale_check",   # passed / excluded / not_checked(判断前のバーが無く検査できない)
     "fill_date", "fill_price", "risk_unit", "exit_date", "exit_price",
     "r_result", "capital_pct", "simulated_at_utc",
@@ -175,6 +188,7 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
         # 期限バーが形成途中(ラベル日がUTCでまだ過ぎていない)なら時間決済を確定しない
         # (#137 Codex P2と同型: 日中値を終値決済として記録しない)。
         if pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+            out["exit_bar_offset"] = EXIT_DEADLINE_BARS
             return finish("filled_time_exit", deadline, float(ohlcv.iloc[deadline]["close"]))
     out["status"] = "open"  # 期限バー未到来/未確定 — 正直に進行中
     return out

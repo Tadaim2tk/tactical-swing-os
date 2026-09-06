@@ -188,3 +188,29 @@ def test_execution_anchor_matches_scoring_anchor_rule():
     seven_day = pd.DataFrame({"date": pd.date_range("2026-06-29", periods=7, freq="D")})  # 週末を含む
     k, a = decision_time_anchor(seven_day, "2026-07-01")
     assert (k, a) == (2, 0), "週7日資産は k-2"
+
+
+# === 監査F5 (2026-09-06): 「5日」が2つある件の名前分け ========================
+
+def test_time_exit_records_its_bar_offset():
+    """時間決済したバーの位置を列に残す。「5日」という名前だけでは量が特定できない。"""
+    bars = _ohlcv([("2026-06-30", 100, 100, 100, 100)]
+                  + [("2026-07-%02d" % d, 100, 101, 99, 100 + d) for d in range(1, 9)])
+    r = se.simulate_row(_row(entry_low="99", entry_high="101", sl="80", tp1="999"), bars, "t")
+    assert r["status"] == "filled_time_exit"
+    assert r["exit_bar_offset"] == se.EXIT_DEADLINE_BARS
+
+
+def test_time_exit_is_one_bar_later_than_scoring_horizon():
+    """執行の時間決済(6本目)と採点の r_close_5d(5本目)が別の量であることを固定する。
+
+    2026-09-07 の人間の言明で、どちらも実際の手仕舞いではないことが確定した
+    （実際は日数固定ではなくシナリオ崩壊で降りる）。現実に合わせる問題ではなく、
+    同じ「5日」で呼ばないという名前の問題である。
+    """
+    from score_prediction_log import HORIZONS
+    assert 5 in HORIZONS
+    scoring_offset_from_k = 5 - 1          # j = k - 1 + h  → k+4 が5本目
+    execution_offset_from_idx0 = se.EXIT_DEADLINE_BARS   # idx0 + 5 が6本目
+    assert execution_offset_from_idx0 == scoring_offset_from_k + 1, \
+        "1バー差であることが前提。変えるなら両方の名前と文書を同時に直すこと"
