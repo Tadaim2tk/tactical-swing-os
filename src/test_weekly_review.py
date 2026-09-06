@@ -56,12 +56,20 @@ def test_weekly_review_prefers_prediction_log_over_stale_latest(monkeypatch, tmp
     assert int(row["total_signals"]) == 3
     assert int(row["b_signals"]) == 1
     assert int(row["no_trade_signals"]) == 2
-    assert int(row["pending_signals"]) == 3
+    # 監査F6 (2026-09-06) で期待値を変更。NO_TRADE の2行は result_5d=not_applicable、
+    # つまり**方向Rを持ちようがない**行であり、「これから決着する(pending)」ではない。
+    # 旧実装は status=awaiting_horizon(=10日未確定)だけを見ていたため3件とも pending
+    # にしていた。実データでは pending 116件のうち104件がこの型だった。
+    assert int(row["pending_signals"]) == 1
+    assert int(row["not_applicable_signals"]) == 2
     assert row["signal_source"] == "prediction_log"
     assert row["evaluation_source"] == "prediction_log_scores"
     assert not bool(row["latest_evaluations_available"])
     assert int(row["prediction_awaiting_rows"]) == 3
-    assert row["rule_change_1"] == "予測ログは評価期間中（awaiting_horizon）"
+    # 監査F6以降、pending は1件（NO_TRADE 2件は not_applicable）。
+    # 「評価期間中」の注記は pending>=3 のときだけ出るため、ここでは出ない。
+    # 決着0件なので mode_notes 側の「データ不足」が先頭に来る、が正しい挙動。
+    assert row["rule_change_1"] == "データ不足"
     assert row["best_asset"] == ""
     assert row["worst_asset"] == ""
     assert "シグナル集計ソース: prediction_log" in Path(report_path).read_text(encoding="utf-8")
