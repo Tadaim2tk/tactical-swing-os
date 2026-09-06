@@ -219,20 +219,33 @@ def prediction_scores_to_evaluations(scores: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     out = scores.copy()
     status = out.get("status", pd.Series([""] * len(out), index=out.index)).astype(str).str.lower()
+    # 監査F6 (2026-09-06): 値に r_close_5d を採る一方で採否条件に status=scored
+    # (全horizon完了=10日まで確定)を使っていたため、**5日は確定しているのに週次では
+    # pending**という行が出ていた(実測: 702行中13件が status=awaiting_horizon かつ
+    # result_5d ∈ {success, failure})。5日成績の分母は5日の確定条件で決める。
+    horizon_col, result_col = None, None
+    if "r_close_5d" in out.columns:
+        horizon_col, result_col, out["r_horizon"] = "r_close_5d", "result_5d", "5d"
+    elif "r_close_10d" in out.columns:
+        horizon_col, result_col, out["r_horizon"] = "r_close_10d", "result_10d", "10d"
     if "r_result" not in out.columns:
-        if "r_close_5d" in out.columns:
-            out["r_result"] = out["r_close_5d"]
-        elif "r_close_10d" in out.columns:
-            out["r_result"] = out["r_close_10d"]
-        else:
-            out["r_result"] = ""
-    # closed = scored かつ 方向Rが数値で在る行のみ(#125 Codex P2: NO_TRADE等の非actionable行も
-    # status=scored になるため、そのままclosedに写すと勝率の分母が空白Rの行で薄まり
-    # next_week_mode の判定まで歪む)。非actionableのscored行は not_applicable として区別する。
+        out["r_result"] = out[horizon_col] if horizon_col else ""
+    # closed = 当該horizonの結果が確定していて、方向Rが数値で在る行のみ
+    # (#125 Codex P2: NO_TRADE等の非actionable行は結果が not_applicable になるため、
+    # そのままclosedに写すと勝率の分母が空白Rの行で薄まり next_week_mode まで歪む)。
     r_numeric = pd.to_numeric(out["r_result"], errors="coerce")
+    result = (out.get(result_col, pd.Series([""] * len(out), index=out.index))
+              .astype(str).str.lower() if result_col else pd.Series([""] * len(out), index=out.index))
+    decided = result.isin(["success", "failure"])
     out["evaluation_status"] = "pending"
-    out.loc[(status == "scored") & r_numeric.notna(), "evaluation_status"] = "closed"
-    out.loc[(status == "scored") & r_numeric.isna(), "evaluation_status"] = "not_applicable"
+    out.loc[decided & r_numeric.notna(), "evaluation_status"] = "closed"
+    out.loc[result == "not_applicable", "evaluation_status"] = "not_applicable"
+    out.loc[result == "suspect_data", "evaluation_status"] = "skipped"
+    # 当該horizonの結果列が無い古い形式へのフォールバック(従来どおり status を見る)
+    if result_col is None or result_col not in out.columns:
+        out["evaluation_status"] = "pending"
+        out.loc[(status == "scored") & r_numeric.notna(), "evaluation_status"] = "closed"
+        out.loc[(status == "scored") & r_numeric.isna(), "evaluation_status"] = "not_applicable"
     out.loc[status.isin(["invalid_data", "invalid"]), "evaluation_status"] = "skipped"
     if "error_type" not in out.columns:
         out["error_type"] = status.mask(status == "", "未分類")
@@ -579,7 +592,10 @@ def build_review(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, 
     best_asset, worst_asset = best_worst_asset(asset_table)
     mode, max_daily_risk_pct, mode_notes = next_week_decision(metrics, closed_count)
     pending_note = ""
-    if weekly_source_meta["signal_source"] == "prediction_log" and pending_count and pending_count == prediction_awaiting_rows:
+    # 監査F6以降、pending は「5日結果が awaiting の行」だけになり、
+    # awaiting_horizon 行のうち NO_TRADE 等は not_applicable へ回る。よって
+    # 等号ではなく包含で判定する(pending は awaiting_horizon の部分集合)。
+    if weekly_source_meta["signal_source"] == "prediction_log" and pending_count and pending_count <= prediction_awaiting_rows:
         pending_note = "予測ログは評価期間中（awaiting_horizon）"
     changes = rule_changes(metrics, rank_table, pending_count, mode_notes, pending_note)
     reason_analysis, no_trade_analysis = load_reason_code_analysis()
