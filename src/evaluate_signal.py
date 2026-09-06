@@ -233,9 +233,13 @@ def no_trade_result(signal: pd.Series, df: pd.DataFrame, horizon: int) -> dict:
     if not future.empty:
         result["evaluation_date"] = date_str(future.iloc[-1]["date"])
     if df.empty:
+        # #146 Codex P1: ここも旧実装は no_trade/skipped/no_trade を返しており、
+        # has_open_latest_evaluation に認識されない。つまり**一時的な取得失敗だけで
+        # そのシグナルが恒久的に再評価対象から外れる**（後でOHLCが揃っても戻らない）。
+        # error_type="data_missing" は残したまま、状態は pending/open_unresolved にする。
         result["r_multiple"] = 0.0
         result["r_result"] = 0.0
-        return finish(result, status="no_trade", evaluation_status="skipped", outcome="no_trade", error_type="data_missing", note="No OHLC data for no-trade evaluation")
+        return finish(result, status="pending", evaluation_status="pending", outcome="open_unresolved", error_type="data_missing", note="No OHLC data for no-trade evaluation")
     if future.empty:
         # OHLCはあるが signal_date 以降のバーがまだ無い = ホライズン未到達。
         # no_trade の正否(correct/missed)はまだ判定不能。欠損(data_missing)とは区別する。

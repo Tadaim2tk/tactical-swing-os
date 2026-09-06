@@ -104,10 +104,14 @@ def test_no_trade_awaiting_horizon_when_signal_newer_than_data():
 
 
 def test_no_trade_data_missing_when_no_ohlc():
+    # このテストが守っているのは data_missing の区別であり、そこは不変。
+    # outcome の期待値は #146 Codex P1 で変更した: 旧値 "no_trade" は
+    # has_open_latest_evaluation に認識されず、一時的な取得失敗だけで
+    # そのシグナルが恒久的に再評価対象から外れていた。
     sig = _no_trade_signal("2026-01-01")
     res = ev.no_trade_result(sig, pd.DataFrame(), horizon=10)
     assert res["error_type"] == "data_missing"
-    assert res["outcome"] == "no_trade"
+    assert res["outcome"] == "open_unresolved"
 
 
 # === 入力不正: signal_date が不正/欠損は awaiting_horizon ではなく invalid_signal_date ===

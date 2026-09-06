@@ -90,3 +90,28 @@ def test_empty_future_is_reevaluable():
     assert r["outcome"] == "open_unresolved"
     assert r["status"] == "pending"
     assert rp.has_open_latest_evaluation(pd.Series(r)), "バーが届いても再評価されない行を作らない"
+
+
+def test_missing_ohlc_is_reevaluable_and_keeps_error_type():
+    """#146 Codex P1: 一時的な取得失敗でシグナルを恒久的に失わない。
+
+    OHLCが空のとき旧実装は no_trade/skipped/no_trade を返し、
+    has_open_latest_evaluation に認識されないため、後でデータが揃っても戻らなかった。
+    """
+    r = es.no_trade_result(_signal(), pd.DataFrame(), horizon=10)
+    assert r["error_type"] == "data_missing", "欠損の区別は残す"
+    assert r["outcome"] == "open_unresolved"
+    assert r["status"] == "pending"
+    assert rp.has_open_latest_evaluation(pd.Series(r)), "取得失敗で再評価対象から外れない"
+
+
+def test_all_three_unresolved_paths_are_reevaluable():
+    """no_trade_result が返す3つの未確定経路すべてが再評価対象に残ること。"""
+    cases = {
+        "data_missing": es.no_trade_result(_signal(), pd.DataFrame(), horizon=10),
+        "awaiting_horizon_empty": es.no_trade_result(_signal("2026-12-31"), _ohlc(10), horizon=10),
+        "awaiting_horizon_partial": es.no_trade_result(_signal(), _ohlc(3), horizon=10),
+    }
+    for name, r in cases.items():
+        assert rp.has_open_latest_evaluation(pd.Series(r)), f"{name} が再評価対象から外れている"
+        assert r["outcome"] not in rp.FINAL_OUTCOMES, f"{name} が確定扱いになっている"
