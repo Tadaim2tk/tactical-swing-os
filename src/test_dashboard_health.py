@@ -90,19 +90,15 @@ def _extras_with(adv_status="passed", narr_status="passed"):
     }
 
 
+# フィクスチャはレジストリから導出する。手書きで層名を並べると、レジストリに層を
+# 足したときに「テストが落ちるが、落ちた理由は新機能ではなくフィクスチャの取り残し」
+# という状態になる(2026-09-05に gpt_signal_ledger を足して実際に4件落ちた)。
 def _row_counts_all(n=3):
-    return {k: n for k in [
-        "signals", "evaluations", "latest_evaluations", "weekly_review", "monthly_calibration",
-        "prediction_calibration", "narrative_reliability", "narrative_lookahead_audit", "adversarial_review",
-        "news_narrative_scores", "ai_feedback", "portfolio_layer", "datetime_audit", "model_state_update_proposals",
-    ]}
+    return {spec["rows"]: n for spec in ds.LAYER_HEALTH_REGISTRY if spec.get("rows")}
 
 
-def _latest_dates_fresh():
-    return {
-        "latest_signal_date": "2026-06-15", "latest_evaluation_date": "2026-06-15",
-        "latest_weekly_review_date": "2026-06-15", "latest_monthly_calibration_date": "2026-06-15",
-    }
+def _latest_dates_fresh(date="2026-06-15"):
+    return {spec["ts"][1]: date for spec in ds.LAYER_HEALTH_REGISTRY if spec["ts"][0] == "date"}
 
 
 def test_health_summary_healthy_when_all_fresh():
@@ -208,7 +204,7 @@ def test_health_summary_watch_on_future_timestamp():
 def test_health_summary_watch_when_only_unknown_age():
     # 行はあるが全レイヤーの生成時刻が取れない -> watch
     rc = _row_counts_all(3)
-    ld = {k: "" for k in ["latest_signal_date", "latest_evaluation_date", "latest_weekly_review_date", "latest_monthly_calibration_date"]}
+    ld = _latest_dates_fresh("")
     h = ds.data_health_summary({}, rc, ld, NOW)
     assert h["health_status"] == "watch"
     assert h["unknown_age_count"] > 0
@@ -386,3 +382,45 @@ def test_asset_performance_uses_same_injected_as_of_window():
     assert current.loc[0, "win_rate"] == 1.0
     assert next_day.loc[0, "total_r"] == 0.0
     assert next_day.loc[0, "win_rate"] == 0.0
+
+
+# --- GPT判断台帳の鮮度 (PR #143 で追加した gpt_signal_ledger 層) -------------
+# 機械生成(results/signals.csv)は毎日動くので、GPT台帳が止まっていても
+# signals 層は fresh のままになる。別層として独立に見えることを縛る。
+
+def _gpt_layer(h):
+    return next(l for l in h["layers"] if l["layer"] == "gpt_signal_ledger")
+
+
+def test_gpt_ledger_layer_exists_and_reads_its_own_date():
+    spec = next(s for s in ds.LAYER_HEALTH_REGISTRY if s["label"] == "gpt_signal_ledger")
+    assert spec["ts"] == ("date", "latest_gpt_ledger_date"), "機械生成の日付を見てはいけない"
+    assert spec["rows"] == "signal_ledger"
+
+
+def test_gpt_ledger_stale_while_machine_signals_fresh():
+    """false green の再現: 機械生成だけ新しく、GPT台帳が2日止まっている状態。"""
+    ld = _latest_dates_fresh()
+    ld["latest_gpt_ledger_date"] = "2026-06-12"   # NOW-3日相当
+    h = ds.data_health_summary(_extras_with(), _row_counts_all(3), ld, NOW)
+    assert _gpt_layer(h)["status"] == "stale"
+    assert h["health_status"] == "degraded"
+    assert "gpt_signal_ledger" in h["attention_layers"]
+    # 機械生成側は巻き込まれない
+    assert next(l for l in h["layers"] if l["layer"] == "signals")["status"] == "fresh"
+
+
+def test_gpt_ledger_missing_date_is_not_silently_fresh():
+    ld = _latest_dates_fresh()
+    ld["latest_gpt_ledger_date"] = ""
+    h = ds.data_health_summary(_extras_with(), _row_counts_all(3), ld, NOW)
+    assert _gpt_layer(h)["status"] in ("unknown_age", "missing", "empty")
+    assert h["health_status"] != "healthy"
+
+
+def test_gpt_ledger_empty_ledger_is_flagged():
+    rc = _row_counts_all(3)
+    rc["signal_ledger"] = 0
+    h = ds.data_health_summary(_extras_with(), rc, _latest_dates_fresh(), NOW)
+    assert _gpt_layer(h)["status"] in ("empty", "missing")
+    assert h["health_status"] != "healthy"
