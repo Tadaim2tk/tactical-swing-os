@@ -174,41 +174,109 @@ def weight_lookup(weights: dict[str, Any], category: str, target: str) -> tuple[
     return 1.0, True
 
 
+# 正否を測れなかった行の error_type (監査F1, 2026-09-06)。
+# evaluate_signal はこれらにも r_multiple=0.0 を入れるが、その 0 は「損益ゼロ」ではなく
+# 「測れなかった」である。0R を実績として集計に入れると、負けと同じ働きをして
+# 勝率を薄め、平均Rを引き下げ、標本数と信頼度だけを膨らませる。
+# 実測(合成再現): 正常5件(全て+1R)なら n=5 勝率100% 平均+1R confidence=low
+# 提案 increase +0.03。同じ5件に評価不能20件を足すと n=25 勝率20% 平均+0.2R
+# confidence=high 提案 decrease -0.0507 で、**提案の向きが反転する**。
+UNEVALUABLE_ERROR_TYPES = {"invalid_signal_date", "data_missing", "awaiting_horizon"}
+
+# 確定した見送り評価。no_trade_result はこれらにも evaluation_status="skipped" を付けるため、
+# skipped を一律に評価不能とすると**正しく採点できた見送りまで母集団から消える**
+# (#145 Codex P1)。その場合 NONE/NO_TRADE の side・rank・type 提案が
+# insufficient_samples になり、観測された結果がモデル更新に届かなくなる。
+FINALIZED_NO_TRADE_OUTCOMES = {"no_trade_correct", "no_trade_missed"}
+
+# まだ決着していない行。測れなかったのではなく「これから測る」。
+UNRESOLVED_OUTCOMES = {"open_unresolved", "no_trade"}
+
+
+def _lower_col(df: pd.DataFrame, name: str) -> pd.Series:
+    return df.get(name, pd.Series("", index=df.index)).fillna("").astype(str).str.lower()
+
+
+def unevaluable_mask(df: pd.DataFrame) -> pd.Series:
+    """正否を測れなかった行 = 入力不正・データ欠損・ホライズン未到達・skipped。
+
+    「全判断を記録する」と「全行を売買勝率の分母にする」は別の要件である。
+    記録は残したまま、測れた集合だけを成績の母集団にする。
+    """
+    if df.empty:
+        return pd.Series(dtype=bool)
+    err = _lower_col(df, "error_type")
+    st = _lower_col(df, "status")
+    outcome = _lower_col(df, "outcome")
+    # evaluation_status=="skipped" を単独の条件にしない(#145 Codex P1)。
+    # 確定した no_trade_correct / no_trade_missed も skipped を持つため、
+    # 一律に外すと正しく採点できた見送りが母集団から消える。
+    # 評価不能かどうかは error_type と outcome/status の組み合わせで判定する。
+    return (
+        err.isin(UNEVALUABLE_ERROR_TYPES)
+        | (st == "invalid")
+        | (outcome == "invalid")
+        | (outcome.isin(UNRESOLVED_OUTCOMES) & ~outcome.isin(FINALIZED_NO_TRADE_OUTCOMES))
+        | (st.isin({"pending", "open", "unresolved"}))
+    )
+
+
+def measurable_mask(df: pd.DataFrame) -> pd.Series:
+    """成績の母集団。勝率の分母・R集計・標本数・信頼度はすべてこの集合を使う。"""
+    if df.empty:
+        return pd.Series(dtype=bool)
+    return ~unevaluable_mask(df)
+
+
 def closed_mask(df: pd.DataFrame) -> pd.Series:
     if df.empty:
         return pd.Series(dtype=bool)
-    outcome = df.get("outcome", pd.Series("", index=df.index)).fillna("").astype(str).str.lower()
+    outcome = _lower_col(df, "outcome")
     status = df.get("evaluation_status", df.get("status", pd.Series("", index=df.index))).fillna("").astype(str).str.lower()
     r = numeric_series(df, "r_multiple")
     resolved = outcome.isin(["win_tp1", "win_tp2", "loss_sl"])
-    return resolved | (status == "closed") | r.notna()
+    # 評価不能行は r_multiple=0.0 を持つため r.notna() で closed に混入する。除く。
+    return (resolved | (status == "closed") | r.notna()) & measurable_mask(df)
+
+
+_EMPTY_METRICS = {
+    "sample_count": 0, "recorded_count": 0, "unevaluable_count": 0,
+    "win_rate": 0.0, "avg_r": 0.0, "total_r": 0.0, "median_r": 0.0,
+    "loss_rate": 0.0, "missed_opportunity_rate": 0.0, "no_entry_rate": 0.0, "closed_rate": 0.0,
+}
 
 
 def metrics_from_frame(df: pd.DataFrame) -> dict[str, float | int]:
-    sample_count = int(len(df))
+    """成績指標。分母はすべて「測れた行」で揃える（監査F1）。
+
+    sample_count は測れた行数であり、記録総数ではない。記録総数は recorded_count、
+    測れなかった行数は unevaluable_count に別途残す（記録は捨てない）。
+    """
+    recorded_count = int(len(df))
+    if recorded_count == 0:
+        return dict(_EMPTY_METRICS)
+    measurable = measurable_mask(df)
+    sample_count = int(measurable.sum())
+    unevaluable_count = recorded_count - sample_count
     if sample_count == 0:
-        return {
-            "sample_count": 0,
-            "win_rate": 0.0,
-            "avg_r": 0.0,
-            "total_r": 0.0,
-            "median_r": 0.0,
-            "loss_rate": 0.0,
-            "missed_opportunity_rate": 0.0,
-            "no_entry_rate": 0.0,
-            "closed_rate": 0.0,
-        }
-    outcome = df.get("outcome", pd.Series("", index=df.index)).fillna("").astype(str).str.lower()
-    r = numeric_series(df, "r_multiple")
-    closed = closed_mask(df)
-    closed_count = int(closed.sum())
+        out = dict(_EMPTY_METRICS)
+        out["recorded_count"] = recorded_count
+        out["unevaluable_count"] = unevaluable_count
+        return out
+
+    sub = df[measurable]
+    outcome = _lower_col(sub, "outcome")
+    r = numeric_series(sub, "r_multiple")
+    closed_count = int(closed_mask(df)[measurable].sum())
     wins = int(outcome.isin(["win_tp1", "win_tp2"]).sum())
     losses = int(outcome.isin(["loss_sl"]).sum())
-    missed = int(bool_series(df, "missed_opportunity").sum())
+    missed = int(bool_series(sub, "missed_opportunity").sum())
     no_entry = int((outcome == "no_entry").sum())
     r_values = r.dropna()
     return {
         "sample_count": sample_count,
+        "recorded_count": recorded_count,
+        "unevaluable_count": unevaluable_count,
         "win_rate": wins / closed_count if closed_count else 0.0,
         "avg_r": float(r_values.mean()) if not r_values.empty else 0.0,
         "total_r": float(r_values.sum()) if not r_values.empty else 0.0,
