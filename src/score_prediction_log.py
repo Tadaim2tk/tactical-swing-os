@@ -34,6 +34,9 @@ SCORES_PATH = Path("data/prediction_log_scores.csv")
 RESULTS_DIR = Path("results")
 REPORTS_DIR = Path("reports/prediction_log")
 
+# r_close_<n>d は「判断後 n 本目の終値で測った方向リターン」であり、**決済を含意しない**。
+# 執行シミュレーションの時間決済(6本目)とは1バー違う別の量である(監査F5)。
+# 同じ「5日」で呼ばないこと。詳細は simulate_execution.EXIT_DEADLINE_BARS のコメント。
 HORIZONS = [1, 3, 5, 10]
 MIN_SAMPLES = 30  # 集計判断の敷居(SPEC-SG-001と整合)。件数はそれ未満でも正直に表示する
 MAX_REFERENCE_ANCHOR_DEVIATION = 0.10  # reference が anchor からこれ以上離れたら scale_mismatch 隔離
