@@ -38,6 +38,26 @@ HORIZONS = [1, 3, 5, 10]
 MIN_SAMPLES = 30  # 集計判断の敷居(SPEC-SG-001と整合)。件数はそれ未満でも正直に表示する
 MAX_REFERENCE_ANCHOR_DEVIATION = 0.10  # reference が anchor からこれ以上離れたら scale_mismatch 隔離
 
+
+def decision_time_anchor(ohlcv, signal_date):
+    """(k, anchor_idx) を返す。判断時に既知の最後のバーはどれか、という1つの規約。
+
+    k        = 判断後に始まる最初のバーの位置
+    anchor_idx = 判断時に「閉まっていた」最後のバーの位置
+
+    境界は資産の暦の関数であり定数ではない(2026-08-31監査P1-3 + #128 Codex P1):
+    - 週5日資産(米先物・指数・FX): 前日ラベルのバーは判断1時間前(06:00 JST)にclose済 → k-1
+    - 週7日資産(暗号資産のUTC日足): 前日ラベルのキャンドルは判断2時間後(09:00 JST)まで
+      閉まらない=未来情報 → さらに1本遡って k-2
+
+    この規約は採点・執行シミュレーション・ジオメトリ分析で共有する。写しを持つと片方だけ
+    直って乖離する(監査F3, 2026-09-06: 採点側は修正済みだったが執行側は判断日ラベルの
+    終値を見たままだった)。
+    """
+    k = int(ohlcv["date"].searchsorted(pd.to_datetime(signal_date).normalize(), side="left"))
+    seven_day_calendar = bool((ohlcv["date"].dt.dayofweek >= 5).any())
+    return k, k - (2 if seven_day_calendar else 1)
+
 SCORE_COLUMNS = [
     "date",
     "signal_id",
@@ -142,9 +162,7 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
     # 判断直後に開始)、週7日資産は当日ラベルのキャンドル(09:00 JST開始。進行中キャンドルの
     # 判断前レンジで約定を偽認定しない=不利側原則)。
     # 旧side="right"実装はfwd_return_1dの符号を51%反転させていた(known-bias#9も同時解消)。
-    k = int(ohlcv["date"].searchsorted(signal_date.normalize(), side="left"))
-    seven_day_calendar = bool((ohlcv["date"].dt.dayofweek >= 5).any())
-    anchor_idx = k - (2 if seven_day_calendar else 1)
+    k, anchor_idx = decision_time_anchor(ohlcv, signal_date)
     if anchor_idx < 0:
         return out
     anchor_close = float(ohlcv.iloc[anchor_idx]["close"])

@@ -14,6 +14,7 @@ import pandas as pd
 
 from score_prediction_log import load_ohlcv_frame, normalize_side
 from simulate_execution import MAX_REFERENCE_ANCHOR_DEVIATION
+from score_prediction_log import decision_time_anchor
 
 SL_MULTS = (1.0, 1.5, 2.0, 2.5, 3.0)
 ENTRY_MODES = ("worst", "mid", "deep")
@@ -46,10 +47,11 @@ def load_orders(ledger: pd.DataFrame) -> list[dict]:
         d = pd.to_datetime(r.get("date"), errors="coerce")
         if pd.isna(d):
             continue
-        i0 = int(o["date"].searchsorted(d.normalize(), side="left"))
-        if i0 >= len(o):
+        # 監査F3: ここも判断日ラベルの終値(判断後に確定する値)で標本を選んでいた
+        i0, anchor_i = decision_time_anchor(o, d)
+        if i0 >= len(o) or anchor_i < 0:
             continue
-        anchor = float(o.iloc[i0]["close"])
+        anchor = float(o.iloc[anchor_i]["close"])
         if anchor <= 0 or abs(((e1 + e2) / 2) / anchor - 1) > MAX_REFERENCE_ANCHOR_DEVIATION:
             continue
         orders.append({"side": side, "rp": rp, "e1": e1, "e2": e2, "sl": sl,

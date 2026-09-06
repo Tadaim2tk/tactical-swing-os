@@ -92,9 +92,19 @@ def test_short_direction_mirrors():
 
 
 def test_scale_mismatch_excluded():
+    # 監査F3以降、水準検査は「判断時に既知の終値」で行う。判断前のバーが要る。
+    bars = _ohlcv([("2026-06-30", 74, 75, 73, 74), ("2026-07-01", 74, 75, 73, 74)])
+    r = se.simulate_row(_row(entry_low="720", entry_high="730", sl="700", tp1="760"), bars, "t")
+    assert r["status"] == "excluded_scale"
+    assert r["scale_check"] == "excluded"
+
+
+def test_scale_check_not_checked_does_not_exclude():
+    """判断前のバーが無く検査できないとき、検査不能を除外に変えない(母集団を静かに縮めない)。"""
     r = se.simulate_row(_row(entry_low="720", entry_high="730", sl="700", tp1="760"),
                         _ohlcv([("2026-07-01", 74, 75, 73, 74)]), "t")
-    assert r["status"] == "excluded_scale"
+    assert r["scale_check"] == "not_checked"
+    assert r["status"] != "excluded_scale"
 
 
 def test_signal_before_price_window_gets_typed_status_not_fake_fill():
@@ -136,3 +146,45 @@ def test_summarize_counts_and_cost_sensitivity():
     assert s["fills_resolved"] == 2 and s["no_fill"] == 1
     assert s["gross_total_r"] == 0.0
     assert abs(s["cost_sensitivity_r"]["0.05R"] - (0.0 - 0.1)) < 1e-9
+
+
+# === 監査F3 (2026-09-06): 判断後の終値で標本を選ばない =========================
+
+def test_decision_day_close_does_not_change_inclusion():
+    """監査の中心的所見の再現。
+
+    同じ事前情報(前日終値100・entry 99-101・SL 95)、同じ当日レンジ(high 101 / low 79)で、
+    **当日の終値だけ**を 80 と 100 に変えても、母集団に含むかどうかが変わってはいけない。
+    旧実装は当日終値80なら excluded_scale(損益なし)、100なら filled_sl(-1R)だった。
+    """
+    row = _row(entry_low="99", entry_high="101", sl="95", tp1="110")
+    results = {}
+    for close in (80.0, 100.0):
+        bars = _ohlcv([("2026-06-30", 100, 100, 100, 100),
+                       ("2026-07-01", 100, 101, 79, close),
+                       ("2026-07-02", 100, 101, 99, 100)])
+        results[close] = se.simulate_row(row, bars, "t")
+    assert results[80.0]["status"] == results[100.0]["status"], \
+        "判断後に確定する終値で母集団が変わってはいけない"
+    assert results[80.0]["scale_check"] == results[100.0]["scale_check"] == "passed"
+    assert results[80.0]["status"] == "filled_sl"
+
+
+def test_reference_deviation_is_recorded_even_when_passing():
+    bars = _ohlcv([("2026-06-30", 100, 100, 100, 100), ("2026-07-01", 100, 101, 99, 100)])
+    r = se.simulate_row(_row(entry_low="99", entry_high="101", sl="95", tp1="110"), bars, "t")
+    assert r["scale_check"] == "passed"
+    assert r["reference_deviation"] == 0.0, "隔離の可否を後から検算できるよう常に残す"
+
+
+def test_execution_anchor_matches_scoring_anchor_rule():
+    """採点側と執行側で同じ規約を使う(写しを持って片方だけ直る事故を防ぐ)。"""
+    import pandas as pd
+    from score_prediction_log import decision_time_anchor
+    weekday_only = pd.DataFrame({"date": pd.to_datetime(
+        ["2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03"])})  # 月-金
+    k, a = decision_time_anchor(weekday_only, "2026-07-01")
+    assert (k, a) == (2, 1), "週5日資産は k-1"
+    seven_day = pd.DataFrame({"date": pd.date_range("2026-06-29", periods=7, freq="D")})  # 週末を含む
+    k, a = decision_time_anchor(seven_day, "2026-07-01")
+    assert (k, a) == (2, 0), "週7日資産は k-2"
