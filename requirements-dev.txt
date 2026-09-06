@@ -1,0 +1,5 @@
+# テスト実行用。本番workflowは requirements.txt だけで動く。
+# 2026-09-06 監査T1: pytest が requirements に無く、CIで走らせようが無い状態だった
+# (workflowを足しても "No module named pytest" で落ちる)。
+-r requirements.txt
+pytest>=7.1

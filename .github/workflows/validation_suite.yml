@@ -27,7 +27,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
 
       # 監査T1 (2026-09-06): この workflow は「全テスト実行」を名乗っていたが、
       # 実際は下の24本のスクリプトを走らせるだけで pytest を1本も走らせていなかった。
