@@ -9,7 +9,8 @@ close基準の方向採点(score_prediction_log)の一段上の忠実度とし�
 - TP1は約定した足では成立させない(翌足以降のみ)。SLとTP1が同じ足なら SL優先
 - 判断当日の足は約定検出に含める(7:00 JSTの記帳は各系列の当日セッション開始前。
   境界の曖昧さは上記ルールにより不利側へしか作用しない)
-- 記帳水準が当日終値から10%超乖離した行は excluded_scale として隔離(採点系と同じ閾値)
+- 記帳水準が**判断時に既知の終値**から10%超乖離した行は excluded_scale として隔離
+  (採点系と同じ閾値・同じアンカー規約。監査F3で当日終値からの乖離判定を修正)
 
 執行ポリシー v0 (docs/gpt_prompt_changelog.md の運用と整合):
 - 対象: side BUY/SELL・rank A/B・entry/SL記帳あり・risk_pct>0 の判断
@@ -33,6 +34,7 @@ import pandas as pd
 
 from score_prediction_log import (
     MAX_REFERENCE_ANCHOR_DEVIATION,
+    decision_time_anchor,
     _current_utc_date,
     load_ohlcv_frame,
     normalize_side,
@@ -51,6 +53,8 @@ COLUMNS = [
     "date", "signal_id", "asset", "side", "rank", "risk_pct",
     "entry_low", "entry_high", "sl", "tp1",
     "status",        # filled_sl / filled_tp1 / filled_time_exit / no_fill / open / excluded_scale / excluded_bad_levels / invalid_data / data_window_expired
+    "reference_deviation",  # reference/anchor-1。隔離の可否を後から検算できるよう常に残す
+    "scale_check",   # passed / excluded / not_checked(判断前のバーが無く検査できない)
     "fill_date", "fill_price", "risk_unit", "exit_date", "exit_price",
     "r_result", "capital_pct", "simulated_at_utc",
 ]
@@ -92,16 +96,31 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
     if sig_date.normalize() < pd.to_datetime(ohlcv["date"].iloc[0]):
         out["status"] = "data_window_expired"
         return out
-    idx0 = int(ohlcv["date"].searchsorted(sig_date.normalize(), side="left"))
+    idx0, anchor_idx = decision_time_anchor(ohlcv, sig_date)
     if idx0 >= len(ohlcv):
         out["status"] = "open"  # 当日バー未取得(週末記帳など) — 次回実行で解決
         return out
 
-    anchor_close = float(ohlcv.iloc[idx0]["close"])
+    # 監査F3 (2026-09-06): 旧実装は ohlcv.iloc[idx0]["close"] = **判断日ラベルのバーの終値**を
+    # 基準にしていた。これは判断の22〜26時間後に確定する値であり、判断時には未知。
+    # 同じ事前情報・同じ損切り到達でも、後から判明した終値だけで母集団に含むかが変わっていた
+    # (監査の合成再現: 当日終値80なら excluded_scale、100なら filled_sl -1R)。
+    # 採点側は #128 で decision_time_anchor へ修正済みだったが、執行側に写しが残っていた。
+    # 判断前のバーが系列に無い(窓の先頭)場合、この検査は**実施できない**。
+    # 実施できないことを理由に標本を落とさない: 系列取り違えの検査は健全性チェックであって
+    # シミュレーションの目的ではなく、検査不能を除外に変えると母集団が静かに縮む。
+    # 検査できたか否かを scale_check に残し、後から母集団を再構成できるようにする。
     reference = (e1 + e2) / 2
-    if anchor_close > 0 and abs(reference / anchor_close - 1.0) > MAX_REFERENCE_ANCHOR_DEVIATION:
-        out["status"] = "excluded_scale"
-        return out
+    anchor_close = float(ohlcv.iloc[anchor_idx]["close"]) if anchor_idx >= 0 else float("nan")
+    if anchor_idx < 0 or not (anchor_close > 0):
+        out["scale_check"] = "not_checked"
+    else:
+        out["reference_deviation"] = round(reference / anchor_close - 1.0, 6)
+        if abs(reference / anchor_close - 1.0) > MAX_REFERENCE_ANCHOR_DEVIATION:
+            out["scale_check"] = "excluded"
+            out["status"] = "excluded_scale"
+            return out
+        out["scale_check"] = "passed"
 
     is_long = side == "LONG"
     fill_price = e2 if is_long else e1  # ゾーン内の最悪価格
