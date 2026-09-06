@@ -1,0 +1,53 @@
+name: tests
+
+# 監査T1 (2026-09-06) への対応。それまでTSOには pull_request で走るworkflowが
+# pr_review_gate.yml しか無く、**pytest を走らせるworkflowは23本中0本だった**。
+# そのため main に4件のテスト失敗が入ったまま誰にも見えなかった
+# (PR #143 が dashboard の鮮度レジストリに層を足し、手書きフィクスチャが取り残された)。
+# validation_suite.yml は「全テスト実行」と自称していたが、実際は24本のスクリプトを
+# 順に実行するだけでテストは1本も走らせていない。
+#
+# ERSで同型の失敗を踏んでいる:「workflowがsuccessなら観測している」で5営業日消えた。
+# TSO版は「Actionsがsuccessならテストが通っている」。両方とも、緑の意味を確かめずに
+# 緑を信じた結果である。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        run: python -m pytest -q --junitxml=results/pytest.xml
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: results/pytest.xml

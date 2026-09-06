@@ -3,7 +3,7 @@ name: Tactical Swing OS validation suite
 on:
   workflow_dispatch:
   schedule:
-    # 03:30 UTC Sunday = 12:30 JST 日曜。週次の沈黙死検知網(YAML lint含む全テスト+全レイヤー実行)
+    # 03:30 UTC Sunday = 12:30 JST 日曜。週次の沈黙死検知網(pytest + YAML lint + 全レイヤー実行)
     - cron: "30 3 * * 0"
 
 permissions:
@@ -27,7 +27,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
+
+      # 監査T1 (2026-09-06): この workflow は「全テスト実行」を名乗っていたが、
+      # 実際は下の24本のスクリプトを走らせるだけで pytest を1本も走らせていなかった。
+      # 週次の沈黙死検知網を名乗る以上、まずテストを走らせる。
+      - name: Run pytest (週次の沈黙死検知網の本体)
+        run: python -m pytest -q
 
       - name: Run validation pipeline
         run: |
