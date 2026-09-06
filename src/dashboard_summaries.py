@@ -1626,11 +1626,19 @@ def execution_view_summary(scores: pd.DataFrame, ledger: pd.DataFrame) -> dict:
     - close基準の方向採点であり SL/TP 執行の再現ではない(過大にも過小にもなり得る)
     - 到達判定は当日タッチを拾わない既知バイアスがある(過小方向)
     - capital_pct は各判断の記帳 risk_pct で重み付けした資金%換算
-    - windows: 記帳日ベースの移動窓 W 日の正味Rがプラスだった割合(安定性の目安)
+    - windows: 記帳日ベースの移動窓 W 日の正味Rがプラスだった割合(安定性の目安)。
+      **窓数は独立標本数ではない**(隣接する窓は W-1 日を共有する)
+    - max_dd_r は**日次正味Rの累積**で測る(監査F7)。同日内の約定順序は記録が無く、
+      資産名の文字順で並べて足すと最大DDが変わってしまうため、日を単位にする。
+      日中の最大DDは日足だけからは分からない
+    - windows の日軸は**全記帳日**(約定なし日・全件見送り日を0として含む)。
+      約定した日だけを並べると「営業日窓」を名乗りながら見送り日が消える(監査F8)
     """
     out = {
         "available": False, "orders": 0, "fills": 0, "fill_rate": None,
         "cum_r": None, "capital_pct": None, "avg_r": None, "max_dd_r": None,
+        "max_dd_basis": "daily_net_r", "window_basis": "ledger_days",
+        "ledger_days": 0, "fill_days": 0,
         "series": [], "windows": [], "zero_risk_excluded": 0,
     }
     if scores is None or scores.empty:
@@ -1639,6 +1647,11 @@ def execution_view_summary(scores: pd.DataFrame, ledger: pd.DataFrame) -> dict:
     if not need.issubset(set(scores.columns)):
         return out
     sc = scores.copy()
+    # 監査F8: 窓の日軸は**絞り込み前**の全記帳日から取る。actionable/rank/r5 で絞ってから
+    # 日付を拾うと、全件見送りの日など「判断はしたが約定候補が無かった日」が消え、
+    # 「営業日窓」を名乗りながら実際は約定候補があった日だけの窓になる。
+    # (実測: 保持59日に対し、同じ最終日までの記帳日は76日=17日が落ちていた)
+    ledger_days = sorted(scores["date"].astype(str).dropna().unique())
     sc = sc[(sc["data_quality"] == "ok") & (sc["actionable"].astype(str).str.lower() == "true") & (sc["rank"].isin(["A", "B"]))]
     sc["r5"] = pd.to_numeric(sc["r_close_5d"], errors="coerce")
     sc = sc.dropna(subset=["r5"])
@@ -1661,23 +1674,32 @@ def execution_view_summary(scores: pd.DataFrame, ledger: pd.DataFrame) -> dict:
         out["fill_rate"] = round(out["fills"] / out["orders"], 3)
     if fills.empty:
         return out
+    # 表示用の系列は判断順のまま(見えている並びと数字を一致させる)
     cum = 0.0
-    peak = 0.0
-    max_dd = 0.0
     for _, r in fills.iterrows():
         cum += float(r["r5"])
-        peak = max(peak, cum)
-        max_dd = max(max_dd, peak - cum)
         out["series"].append({"date": str(r["date"]), "asset": str(r.get("asset", "")), "r": round(float(r["r5"]), 2), "cum": round(cum, 3)})
     out["cum_r"] = round(cum, 2)
     out["capital_pct"] = round(float((fills["r5"] * fills["rp"]).sum()), 2)
     out["avg_r"] = round(float(fills["r5"].mean()), 2)
+
+    # 監査F7: 最大DDは**日次正味R**の累積で測る。同日内の約定順序は記録に無く、
+    # 資産名の文字順で並べて足すと最大DDが変わる(合成再現: 同日 +10R/-4R/-4R を
+    # ラベルだけ並べ替えると 8R → 4R)。日を単位にすれば順序依存が消える。
+    daily = fills.groupby(fills["date"].astype(str))["r5"].sum()
+    day_cum = 0.0
+    day_peak = 0.0
+    max_dd = 0.0
+    for d in sorted(daily.index):
+        day_cum += float(daily[d])
+        day_peak = max(day_peak, day_cum)
+        max_dd = max(max_dd, day_peak - day_cum)
     out["max_dd_r"] = round(max_dd, 2)
 
     # 安定性: 記帳日ベースの移動窓 W 日で正味Rがプラスだった窓の割合
-    daily = fills.groupby(fills["date"].astype(str))["r5"].sum()
-    all_days = sorted(sc["date"].astype(str).unique())  # 記帳が確定している全日(約定なし日=0を含む)
-    net_by_day = [float(daily.get(d, 0.0)) for d in all_days]
+    net_by_day = [float(daily.get(d, 0.0)) for d in ledger_days]
+    out["ledger_days"] = len(ledger_days)
+    out["fill_days"] = int(len(daily))
     for w in (5, 10, 15, 20):
         if len(net_by_day) < w:
             continue
