@@ -9,7 +9,10 @@ name: Codex review gate
 #
 # 成功条件は「レビュー到着」ではなく「未解決のCodex指摘スレッドがゼロ」(#121 Codex P1対応:
 # 到着だけで緑にすると、--auto予約が指摘を読む前にマージしてしまう):
-# - レビュー未着のままtimeout → 成功(fail-open: Codex停止で全マージを詰まらせない)
+# - レビュー未着のままtimeout → 成功(fail-open: Codex停止で全マージを詰まらせない)。
+#   ただし2026-09-06にこの経路で4本(#145/#148/#149/#150)が未レビューのままマージされた。
+#   同じ緑が「レビュー済み・指摘なし」と「未レビュー」の2つを意味してしまうため、
+#   fail-openで通した場合はPRにコメントを残して区別できるようにした。
 # - レビュー到着済みで未解決スレッドが残ったままtimeout → 失敗(赤)。修正をpushするか
 #   スレッドをresolveすれば、synchronize/再実行で緑になる。
 
@@ -18,7 +21,9 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
-  pull-requests: read
+  # fail-open で通したことを PR にコメントで残すため write が要る(2026-09-06)。
+  # 読み取りだけだと「緑の意味」が Actions のログにしか残らず、PRを見た人には見えない。
+  pull-requests: write
 
 jobs:
   wait-for-codex-review:
@@ -52,6 +57,7 @@ jobs:
                 2>/dev/null || echo "unknown")
               if [ "$unresolved" = "0" ]; then
                 echo "Codex review arrived ($n review(s)) and no unresolved finding threads remain."
+                echo "### ゲート: Codexレビュー済み・未解決指摘なし ($n review(s))" >> "$GITHUB_STEP_SUMMARY"
                 exit 0
               fi
               echo "Codex review arrived; unresolved finding threads: $unresolved — address them in this PR. ($i/40)"
@@ -64,4 +70,17 @@ jobs:
             echo "::error::Codex findings are still unresolved after 20 min. Push a fix and/or resolve the threads, then re-run this check."
             exit 1
           fi
+          # 2026-09-06: この経路で #145/#148/#149/#150 の4本が「未レビューのまま」マージされた。
+          # check の結果は success なので、緑を見ただけでは「レビュー済み・指摘なし」と
+          # 区別がつかない。**同じ緑が2つの意味を持つ**のは監査T1と同じ構図なので、
+          # fail-open で通したことを PR 本体に痕跡として残す。
           echo "No Codex review within 20 min — gate passes as a no-review PR."
+          {
+            echo "### ゲート: **Codexレビュー未着のまま通過(fail-open)**"
+            echo ""
+            echo "20分待ってレビューが来なかったため、no-review PR として通した。"
+            echo "この緑は「レビュー済み・指摘なし」を意味しない。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment "$PR" --repo "$REPO" --body \
+            "🟡 **Codexレビュー未着のまま通過しました(fail-open)**。ゲートは20分待って無反応だったため no-review PR として通しています。この緑は「レビュー済み・指摘なし」ではありません。評価・選別の定義に触るPRなら、後追いでレビューを依頼してください。" \
+            || echo "warning: could not post the fail-open notice comment"
