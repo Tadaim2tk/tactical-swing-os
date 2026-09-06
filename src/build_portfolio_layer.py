@@ -195,12 +195,22 @@ def evaluation_component(evaluations: pd.DataFrame, asset: str) -> tuple[float, 
     wins = closed.str.contains("win|tp", case=False, regex=True, na=False)
     losses = closed.str.contains("loss|sl", case=False, regex=True, na=False)
     decided = wins | losses
-    win_rate = float(wins.sum() / decided.sum()) if decided.sum() else 0.0
-    avg_r = float(r.dropna().mean()) if not r.dropna().empty else 0.0
+    decided_count = int(decided.sum())
+    win_rate = float(wins.sum() / decided_count) if decided_count else 0.0
+    # 監査F9 (2026-09-06): avg_r も confidence も**決着した行**で測る。
+    # 未決着行(open_unresolved 等)は r_multiple=0.0 を持つため、
+    # 全行平均だと 0 が平均を薄め、件数だけが confidence を押し上げる。
+    # 実測: BTC の未決着30件だけで confidence が 0.35 → 0.86 になっていた。
+    r_decided = r[decided].dropna()
+    avg_r = float(r_decided.mean()) if not r_decided.empty else 0.0
     missed = rows.get("missed_opportunity", pd.Series([False] * len(rows))).fillna(False).astype(str).str.lower().isin(["true", "1", "yes"]).sum()
     score = avg_r * 8.0 + win_rate * 12.0 - min(10.0, missed * 2.0)
-    confidence = min(0.85, 0.30 + min(len(rows), 30) / 60.0)
-    return score, confidence, f"evaluation avg_r={avg_r:.2f} win_rate={win_rate:.2f}"
+    # 「入力があること」と「成績が確からしいこと」は別物。confidence は後者のみを表す。
+    confidence = min(0.85, 0.30 + min(decided_count, 30) / 60.0)
+    return score, confidence, (
+        f"evaluation avg_r={avg_r:.2f} win_rate={win_rate:.2f} "
+        f"decided={decided_count}/{len(rows)}"
+    )
 
 
 def meta_component(meta: pd.DataFrame, asset: str) -> tuple[float, str]:
