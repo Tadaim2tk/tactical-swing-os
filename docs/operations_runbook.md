@@ -124,8 +124,12 @@ GPT出力（日次シグナルログ・週次レビュー・crypto週末レビ�
 台帳CSVは構造化された行を保つが、判断の理由・因果モデル・主役の申告根拠は文章側にしかない。
 
 対策の候補（未着手・要判断）:
-1. `weekly_review` workflow に、`results/weekly_review.csv` を
-   `data/weekly_review_log.csv` へ追記コミットする段を足す（deploy key の既存パターンを流用）
+1. ~~`weekly_review` workflow に、`results/weekly_review.csv` を
+   `data/weekly_review_log.csv` へ追記コミットする段を足す~~ → **2026-09-05 実装済み**（PR #143）。
+   ただしこの台帳は **week_start ごとに初回だけ保存する**ため、
+   「その週を最初に集計した土曜時点の観測」であって最終成績台帳ではない
+   （実行時点では多くの判断が awaiting_horizon）。最終成績が要るなら
+   revision / as_of を持つ別設計が要る（監査 2026-09-06 の仕様確認事項）
 2. route-3 取込のときに、その日のGPT本文を `data/prediction_log_archive/` へ保存する手順を足す
 3. 全workflowに `retention-days` を明示する（90日→最大値）。応急策にすぎない
 
