@@ -279,3 +279,28 @@
 - 評価: 10月月次で (1) **`prev_result` の的中率＝3)の予測が当たっているか（本命）**
   (2) `driver=MACRO` と申告した週のBTC/ETHが実際にDXY・US10Yと高相関だったか
   (3) 自己申告confidenceと当否の対応 (4) `crypto_grounds` の有無別に見た見送り率。
+
+## 2026-09-07 (15): expected_r の意味を明示させる + invalidation の発動を記録する
+
+- 出所: 数値定義監査(2026-09-06) D1 と、人間の運用の言明(2026-09-07)。
+- **expected_r_basis**: `expected_r` に GPT の主観と二点分布式 `win_prob*rr-(1-win_prob)` が
+  同じ列名で混在していた。監査の実測では方向あり193行のうち123行で両者の差が0.10超。
+  **A級条件が `expected_r>=0.45` なので、どちらの意味かで同じ判断が通ったり落ちたりする**
+  （2026-09-04 WTI: rr=2.89 / win_prob=0.57 / 申告0.39 → A級にならない。
+  式なら1.2173 → A級になる。0.45を挟んで反対側）。
+  本文に `expected_r_basis: subjective|two_point` を1行書かせ、subjective のときは
+  何を織り込んだかを1文添えさせる。**どちらが正しいという話ではない**——
+  時間決済で途中降りる想定や未約定確率は式では表せないので、主観を捨てない。
+  人間承認: 2026-09-07（選択肢A: 主観か計算かを明示させる）。
+- **invalidation_check**: `invalidation`（シナリオ崩壊の条件）は方向あり193行のうち
+  **191行に記入されているのに、発動したかを記録する列が無かった**。
+  人間の実際の手仕舞いは「SLやTPまで引っ張らずシナリオ崩壊が確認できたら降りる」であり、
+  **運用の中心にある基準が一度も測られていなかった**。前日の方向あり判断について
+  `invalidation_check: <signal_id>=fired|not_fired|unknown` を書かせる。
+  判定できないときは unknown。推測で fired と書かせない。
+- 取込: `tools/record_signal_extras.py` → `data/expected_r_basis.csv` /
+  `data/invalidation_checks.csv`（LOG28列は不変のサイドカー方式）。
+- 介入境界: 2026-09-08 07:00 の定時実行から。推測でのbackfillはしない。
+- 評価: 10月月次で (1) `expected_r_basis` の分布と、`subjective` の日の較正誤差が
+  `two_point` の日と違うか (2) **invalidation が fired だった判断のその後5日リターン**
+  ——シナリオ崩壊で降りる判断が正しかったかを初めて測れる。
