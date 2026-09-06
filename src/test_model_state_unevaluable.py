@@ -126,3 +126,16 @@ def test_mixed_frame_keeps_no_trade_and_drops_only_unevaluable():
     assert m["sample_count"] == 7, "勝ち3 + 確定見送り4"
     assert m["unevaluable_count"] == 5
     assert m["recorded_count"] == 12
+
+
+def test_counts_reach_the_proposal_output():
+    """F1の「記録は捨てない」が出力列まで届いていること。
+
+    sample_count だけだと「測れなかった行が何件あったか」が読み手に見えない。
+    実際、初版は metrics_from_frame に3つの数を持たせながら CSV には
+    sample_count しか出しておらず、BTC が sample_count=0 とだけ見えていた。
+    """
+    import propose_model_state_updates as m
+    for col in ("recorded_count", "unevaluable_count"):
+        assert col in m.CSV_COLUMNS, f"{col} が出力列に無い"
+    assert m.CSV_COLUMNS.index("sample_count") < m.CSV_COLUMNS.index("recorded_count")

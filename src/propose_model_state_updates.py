@@ -47,6 +47,10 @@ CSV_COLUMNS = [
     "target",
     "metric_group",
     "sample_count",
+    # 監査F1の要件「記録総数・評価不能数を別に残す」を出力まで届ける。
+    # sample_count だけだと「測れなかった行が何件あったか」が読み手に見えない。
+    "recorded_count",
+    "unevaluable_count",
     "win_rate",
     "avg_r",
     "total_r",
@@ -383,6 +387,8 @@ def make_proposal(
         "target": target,
         "metric_group": metric_group,
         "sample_count": int(metrics["sample_count"]),
+        "recorded_count": int(metrics.get("recorded_count", metrics["sample_count"])),
+        "unevaluable_count": int(metrics.get("unevaluable_count", 0)),
         "win_rate": round(float(metrics["win_rate"]), 4),
         "avg_r": round(float(metrics["avg_r"]), 4),
         "total_r": round(float(metrics["total_r"]), 4),
