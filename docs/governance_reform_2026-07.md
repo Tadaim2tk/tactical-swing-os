@@ -96,8 +96,11 @@
 ### 維持するもの（この改定で緩めていない）
 
 実売買・発注の禁止 / Secrets保護 / 未来情報の混入防止 / 元データの保全 /
-active な閾値・重みの変更は人間承認 / Sheets書き込み禁止 / false green を作らない /
-既存テストを黙って削除しない。
+active な閾値・重みの変更は人間承認 / **Google Sheets への新規書き込み経路の追加禁止**
+（§2 #7 の原文どおり。既存の承認済み同期——`daily_cycle.yml` と
+`reevaluate_pending.yml` の Sheets 書き込み——は grandfather する。
+「Sheets書き込み禁止」と縮めて書くと正規の日次同期まで止める規約になる。#156 Codex P2）/
+false green を作らない / 既存テストを黙って削除しない。
 
 ### 過去フェーズの設計固定について
 
