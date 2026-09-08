@@ -124,3 +124,25 @@ def test_already_fired_signal_is_not_warned(repo):
     assert run(["invalidation", "2026-09-08", "GONE=fired"], repo).returncode == 0
     r = run(["invalidation", "2026-09-09", "X=not_fired"], repo)
     assert "GONE" not in r.stderr
+
+
+def test_previously_recorded_same_day_counts_as_declared(repo):
+    """漏れた分だけ追記する2回目の実行が、1回目の申告を漏れ扱いしない。
+
+    runbook 1d の手順そのもの。ここを見ないと追記のたびに警告が逆さまになる
+    （#161 Codex P2）。
+    """
+    _ledger(repo, [("2026-09-07", "A_WTI", "WTI", "BUY"),
+                   ("2026-09-07", "A_GOLD", "GOLD", "BUY")])
+    assert "A_GOLD" in run(["invalidation", "2026-09-09", "A_WTI=not_fired"], repo).stderr
+    r = run(["invalidation", "2026-09-09", "A_GOLD=unknown"], repo)
+    assert "申告漏れ" not in r.stderr, "1回目の A_WTI を漏れ扱いしない"
+    assert len(_rows(repo, "invalidation_checks.csv")) == 2
+
+
+def test_other_day_record_does_not_count_as_declared(repo):
+    """別の日の記録では今日の申告漏れは埋まらない。毎日聞き直すのが契約。"""
+    _ledger(repo, [("2026-09-07", "A_WTI", "WTI", "BUY")])
+    assert run(["invalidation", "2026-09-08", "A_WTI=not_fired"], repo).returncode == 0
+    r = run(["invalidation", "2026-09-09", "OTHER=not_fired"], repo)
+    assert "A_WTI" in r.stderr

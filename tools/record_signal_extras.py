@@ -97,11 +97,20 @@ def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
     区別できない。invalidation_check は発動率を測るための列なので、分母が黙って
     縮むと数字そのものが意味を失う(2026-09-09に実際に3件漏れた)。
 
+    同じ check_date で既に記録済みの signal_id は申告済みとして扱う。漏れた分だけを
+    追記する運用(runbook 1d)で、2回目の実行が1回目の申告を漏れ扱いしないため。
+
     判定は台帳と本ファイルだけで閉じる。採点表(result_5d)を使うと、UTC同日ラベルの
     バーを確定扱いしない防御(#137 Codex P2)のぶん窓が実際より長く見え、
     朝の取込時に決着済みのものまで警告に出る。
     """
-    fired = {r["signal_id"] for r in _read(INVAL_PATH) if r.get("invalidation_fired") == "fired"}
+    history = _read(INVAL_PATH)
+    fired = {r["signal_id"] for r in history if r.get("invalidation_fired") == "fired"}
+    # 同じ check_date で既に記録済みのものも「申告済み」に数える(#161 Codex P2)。
+    # runbook の手順は「漏れた分だけ聞き直して追記する」なので、2回目の実行では
+    # declared に1回目の分が入らない。ここを見ないと、追記のたびに前回申告済みの
+    # 側が「漏れ」として出て、警告が逆さまになる。
+    declared = declared | {r["signal_id"] for r in history if r.get("check_date") == check_date}
     out = []
     for r in _read(LEDGER_PATH):
         sid = (r.get("signal_id") or "").strip()
