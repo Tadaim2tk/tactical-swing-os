@@ -734,10 +734,10 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-09-09,20260909_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,79115.851562,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-09-08 22:33:28 UTC
 2026-09-09,20260909_DXY_NONE_NO_TRADE,DXY,NONE,NO_TRADE,False,,,98.835999,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-09-08 22:33:28 UTC
 2026-09-09,20260909_ETH_NONE_NO_TRADE,ETH,NONE,NO_TRADE,False,,,2490.958008,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-09-08 22:33:28 UTC
-2026-09-09,20260909_GOLD_NONE_NO_TRADE,GOLD,NONE,NO_TRADE,False,,,4397.600098,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-09-08 22:33:28 UTC
-2026-09-09,20260909_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,29519.25,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-09-08 22:33:28 UTC
-2026-09-09,20260909_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7678.5,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-09-08 22:33:28 UTC
+2026-09-09,20260909_GOLD_NONE_NO_TRADE,GOLD,NONE,NO_TRADE,False,,,4402.700195,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-09-08 23:42:40 UTC
+2026-09-09,20260909_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,29516.5,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-09-08 23:42:40 UTC
+2026-09-09,20260909_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7677.5,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-09-08 23:42:40 UTC
 2026-09-09,20260909_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,4.806,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-09-08 22:33:28 UTC
-2026-09-09,20260909_USDJPY_SELL_PULLBACK,USDJPY,SHORT,B,True,155.1,1.1,153.639999,,,,,,,,,False,ok,awaiting,awaiting,awaiting_horizon,verified,2026-09-08 22:33:28 UTC
+2026-09-09,20260909_USDJPY_SELL_PULLBACK,USDJPY,SHORT,B,True,155.1,1.1,153.854996,,,,,,,,,False,ok,awaiting,awaiting,awaiting_horizon,verified,2026-09-08 23:42:40 UTC
 2026-09-09,20260909_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,15.72,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-09-08 22:33:28 UTC
-2026-09-09,20260909_WTI_BUY_PULLBACK,WTI,LONG,B,True,92.15,1.95,94.269997,,,,,,,,,False,ok,awaiting,awaiting,awaiting_horizon,verified,2026-09-08 22:33:28 UTC
+2026-09-09,20260909_WTI_BUY_PULLBACK,WTI,LONG,B,True,92.15,1.95,94.370003,,,,,,,,,False,ok,awaiting,awaiting,awaiting_horizon,verified,2026-09-08 23:42:40 UTC
