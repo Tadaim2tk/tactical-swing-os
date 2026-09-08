@@ -5,7 +5,9 @@ LOG28列は不変（append-only契約）なので、本文の1行申告はサイ
 - expected_r_basis: expected_r が主観か二点分布式か。**A級条件が expected_r>=0.45 なので、
   同じ列に別の量が混ざると同じ判断が通ったり落ちたりする**
   （2026-09-04 WTI: rr=2.89 win_prob=0.57 申告0.39 / 式なら1.2173。0.45を挟んで反対側）
-- invalidation_check: 前日の方向あり判断について invalidation が発動したか。
+- invalidation_check: **まだ決着していない方向あり判断すべて**について invalidation が
+  発動したか。判断は最長5営業日オープンなので、初日だけ聞くと2〜5日目の崩壊
+  （まさに測りたいもの）を取りこぼす(#157 Codex P1)。
   invalidation は191/193行に書かれているのに発動記録が無く、
   **実際の手仕舞い基準(シナリオ崩壊)が当たっていたかを測れなかった**
 
@@ -22,11 +24,13 @@ from __future__ import annotations
 
 import csv
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 BASIS_PATH = Path("data/expected_r_basis.csv")
 INVAL_PATH = Path("data/invalidation_checks.csv")
+LEDGER_PATH = Path("data/signal_log.csv")
+WINDOW_BUSINESS_DAYS = 5  # prompts/tso_daily_signal_log.md の「5営業日を過ぎるまで毎日聞き直す」
 BASIS_VOCAB = {"subjective", "two_point"}
 SOURCE_VOCAB = {"chatgpt_app", "gpt_terminal", "manual"}  # ingest_daily_log の origin と揃える
 INVAL_VOCAB = {"fired", "not_fired", "unknown"}
@@ -41,9 +45,12 @@ def _check_date(token: str) -> str:
     return token
 
 
+def _read(path: Path) -> list[dict]:
+    return list(csv.DictReader(path.open(encoding="utf-8"))) if path.exists() else []
+
+
 def _append(path: Path, fields: list[str], rows: list[dict], key: tuple[str, ...]) -> int:
-    existing = list(csv.DictReader(path.open(encoding="utf-8"))) if path.exists() else []
-    seen = {tuple(r[k] for k in key) for r in existing}
+    seen = {tuple(r[k] for k in key) for r in _read(path)}
     # 投入分の中の重複も弾く(#157 Codex P2)。seen をディスク上のキーだけにしていると、
     # 1行に同じ signal_id が fired と not_fired で2回現れた場合に両方通り、
     # 矛盾した (check_date, signal_id) が append-only 台帳に書かれる。
@@ -65,6 +72,50 @@ def _append(path: Path, fields: list[str], rows: list[dict], key: tuple[str, ...
             w.writeheader()
         w.writerows(new)
     return len(new)
+
+
+def _business_days_since(start: str, end: str) -> int:
+    """start の翌日から end までの平日数。祝日は考慮しない(米国休場日も1日と数える)。
+
+    多く数える側に振れるので窓は早く閉じ、警告は出過ぎない方へ倒れる。
+    暗号資産は土日も動くが、契約側の窓が全資産一律「5営業日」なのでそれに合わせる。
+    """
+    a, b = date.fromisoformat(start), date.fromisoformat(end)
+    n, cur = 0, a
+    while cur < b:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            n += 1
+    return n
+
+
+def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
+    """台帳上まだ窓の内側にある方向あり判断のうち、過去に fired と記録されておらず、
+    今回の申告にも含まれていない signal_id を返す。
+
+    これが空でないと、その判断は「発動しなかった」のか「聞かれなかった」のかが
+    区別できない。invalidation_check は発動率を測るための列なので、分母が黙って
+    縮むと数字そのものが意味を失う(2026-09-09に実際に3件漏れた)。
+
+    判定は台帳と本ファイルだけで閉じる。採点表(result_5d)を使うと、UTC同日ラベルの
+    バーを確定扱いしない防御(#137 Codex P2)のぶん窓が実際より長く見え、
+    朝の取込時に決着済みのものまで警告に出る。
+    """
+    fired = {r["signal_id"] for r in _read(INVAL_PATH) if r.get("invalidation_fired") == "fired"}
+    out = []
+    for r in _read(LEDGER_PATH):
+        sid = (r.get("signal_id") or "").strip()
+        day = (r.get("date") or "").strip()
+        if (r.get("side") or "").strip().upper() not in {"BUY", "SELL", "LONG", "SHORT"}:
+            continue
+        if not day or day >= check_date:
+            continue          # 当日ぶんはまだ確認しようがない
+        if _business_days_since(day, check_date) > WINDOW_BUSINESS_DAYS:
+            continue          # 窓が閉じた
+        if sid in fired or sid in declared:
+            continue
+        out.append(sid)
+    return out
 
 
 def main() -> int:
@@ -109,10 +160,16 @@ def main() -> int:
                          "source": source, "recorded_at": NOW})
         if not rows:
             raise SystemExit("記録する項目が無い")
+        missing = _undeclared_open(day, {r["signal_id"] for r in rows})
         n = _append(INVAL_PATH, ["check_date", "signal_id", "invalidation_fired", "source", "recorded_at"],
                     rows, ("check_date", "signal_id"))
         for r in rows[:n]:
             print(f"recorded invalidation: {r['signal_id']} -> {r['invalidation_fired']}")
+        if missing:
+            print(f"!! 申告漏れ: 未決着の方向あり判断 {len(missing)} 件が今回の申告に無い: "
+                  + ", ".join(missing), file=sys.stderr)
+            print("   発動したのか聞かれなかったのかが区別できない。"
+                  "GPT側の取りこぼしなら出し直すこと。", file=sys.stderr)
         return 0
 
     raise SystemExit(f"未知の種別: '{kind}'（basis か invalidation）")
