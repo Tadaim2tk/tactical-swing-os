@@ -159,8 +159,13 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
     if fill_i is None:
         window_complete = (idx0 + FILL_WINDOW_BARS) <= len(ohlcv)
         out["status"] = "no_fill" if window_complete else "open"
-        if window_complete:
-            last = float(ohlcv.iloc[idx0 + FILL_WINDOW_BARS - 1]["close"])
+        # 最終バーが形成途中なら逃した分を名乗らない(#165 Codex P2 / #137と同型)。
+        # window_complete は行数だけで決まるので、24時間動く資産では
+        # 当日ラベルのバーがまだ閉じていないまま5本目に数えられ、
+        # 日中値を「終値で測った方向R」として記録してしまう。
+        last_i = idx0 + FILL_WINDOW_BARS - 1
+        if window_complete and pd.Timestamp(ohlcv.iloc[last_i]["date"]).normalize() < _current_utc_date():
+            last = float(ohlcv.iloc[last_i]["close"])
             gain = (last - fill_price) if is_long else (fill_price - last)
             out["forgone_r"] = round(gain / risk, 4)
         return out

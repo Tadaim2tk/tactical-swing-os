@@ -263,3 +263,19 @@ def test_summary_reports_forgone_separately_from_realized():
     assert out["gross_total_r"] == 1.0, "実現Rには no_fill を入れない"
     assert out["no_fill_forgone_r"] == 3.0
     assert out["no_fill_forgone_avg_r"] == 1.5
+
+
+def test_forming_last_bar_does_not_claim_forgone_r(monkeypatch):
+    """5本目が当日ラベルのままなら逃した分を名乗らない(#165 Codex P2)。
+
+    window_complete は行数だけで決まるので、24時間動く資産では当日の
+    未確定バーが5本目に数えられ、日中値が終値扱いで入る。#137 と同型。
+    """
+    bars = _ohlcv([(f"2026-07-0{i}", 74 + i, 75 + i, 73.5 + i, 74.5 + i) for i in range(1, 6)])
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-05"))
+    r = se.simulate_row(_row(), bars, "t")
+    assert r["status"] == "no_fill"
+    assert pd.isna(r["forgone_r"]), "5本目(7/5)が当日なので確定値を名乗らない"
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
+    r2 = se.simulate_row(_row(), bars, "t")
+    assert not pd.isna(r2["forgone_r"]), "閉じたら記録する"
