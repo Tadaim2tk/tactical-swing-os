@@ -358,3 +358,120 @@ def test_chase_summary_is_separate_from_realized_r():
     assert out["chase"]["total_r"] == 0.0
     assert out["chase"]["chased"] == 1
     assert out["chase"]["baseline_total_r"] == -1.0
+
+
+# --- TP1で半分降りて残りを時間決済まで持つ規則(人間の承認 2026-09-09) ---
+
+def _six(rest):
+    """判断日から決済期限まで6本。rest は1本目以降の (h, l, c)。"""
+    bars = [("2026-07-01", 74, 74.5, 72.5, 74.0)]        # 帯72-73に触れて約定・SLなし
+    for i, (h, l, c) in enumerate(rest, start=2):
+        bars.append((f"2026-07-0{i}", c, h, l, c))
+    return _ohlcv(bars)
+
+
+def test_half_exit_books_tp1_and_rides_the_rest_to_the_deadline():
+    """TP1で半分、残りは6本目の終値。建値73/risk3/TP1=76 -> 0.5*1.0 + 0.5*(79-73)/3。"""
+    bars = _six([(76.5, 74.0, 76.2), (77, 75, 76.8), (78, 76, 77.5),
+                 (78.5, 76.5, 78.0), (79.5, 77, 79.0)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_time"
+    assert abs(r - (0.5 * 1.0 + 0.5 * 2.0)) < 1e-3
+    assert abs(r_be - r) < 1e-9, "一度も建値へ戻っていないので同じ"
+
+
+def test_half_exit_gives_back_the_rest_when_price_reverses():
+    """TP1後に反転したら残りは返上する。**これがTP1全決済より悪くなる日**。
+
+    元のSLのままなら残り -1.0R、建値へ上げていれば 0R。両方測って比べられるようにする。
+    """
+    bars = _six([(76.5, 74.0, 76.2),     # TP1到達
+                 (76.5, 73.5, 74.0),     # 建値73は割らない
+                 (74.0, 69.0, 70.5),     # SL70も建値73も割る
+                 (72, 70.5, 71), (72, 70.5, 71)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_stopped"
+    assert abs(r - (0.5 * 1.0 + 0.5 * -1.0)) < 1e-3, "元のSLなら残りは-1R"
+    assert abs(r_be - (0.5 * 1.0 + 0.5 * 0.0)) < 1e-3, "建値なら残りは0R"
+    assert r_be > r
+
+
+def test_half_exit_is_identical_when_the_stop_comes_first():
+    """SLが先なら分ける対象が無い。r_result と同じ値でなければ比較が壊れる。"""
+    bars = _six([(74, 69.0, 70.0), (72, 70, 71), (72, 70, 71), (72, 70, 71), (72, 70, 71)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_sl_before_tp1"
+    assert r == r_be == -1.0
+    assert abs(se.simulate_row(_row(), bars, "t")["r_result"] - r) < 1e-9
+
+
+def test_half_exit_is_identical_when_tp1_is_never_reached():
+    """TP1に届かなければ全部を時間決済。分けても同じ。"""
+    bars = _six([(75, 73.5, 74.5), (75, 73.5, 74.5), (75, 73.5, 74.5),
+                 (75, 73.5, 74.5), (75, 73.5, 74.8)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_no_tp1_time_exit"
+    assert r == r_be
+    assert abs(se.simulate_row(_row(), bars, "t")["r_result"] - r) < 1e-9
+
+
+def test_half_exit_needs_a_fill_first():
+    """建っていない判断は分ける対象ではない。空欄で返す。"""
+    bars = _ohlcv([(f"2026-07-0{i}", 76, 78, 75, 77) for i in range(1, 7)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "" and pd.isna(r) and pd.isna(r_be)
+
+
+def test_half_exit_does_not_close_on_a_forming_bar(monkeypatch):
+    """期限バーが形成途中なら確定値を名乗らない(#137/#165/#166 と同型)。"""
+    bars = _six([(76.5, 74.0, 76.2), (77, 75, 76.8), (78, 76, 77.5),
+                 (78.5, 76.5, 78.0), (79.5, 77, 79.0)])
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "open" and pd.isna(r) and pd.isna(r_be)
+
+
+def test_half_exit_summary_keeps_the_baseline_beside_it():
+    """同じ母集団の実現Rを並べないと、差が読めない。"""
+    sim = pd.DataFrame([
+        {"asset": "WTI", "status": "filled_tp1", "r_result": 1.0, "capital_pct": 0.25,
+         "forgone_r": float("nan"), "chase_status": "", "chase_r": float("nan"),
+         "half_exit_status": "half_tp1_then_time", "half_exit_r": 1.5, "half_exit_be_r": 1.5},
+        {"asset": "WTI", "status": "filled_sl", "r_result": -1.0, "capital_pct": -0.25,
+         "forgone_r": float("nan"), "chase_status": "", "chase_r": float("nan"),
+         "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0},
+    ])
+    out = se.summarize(sim)
+    assert out["half_exit"]["total_r"] == 0.5
+    assert out["half_exit"]["baseline_total_r"] == 0.0
+    assert out["half_exit"]["tp1_split"] == 1
+    assert out["gross_total_r"] == 0.0, "実現Rに half_exit を混ぜない"
+
+
+def test_half_exit_breakeven_stop_is_judged_on_the_tp1_bar_itself():
+    """TP1を踏んだ足が建値まで戻っていたら、建値版はその足で止まる(#168 Codex P2)。
+
+    TP1が先か戻りが先かは分からない。同じ足の順序不明は不利側に倒す規約。
+    元のSL版はその足でSL未到達が確認済みなので、翌足以降を見るのと同じ結果になる。
+    """
+    bars = _six([(76.5, 72.8, 75.0),     # TP1=76到達、かつ安値72.8で建値73を割る
+                 (77, 75, 76.8), (78, 76, 77.5), (78.5, 76.5, 78.0), (79.5, 77, 79.0)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_time"
+    assert abs(r - (0.5 * 1.0 + 0.5 * 2.0)) < 1e-3, "元のSLは割っていないので伸ばせる"
+    assert abs(r_be - (0.5 * 1.0 + 0.5 * 0.0)) < 1e-3, "建値版はその足で止まったと扱う"
+
+
+def test_half_exit_breakeven_cannot_record_a_loss_when_tp1_lands_on_the_deadline_bar():
+    """TP1が期限足に当たり終値が建値割れでも、建値版は残りを負にしない(#168 Codex P2)。
+
+    翌足から見る実装だと runner の走査が空になり、時間決済の終値で残りの損を
+    記録していた。「返上しない」という建値版の定義に反する。
+    """
+    bars = _six([(75, 73.5, 74.5), (75, 73.5, 74.5), (75, 73.5, 74.5), (75, 73.5, 74.5),
+                 (76.5, 72.0, 72.5)])  # 期限足でTP1到達、安値72で建値割れ、終値72.5
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_time"
+    assert abs(r - (0.5 * 1.0 + 0.5 * (72.5 - 73.0) / 3.0)) < 1e-3, "元のSL版は終値で返上"
+    assert abs(r_be - 0.5) < 1e-3, "建値版は建値で止まる。残りは0"
+    assert r_be > r
