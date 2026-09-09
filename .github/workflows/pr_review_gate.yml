@@ -65,43 +65,35 @@ jobs:
           }
 
           # 承認できるのは誰か。**author_association は書き込み権限ではない。**
-          # いまの権限を問い合わせ、確認できた login だけを判定器へ渡す。
-          # 問い合わせに失敗したら承認しない(安全側)。
+          # 判定は tools/resolve_gate_ack.sh に出した。**標準出力は login だけ**で、
+          # 診断は標準エラーへ出る。初版はワークフロー内の関数で、権限が無いときの
+          # 説明文を標準出力へ出していたため、**その説明が承認として通っていた。**
           resolve_ack() {
-            ack=""
-            repo_owner=$(gh api "repos/$REPO" --jq '.owner.login' 2>/dev/null || echo "")
-            for login in $(jq -r --arg s "GATE-ACK: $HEAD_SHA" \
-                  '[.[] | select((.user.type // "") == "User")
-                        | select((.body // "") | contains($s))
-                        | .user.login] | unique | .[]' comments.json); do
-              if [ -n "$repo_owner" ] && [ "$login" = "$repo_owner" ]; then
-                ack="$ack,$login"; continue
-              fi
-              perm=$(gh api "repos/$REPO/collaborators/$login/permission" \
-                       --jq '.permission' 2>/dev/null || echo "none")
-              case "$perm" in
-                admin|maintain|write) ack="$ack,$login" ;;
-                *) echo "GATE-ACK を無視: $login の書き込み権限を確認できない ($perm)" ;;
-              esac
-            done
-            printf '%s' "${ack#,}"
+            bash tools/resolve_gate_ack.sh comments.json "$REPO" "$HEAD_SHA"
           }
 
-          # --- 導入回: base に判定器が無い ---
-          if [ ! -f tools/codex_review_state.py ]; then
-            fetch_comments
-            if [ -n "$(resolve_ack)" ]; then
-              {
-                echo "### ゲート: **人の承認で通過(GATE-ACK / 判定器の導入回)**"
-                echo ""
-                echo "base にまだ判定器が無いため自動判定できない。書き込み権限を確認した人の承認で通した。"
-              } >> "$GITHUB_STEP_SUMMARY"
-              gh pr comment "$PR" --repo "$REPO" --body \
-                "🟠 **人の承認で通過しました(GATE-ACK / 判定器の導入回)**。base に \`tools/codex_review_state.py\` がまだ無く、**PR側のコードは信用しない**方針のため自動判定できません。書き込み権限を確認した人の承認で通しています。この緑は「Codexレビュー済み・指摘なし」ではありません。" \
-                || echo "warning: could not post the bootstrap ack comment"
-              exit 0
+          # --- 導入回: base に判定器がまだ無い ---
+          # **PR側のコードは動かさない。** ゲート自身を書き換えて自分を通せてしまう。
+          if [ ! -f tools/codex_review_state.py ] || [ ! -f tools/resolve_gate_ack.sh ]; then
+            if [ -f tools/resolve_gate_ack.sh ]; then
+              fetch_comments
+              if [ -n "$(resolve_ack)" ]; then
+                {
+                  echo "### ゲート: **人の承認で通過(GATE-ACK / 判定器の導入回)**"
+                  echo ""
+                  echo "base にまだ判定器が無いため自動判定できない。書き込み権限を確認した人の承認で通した。"
+                } >> "$GITHUB_STEP_SUMMARY"
+                gh pr comment "$PR" --repo "$REPO" --body \
+                  "🟠 **人の承認で通過しました(GATE-ACK / 判定器の導入回)**。base に \`tools/codex_review_state.py\` がまだ無く、**PR側のコードは信用しない**方針のため自動判定できません。書き込み権限を確認した人の承認で通しています。この緑は「Codexレビュー済み・指摘なし」ではありません。" \
+                  || echo "warning: could not post the bootstrap ack comment"
+                exit 0
+              fi
+              echo "::error::base に tools/codex_review_state.py が無い(判定器の導入回)。**PR側のコードは動かさない。** 内容とレビューを人が確認したうえで、PR に GATE-ACK: $HEAD_SHA とコメントして再実行すること。"
+              exit 1
             fi
-            echo "::error::base に tools/codex_review_state.py が無い(判定器の導入回)。**PR側のコードは動かさない。** 内容とレビューを人が確認したうえで、PR に GATE-ACK: $HEAD_SHA とコメントして再実行すること。"
+            # この仕組みを入れる最初のPRでは、承認スクリプトも base に無い。
+            # **ゲートを緑にする経路は無い。** 誤魔化さずに赤で止める。
+            echo "::error::base に判定器も承認スクリプトも無い(この仕組みを入れる最初のPR)。**ゲートが緑になる経路は無い。** 差分とレビューを人が確認したうえで、管理者権限でこの必須チェックをバイパスして入れること。次回以降は base に判定器が入るので、この経路は通らない。"
             exit 1
           fi
 
