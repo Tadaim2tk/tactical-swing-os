@@ -74,6 +74,17 @@ COST_SENSITIVITY_R = (0.02, 0.05, 0.10)
 CHASE_ASSETS = frozenset({"NASDAQ", "BTC", "USDJPY"})
 CHASE_WAIT_BARS = 1
 
+# TP1で全部降りると、伸びた分を取り逃す(人間の承認 2026-09-09)。
+# 観測: 約定した118件のうち46件が TP1 を中央値 1.14R ぶん超えて伸びていた(合計55R)。
+# 未約定ぶんの17.1Rより大きく、「大相場に乗れない」の主因はこちらの可能性がある。
+# 規則: TP1で半分だけ降り、残りを時間決済(6本目の終値)まで持つ。
+#
+# 残りに置く損切りを2通り測る。どちらにするかを数字で決めるため、両方残す:
+#   half_exit_r     残りも元のSLのまま。伸びなければ利益を返上しうる
+#   half_exit_be_r  残りは建値(fill_price)で降りる。返上はしないが早く出される
+# **これも併走観測であって既定の執行規約ではない。** r_result はTP1全決済のまま。
+HALF_EXIT_FRACTION = 0.5
+
 COLUMNS = [
     "date", "signal_id", "asset", "side", "rank", "risk_pct",
     "entry_low", "entry_high", "sl", "tp1",
@@ -90,6 +101,9 @@ COLUMNS = [
     "forgone_r",
     # 押し目を待たずに追った場合の併走観測(CHASE_ASSETS のみ)。r_result とは別枠。
     "chase_status", "chase_r",
+    # TP1で半分降りて残りを時間決済まで持った場合の併走観測。r_result とは別枠。
+    # _be_ は残りの損切りを建値に上げた版。どちらにするかは10月の較正で決める。
+    "half_exit_status", "half_exit_r", "half_exit_be_r",
     "simulated_at_utc",
 ]
 
@@ -117,6 +131,7 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
         "fill_date": "", "fill_price": np.nan, "risk_unit": np.nan,
         "exit_date": "", "exit_price": np.nan,
         "r_result": np.nan, "capital_pct": np.nan, "forgone_r": np.nan, "chase_status": "", "chase_r": np.nan,
+        "half_exit_status": "", "half_exit_r": np.nan, "half_exit_be_r": np.nan,
         "simulated_at_utc": simulated_at,
     }
     e1, e2, sl, tp1 = out["entry_low"], out["entry_high"], out["sl"], out["tp1"]
@@ -291,6 +306,104 @@ def chase_row(row, ohlcv: pd.DataFrame, wait_bars: int = CHASE_WAIT_BARS) -> tup
     return "open", np.nan
 
 
+def half_exit_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, float]:
+    """TP1で半分降り、残りを時間決済まで持った場合を測る。
+
+    戻り値 (status, r, r_breakeven)。r は残りの損切りを元のSLに置いたまま、
+    r_breakeven は TP1 到達後に残りの損切りを建値へ上げた場合。
+
+    建値・SL優先・TP1は翌足以降・決済期限といった規約は simulate_row と同じ。
+    ズレると r_result と並べて読めない。**TP2は使わない**(人間の指定は
+    「残りを時間決済まで持つ」であって、二段目の利確ではない)。
+
+    TP1に届かなかった場合・SLが先に付いた場合は、半分に分ける意味が無いので
+    r_result と同じ値になる。差が出るのは TP1 を踏んだ行だけ。
+    """
+    nan = float("nan")
+    side = normalize_side(row.get("side"))
+    e1, e2 = _num(row.get("entry_low")), _num(row.get("entry_high"))
+    sl, tp1 = _num(row.get("sl")), _num(row.get("tp1"))
+    if ohlcv.empty or side not in {"LONG", "SHORT"} or not (e1 == e1 and e2 == e2 and sl == sl):
+        return "", nan, nan
+    if tp1 != tp1:
+        return "", nan, nan          # TP1が無ければ分ける対象ではない
+    sig_date = pd.to_datetime(row.get("date"), errors="coerce")
+    if pd.isna(sig_date) or sig_date.normalize() < pd.to_datetime(ohlcv["date"].iloc[0]):
+        return "", nan, nan
+    idx0, anchor_idx = decision_time_anchor(ohlcv, sig_date)
+    if idx0 >= len(ohlcv):
+        return "open", nan, nan
+    is_long = side == "LONG"
+    ref = (e1 + e2) / 2
+    if anchor_idx >= 0:
+        ac = float(ohlcv.iloc[anchor_idx]["close"])
+        if ac > 0 and abs(ref / ac - 1.0) > MAX_REFERENCE_ANCHOR_DEVIATION:
+            return "", nan, nan
+    fill_price = e2 if is_long else e1
+    risk = abs(fill_price - sl)
+    if risk <= 0:
+        return "", nan, nan
+
+    def r_of(price):
+        return ((price - fill_price) if is_long else (fill_price - price)) / risk
+
+    fill_i = None
+    for i in range(idx0, min(idx0 + FILL_WINDOW_BARS, len(ohlcv))):
+        bar = ohlcv.iloc[i]
+        if float(bar["low"]) <= e2 and float(bar["high"]) >= e1:
+            fill_i = i
+            break
+    if fill_i is None:
+        return "", nan, nan          # 建っていない。分ける対象ではない
+
+    deadline = idx0 + EXIT_DEADLINE_BARS
+
+    def hit_sl(bar, level):
+        return (float(bar["low"]) <= level) if is_long else (float(bar["high"]) >= level)
+
+    # 約定足はSLのみ判定(順序不明 → 不利側)。TP1は翌足以降
+    if hit_sl(ohlcv.iloc[fill_i], sl):
+        r = round(r_of(sl), 4)
+        return "half_sl_before_tp1", r, r
+
+    tp_i = None
+    for i in range(fill_i + 1, min(deadline + 1, len(ohlcv))):
+        bar = ohlcv.iloc[i]
+        if hit_sl(bar, sl):          # SLとTP1が同じ足なら SL優先(不利側)
+            r = round(r_of(sl), 4)
+            return "half_sl_before_tp1", r, r
+        if (float(bar["high"]) >= tp1) if is_long else (float(bar["low"]) <= tp1):
+            tp_i = i
+            break
+
+    if tp_i is None:
+        # TP1に届かないまま期限。分けても全部でも同じ
+        if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+            r = round(r_of(float(ohlcv.iloc[deadline]["close"])), 4)
+            return "half_no_tp1_time_exit", r, r
+        return "open", nan, nan
+
+    # TP1で半分。残りは期限まで。残りの損切りを2通りで測る
+    booked = r_of(tp1) * HALF_EXIT_FRACTION
+    rest = 1.0 - HALF_EXIT_FRACTION
+
+    def runner(stop):
+        for j in range(tp_i + 1, min(deadline + 1, len(ohlcv))):
+            if hit_sl(ohlcv.iloc[j], stop):
+                return r_of(stop), "stopped"
+        if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+            return r_of(float(ohlcv.iloc[deadline]["close"])), "time"
+        return None, "open"
+
+    r_sl, how_sl = runner(sl)
+    r_be, how_be = runner(fill_price)
+    if r_sl is None or r_be is None:
+        return "open", nan, nan
+    return (f"half_tp1_then_{how_sl}",
+            round(booked + rest * r_sl, 4),
+            round(booked + rest * r_be, 4))
+
+
 def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None) -> pd.DataFrame:
     if ledger is None or ledger.empty:
         return pd.DataFrame(columns=COLUMNS)
@@ -311,6 +424,10 @@ def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None) -> pd.Dat
         if asset in CHASE_ASSETS and out["status"] not in {"excluded_scale", "excluded_bad_levels",
                                                            "invalid_data", "data_window_expired"}:
             out["chase_status"], out["chase_r"] = chase_row(row, cache[asset])
+        if out["status"] not in {"excluded_scale", "excluded_bad_levels",
+                                 "invalid_data", "data_window_expired"}:
+            (out["half_exit_status"], out["half_exit_r"],
+             out["half_exit_be_r"]) = half_exit_row(row, cache[asset])
         rows.append(out)
     return pd.DataFrame(rows, columns=COLUMNS)
 
@@ -328,6 +445,11 @@ def summarize(sim: pd.DataFrame) -> dict:
         # Entry規則は「当たった判断ほど落とす」側に働いている。実現Rとは別枠に置く。
         "no_fill_forgone_r": None, "no_fill_forgone_avg_r": None,
         # 追った場合の併走観測(CHASE_ASSETS のみ)。実現Rとは別枠に置く。
+        # TP1で半分降りた場合の併走観測。分岐が起きるのはTP1を踏んだ行だけなので、
+        # 同じ行の r_result と並べないと差が読めない。baseline は同じ母集団の実現R。
+        "half_exit": {"fraction": HALF_EXIT_FRACTION, "orders": 0, "tp1_split": 0,
+                      "total_r": None, "total_r_breakeven": None,
+                      "baseline_total_r": None, "win_rate": None},
         "chase": {"assets": sorted(CHASE_ASSETS), "wait_bars": CHASE_WAIT_BARS,
                   "orders": 0, "chased": 0, "total_r": None, "avg_r": None, "win_rate": None,
                   "baseline_total_r": None},
@@ -352,6 +474,22 @@ def summarize(sim: pd.DataFrame) -> dict:
     if not nf.empty:
         out["no_fill_forgone_r"] = round(float(nf.sum()), 2)
         out["no_fill_forgone_avg_r"] = round(float(nf.mean()), 3)
+    if "half_exit_r" in sim.columns:
+        hv = pd.to_numeric(sim["half_exit_r"], errors="coerce")
+        done = sim[hv.notna()]
+        if not done.empty:
+            a = pd.to_numeric(done["half_exit_r"], errors="coerce")
+            b = pd.to_numeric(done["half_exit_be_r"], errors="coerce")
+            base = pd.to_numeric(done["r_result"], errors="coerce").dropna()
+            out["half_exit"].update({
+                "orders": int(len(done)),
+                "tp1_split": int(done["half_exit_status"].astype(str)
+                                 .str.startswith("half_tp1_then_").sum()),
+                "total_r": round(float(a.sum()), 2),
+                "total_r_breakeven": round(float(b.sum()), 2),
+                "baseline_total_r": round(float(base.sum()), 2) if not base.empty else None,
+                "win_rate": round(float((a > 0).mean()), 3),
+            })
     if "chase_r" in sim.columns:
         cr = pd.to_numeric(sim["chase_r"], errors="coerce")
         done = sim[cr.notna()]
@@ -398,6 +536,10 @@ def main() -> int:
     c = summary["chase"]
     print(json.dumps({"chase": {k: c[k] for k in ("orders", "chased", "total_r", "avg_r",
                                                   "win_rate", "baseline_total_r")}}, ensure_ascii=False))
+    h = summary["half_exit"]
+    print(json.dumps({"half_exit": {k: h[k] for k in ("orders", "tp1_split", "total_r",
+                                                      "total_r_breakeven", "baseline_total_r",
+                                                      "win_rate")}}, ensure_ascii=False))
     return 0
 
 
