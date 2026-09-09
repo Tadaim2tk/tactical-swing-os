@@ -388,7 +388,14 @@ def half_exit_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, float]:
     rest = 1.0 - HALF_EXIT_FRACTION
 
     def runner(stop):
-        for j in range(tp_i + 1, min(deadline + 1, len(ohlcv))):
+        # TP1を踏んだ足そのものから見る(#168 Codex P2)。その足で価格が建値まで
+        # 戻っていた場合、TP1が先か戻りが先かは分からない。同じ足の順序不明は
+        # 不利側に倒す規約なので、建値ストップはその足で発動したと扱う。
+        # 元のSLについては、この足でSL未到達なのはTP1判定の前に確認済みなので
+        # 同じ範囲から見ても結果は変わらない。
+        # 特にTP1が期限足に当たり終値が建値割れのとき、翌足から見る実装では
+        # 「返上しない」はずの建値版が残りの損を記録していた。
+        for j in range(tp_i, min(deadline + 1, len(ohlcv))):
             if hit_sl(ohlcv.iloc[j], stop):
                 return r_of(stop), "stopped"
         if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():

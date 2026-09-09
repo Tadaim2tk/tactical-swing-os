@@ -446,3 +446,32 @@ def test_half_exit_summary_keeps_the_baseline_beside_it():
     assert out["half_exit"]["baseline_total_r"] == 0.0
     assert out["half_exit"]["tp1_split"] == 1
     assert out["gross_total_r"] == 0.0, "実現Rに half_exit を混ぜない"
+
+
+def test_half_exit_breakeven_stop_is_judged_on_the_tp1_bar_itself():
+    """TP1を踏んだ足が建値まで戻っていたら、建値版はその足で止まる(#168 Codex P2)。
+
+    TP1が先か戻りが先かは分からない。同じ足の順序不明は不利側に倒す規約。
+    元のSL版はその足でSL未到達が確認済みなので、翌足以降を見るのと同じ結果になる。
+    """
+    bars = _six([(76.5, 72.8, 75.0),     # TP1=76到達、かつ安値72.8で建値73を割る
+                 (77, 75, 76.8), (78, 76, 77.5), (78.5, 76.5, 78.0), (79.5, 77, 79.0)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_time"
+    assert abs(r - (0.5 * 1.0 + 0.5 * 2.0)) < 1e-3, "元のSLは割っていないので伸ばせる"
+    assert abs(r_be - (0.5 * 1.0 + 0.5 * 0.0)) < 1e-3, "建値版はその足で止まったと扱う"
+
+
+def test_half_exit_breakeven_cannot_record_a_loss_when_tp1_lands_on_the_deadline_bar():
+    """TP1が期限足に当たり終値が建値割れでも、建値版は残りを負にしない(#168 Codex P2)。
+
+    翌足から見る実装だと runner の走査が空になり、時間決済の終値で残りの損を
+    記録していた。「返上しない」という建値版の定義に反する。
+    """
+    bars = _six([(75, 73.5, 74.5), (75, 73.5, 74.5), (75, 73.5, 74.5), (75, 73.5, 74.5),
+                 (76.5, 72.0, 72.5)])  # 期限足でTP1到達、安値72で建値割れ、終値72.5
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_time"
+    assert abs(r - (0.5 * 1.0 + 0.5 * (72.5 - 73.0) / 3.0)) < 1e-3, "元のSL版は終値で返上"
+    assert abs(r_be - 0.5) < 1e-3, "建値版は建値で止まる。残りは0"
+    assert r_be > r
