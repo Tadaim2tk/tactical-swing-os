@@ -89,6 +89,32 @@ def _business_days_since(start: str, end: str) -> int:
     return n
 
 
+def _ledger_dates() -> dict[str, str]:
+    return {(r.get("signal_id") or "").strip(): (r.get("date") or "").strip()
+            for r in _read(LEDGER_PATH)}
+
+
+def _fired_dating(sid: str, verdict: str, check_date: str,
+                  history: list[dict], ledger: dict[str, str]) -> tuple[str, str]:
+    """(fired_on, retrospective) を決める。**聞いた日を発動日にしない(#162 Codex P2)。**
+
+    前回聞いた日（無ければ判断が出た日）から1営業日以内なら、壊れた日は
+    その日に絞れる → `fired_on = check_date`。
+    それより間が空いていれば、窓のどこかで壊れたとしか言えない → **`fired_on` は空**。
+    空は「発動したが日付は不明」であって「発動していない」ではない。
+    """
+    prior = max((r.get("check_date", "") for r in history
+                 if r.get("signal_id") == sid and r.get("check_date", "") < check_date),
+                default="")
+    base = prior or ledger.get(sid, "")
+    if not base:
+        return "", "unknown"
+    fresh = _business_days_since(base, check_date) <= 1
+    if verdict != "fired":
+        return "", ("no" if fresh else "yes")
+    return (check_date if fresh else ""), ("no" if fresh else "yes")
+
+
 def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
     """台帳上まだ窓の内側にある方向あり判断のうち、過去に fired と記録されておらず、
     今回の申告にも含まれていない signal_id を返す。
@@ -167,13 +193,22 @@ def main() -> int:
                     f"'{prev[sid]}' と '{verdict}'。どちらが正しいか確認して出し直すこと")
             rows.append({"check_date": day, "signal_id": sid, "invalidation_fired": verdict,
                          "source": source, "recorded_at": NOW})
+        hist, led = _read(INVAL_PATH), _ledger_dates()
+        for r in rows:
+            r["fired_on"], r["retrospective"] = _fired_dating(
+                r["signal_id"], r["invalidation_fired"], day, hist, led)
         if not rows:
             raise SystemExit("記録する項目が無い")
         missing = _undeclared_open(day, {r["signal_id"] for r in rows})
-        n = _append(INVAL_PATH, ["check_date", "signal_id", "invalidation_fired", "source", "recorded_at"],
+        n = _append(INVAL_PATH,
+                    ["check_date", "signal_id", "invalidation_fired", "source", "recorded_at",
+                     "fired_on", "retrospective"],
                     rows, ("check_date", "signal_id"))
         for r in rows[:n]:
-            print(f"recorded invalidation: {r['signal_id']} -> {r['invalidation_fired']}")
+            when = r["fired_on"] or ("発動日 **不明**（後日まとめて回収）"
+                                     if r["invalidation_fired"] == "fired" else "")
+            print(f"recorded invalidation: {r['signal_id']} -> {r['invalidation_fired']}"
+                  + (f"  {when}" if when else ""))
         if missing:
             print(f"!! 申告漏れ: 未決着の方向あり判断 {len(missing)} 件が今回の申告に無い: "
                   + ", ".join(missing), file=sys.stderr)
