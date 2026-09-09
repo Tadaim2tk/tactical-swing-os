@@ -69,7 +69,13 @@ COLUMNS = [
     "exit_bar_offset",  # 時間決済したバーの位置(判断日ラベル=0本目)。「5日」の曖昧さを列で解消する
     "scale_check",   # passed / excluded / not_checked(判断前のバーが無く検査できない)
     "fill_date", "fill_price", "risk_unit", "exit_date", "exit_price",
-    "r_result", "capital_pct", "simulated_at_utc",
+    "r_result", "capital_pct",
+    # 到達しなかった判断が、方向としては何Rぶん動いたか。status=no_fill の行にだけ入る。
+    # Entry帯へ戻らなかった判断ほど方向が当たっている、という逆選択が実際に起きているかを、
+    # 執行側の表だけで検算できるようにするための観察列。建値は約定した場合と同じ
+    # 「ゾーン内の最悪価格」なので、r_result と同じ物差しで並ぶ。参加はしていない。
+    "forgone_r",
+    "simulated_at_utc",
 ]
 
 
@@ -95,7 +101,7 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
         "status": "invalid_data",
         "fill_date": "", "fill_price": np.nan, "risk_unit": np.nan,
         "exit_date": "", "exit_price": np.nan,
-        "r_result": np.nan, "capital_pct": np.nan,
+        "r_result": np.nan, "capital_pct": np.nan, "forgone_r": np.nan,
         "simulated_at_utc": simulated_at,
     }
     e1, e2, sl, tp1 = out["entry_low"], out["entry_high"], out["sl"], out["tp1"]
@@ -153,6 +159,15 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
     if fill_i is None:
         window_complete = (idx0 + FILL_WINDOW_BARS) <= len(ohlcv)
         out["status"] = "no_fill" if window_complete else "open"
+        # 最終バーが形成途中なら逃した分を名乗らない(#165 Codex P2 / #137と同型)。
+        # window_complete は行数だけで決まるので、24時間動く資産では
+        # 当日ラベルのバーがまだ閉じていないまま5本目に数えられ、
+        # 日中値を「終値で測った方向R」として記録してしまう。
+        last_i = idx0 + FILL_WINDOW_BARS - 1
+        if window_complete and pd.Timestamp(ohlcv.iloc[last_i]["date"]).normalize() < _current_utc_date():
+            last = float(ohlcv.iloc[last_i]["close"])
+            gain = (last - fill_price) if is_long else (fill_price - last)
+            out["forgone_r"] = round(gain / risk, 4)
         return out
 
     out["fill_date"] = str(ohlcv.iloc[fill_i]["date"].date())
@@ -223,6 +238,9 @@ def summarize(sim: pd.DataFrame) -> dict:
         "exit_breakdown": {}, "win_rate": None,
         "gross_total_r": None, "avg_r": None, "gross_capital_pct": None,
         "cost_sensitivity_r": {},
+        # 未参加の逆選択: no_fill の方向Rが filled の執行Rを上回るなら、
+        # Entry規則は「当たった判断ほど落とす」側に働いている。実現Rとは別枠に置く。
+        "no_fill_forgone_r": None, "no_fill_forgone_avg_r": None,
         "policy": {
             "fill_window_bars": FILL_WINDOW_BARS,
             "exit_deadline_bars": EXIT_DEADLINE_BARS,
@@ -239,6 +257,11 @@ def summarize(sim: pd.DataFrame) -> dict:
     # ガード発動時に注文内訳が照合不能になる)
     for k in ("excluded_scale", "excluded_bad_levels", "invalid_data", "no_fill", "open", "data_window_expired"):
         out[k] = int(counts.get(k, 0))
+    nf = pd.to_numeric(sim.loc[sim["status"] == "no_fill", "forgone_r"], errors="coerce").dropna() \
+        if "forgone_r" in sim.columns else pd.Series(dtype=float)
+    if not nf.empty:
+        out["no_fill_forgone_r"] = round(float(nf.sum()), 2)
+        out["no_fill_forgone_avg_r"] = round(float(nf.mean()), 3)
     resolved = sim[sim["status"].isin(resolved_status)].copy()
     out["fills_resolved"] = int(len(resolved))
     if resolved.empty:
@@ -266,7 +289,7 @@ def main() -> int:
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(f"execution simulation: {len(sim)} orders -> {OUT_CSV}")
-    print(json.dumps({k: summary[k] for k in ("orders", "fills_resolved", "no_fill", "open", "gross_total_r", "win_rate", "gross_capital_pct")}, ensure_ascii=False))
+    print(json.dumps({k: summary[k] for k in ("orders", "fills_resolved", "no_fill", "open", "gross_total_r", "win_rate", "gross_capital_pct", "no_fill_forgone_r", "no_fill_forgone_avg_r")}, ensure_ascii=False))
     return 0
 
 
