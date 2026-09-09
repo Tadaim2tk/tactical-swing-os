@@ -61,6 +61,19 @@ FILL_WINDOW_BARS = 5   # 判断日を含む約定待ちバー数
 EXIT_DEADLINE_BARS = 5  # 判断日ラベルのバーを0本目とした決済期限。実質6本目の終値
 COST_SENSITIVITY_R = (0.02, 0.05, 0.10)
 
+# 押し目待ちの逆選択への対処(人間の承認 2026-09-09)。
+# 観測: 約定した110件が -6.53R、約定しなかった32件が +24.53R。方向は当たっているのに
+# Entry帯へ戻らないまま走った判断に参加できていない(「大相場に乗れないと資産が増えない」)。
+# 規則: 判断日ラベルのバーの終値までに約定しなければ、その終値で成行。
+# 対象は未約定ぶんの方向Rが正で厚い3資産のみ。WTIは唯一マイナス(-3.04R)なので入れない。
+#
+# **これは併走させる観測であって、既定の執行規約ではない。** r_result は従来どおり
+# 押し目待ちのまま計算し、追った場合を chase_r に別置きする。過去データでの改善は
+# 総当たりで選んだ最良値が50件で平均+0.040R であり、補正すれば残らない大きさ。
+# 前向きに測って10月の較正で判断する(measurement-discipline: min-P補正)。
+CHASE_ASSETS = frozenset({"NASDAQ", "BTC", "USDJPY"})
+CHASE_WAIT_BARS = 1
+
 COLUMNS = [
     "date", "signal_id", "asset", "side", "rank", "risk_pct",
     "entry_low", "entry_high", "sl", "tp1",
@@ -75,6 +88,8 @@ COLUMNS = [
     # 執行側の表だけで検算できるようにするための観察列。建値は約定した場合と同じ
     # 「ゾーン内の最悪価格」なので、r_result と同じ物差しで並ぶ。参加はしていない。
     "forgone_r",
+    # 押し目を待たずに追った場合の併走観測(CHASE_ASSETS のみ)。r_result とは別枠。
+    "chase_status", "chase_r",
     "simulated_at_utc",
 ]
 
@@ -101,7 +116,7 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
         "status": "invalid_data",
         "fill_date": "", "fill_price": np.nan, "risk_unit": np.nan,
         "exit_date": "", "exit_price": np.nan,
-        "r_result": np.nan, "capital_pct": np.nan, "forgone_r": np.nan,
+        "r_result": np.nan, "capital_pct": np.nan, "forgone_r": np.nan, "chase_status": "", "chase_r": np.nan,
         "simulated_at_utc": simulated_at,
     }
     e1, e2, sl, tp1 = out["entry_low"], out["entry_high"], out["sl"], out["tp1"]
@@ -209,6 +224,73 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
     return out
 
 
+def chase_row(row, ohlcv: pd.DataFrame, wait_bars: int = CHASE_WAIT_BARS) -> tuple[str, float]:
+    """押し目を待たずに追った場合を併走で測る。(status, r) を返す。
+
+    wait_bars 本のあいだに Entry帯へ来なければ、その最終バーの**終値**で成行。
+    終値で入るので、そのバーの安値/高値は既に過ぎている。SL/TP の判定を同じバーから
+    始めると「入る前に付いた値」で決済したことになるため、追った場合だけ翌バーから見る。
+    自然約定した場合の規約(ゾーン内の最悪価格・約定足はSLのみ・TP1は翌足以降・SL優先)は
+    simulate_row と揃える。ズレると r_result と並べて読めない。
+
+    決済期限は判断日ラベルを0本目とした EXIT_DEADLINE_BARS 本目のまま動かさない。
+    遅く入るほど持ち時間が短いのは規則の費用であって、消してよい不都合ではない。
+    """
+    side = normalize_side(row.get("side"))
+    e1, e2 = _num(row.get("entry_low")), _num(row.get("entry_high"))
+    sl, tp1 = _num(row.get("sl")), _num(row.get("tp1"))
+    if ohlcv.empty or side not in {"LONG", "SHORT"} or not (e1 == e1 and e2 == e2 and sl == sl):
+        return "", np.nan
+    sig_date = pd.to_datetime(row.get("date"), errors="coerce")
+    if pd.isna(sig_date) or sig_date.normalize() < pd.to_datetime(ohlcv["date"].iloc[0]):
+        return "", np.nan
+    idx0, _ = decision_time_anchor(ohlcv, sig_date)
+    if idx0 >= len(ohlcv):
+        return "open", np.nan
+    is_long = side == "LONG"
+
+    fill_i = fill_price = None
+    for i in range(idx0, min(idx0 + wait_bars, len(ohlcv))):
+        bar = ohlcv.iloc[i]
+        if float(bar["low"]) <= e2 and float(bar["high"]) >= e1:
+            fill_i, fill_price = i, (e2 if is_long else e1)
+            break
+    chased = fill_i is None
+    if chased:
+        k = idx0 + wait_bars - 1
+        # 形成途中のバーの終値で建値を作らない(#137/#165 と同型)
+        if k >= len(ohlcv) or pd.Timestamp(ohlcv.iloc[k]["date"]).normalize() >= _current_utc_date():
+            return "open", np.nan
+        fill_i, fill_price = k, float(ohlcv.iloc[k]["close"])
+        if (fill_price <= sl) if is_long else (fill_price >= sl):
+            return "beyond_sl", np.nan      # 既に損切り水準の向こう。追わない
+        if tp1 == tp1 and ((fill_price >= tp1) if is_long else (fill_price <= tp1)):
+            return "beyond_tp1", np.nan     # 目標を過ぎている。追わない
+
+    risk = abs(fill_price - sl)
+    if risk <= 0:
+        return "", np.nan
+
+    def r_of(price: float) -> float:
+        return round(((price - fill_price) if is_long else (fill_price - price)) / risk, 4)
+
+    pre = "chase_" if chased else "band_"
+    if not chased:
+        bar = ohlcv.iloc[fill_i]
+        if (float(bar["low"]) <= sl) if is_long else (float(bar["high"]) >= sl):
+            return pre + "sl", r_of(sl)
+    deadline = idx0 + EXIT_DEADLINE_BARS
+    for i in range(fill_i + 1, min(deadline + 1, len(ohlcv))):
+        bar = ohlcv.iloc[i]
+        if (float(bar["low"]) <= sl) if is_long else (float(bar["high"]) >= sl):
+            return pre + "sl", r_of(sl)
+        if tp1 == tp1 and ((float(bar["high"]) >= tp1) if is_long else (float(bar["low"]) <= tp1)):
+            return pre + "tp1", r_of(tp1)
+    if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+        return pre + "time_exit", r_of(float(ohlcv.iloc[deadline]["close"]))
+    return "open", np.nan
+
+
 def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None) -> pd.DataFrame:
     if ledger is None or ledger.empty:
         return pd.DataFrame(columns=COLUMNS)
@@ -225,7 +307,11 @@ def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None) -> pd.Dat
         asset = str(row.get("asset") or "")
         if asset not in cache:
             cache[asset] = load_ohlcv_frame(asset, **kwargs) if kwargs else load_ohlcv_frame(asset)
-        rows.append(simulate_row(row, cache[asset], simulated_at))
+        out = simulate_row(row, cache[asset], simulated_at)
+        if asset in CHASE_ASSETS and out["status"] not in {"excluded_scale", "excluded_bad_levels",
+                                                           "invalid_data", "data_window_expired"}:
+            out["chase_status"], out["chase_r"] = chase_row(row, cache[asset])
+        rows.append(out)
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
@@ -241,6 +327,10 @@ def summarize(sim: pd.DataFrame) -> dict:
         # 未参加の逆選択: no_fill の方向Rが filled の執行Rを上回るなら、
         # Entry規則は「当たった判断ほど落とす」側に働いている。実現Rとは別枠に置く。
         "no_fill_forgone_r": None, "no_fill_forgone_avg_r": None,
+        # 追った場合の併走観測(CHASE_ASSETS のみ)。実現Rとは別枠に置く。
+        "chase": {"assets": sorted(CHASE_ASSETS), "wait_bars": CHASE_WAIT_BARS,
+                  "orders": 0, "chased": 0, "total_r": None, "avg_r": None, "win_rate": None,
+                  "baseline_total_r": None},
         "policy": {
             "fill_window_bars": FILL_WINDOW_BARS,
             "exit_deadline_bars": EXIT_DEADLINE_BARS,
@@ -262,6 +352,21 @@ def summarize(sim: pd.DataFrame) -> dict:
     if not nf.empty:
         out["no_fill_forgone_r"] = round(float(nf.sum()), 2)
         out["no_fill_forgone_avg_r"] = round(float(nf.mean()), 3)
+    if "chase_r" in sim.columns:
+        cr = pd.to_numeric(sim["chase_r"], errors="coerce")
+        done = sim[cr.notna()]
+        if not done.empty:
+            v = pd.to_numeric(done["chase_r"], errors="coerce")
+            out["chase"].update({
+                "orders": int(len(done)),
+                "chased": int(done["chase_status"].astype(str).str.startswith("chase_").sum()),
+                "total_r": round(float(v.sum()), 2), "avg_r": round(float(v.mean()), 3),
+                "win_rate": round(float((v > 0).mean()), 3),
+            })
+            # 同じ資産の、押し目待ちのままの実現R。並べないと改善かどうか言えない
+            base = sim[(sim["asset"].isin(CHASE_ASSETS)) & (sim["status"].isin(resolved_status))]
+            bv = pd.to_numeric(base["r_result"], errors="coerce").dropna()
+            out["chase"]["baseline_total_r"] = round(float(bv.sum()), 2) if not bv.empty else None
     resolved = sim[sim["status"].isin(resolved_status)].copy()
     out["fills_resolved"] = int(len(resolved))
     if resolved.empty:
@@ -290,6 +395,9 @@ def main() -> int:
     )
     print(f"execution simulation: {len(sim)} orders -> {OUT_CSV}")
     print(json.dumps({k: summary[k] for k in ("orders", "fills_resolved", "no_fill", "open", "gross_total_r", "win_rate", "gross_capital_pct", "no_fill_forgone_r", "no_fill_forgone_avg_r")}, ensure_ascii=False))
+    c = summary["chase"]
+    print(json.dumps({"chase": {k: c[k] for k in ("orders", "chased", "total_r", "avg_r",
+                                                  "win_rate", "baseline_total_r")}}, ensure_ascii=False))
     return 0
 
 

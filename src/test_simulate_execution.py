@@ -279,3 +279,82 @@ def test_forming_last_bar_does_not_claim_forgone_r(monkeypatch):
     monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
     r2 = se.simulate_row(_row(), bars, "t")
     assert not pd.isna(r2["forgone_r"]), "閉じたら記録する"
+
+
+# --- 押し目を待たずに追る規則の併走観測(人間の承認 2026-09-09) ---
+
+def test_chase_enters_at_the_close_when_the_band_never_comes():
+    """帯へ来なければ判断日ラベルの終値で入る。建値はその終値。"""
+    bars = _ohlcv([("2026-07-01", 74, 75, 73.5, 74.5),    # 帯72-73へ来ない
+                   ("2026-07-02", 75, 77, 74.5, 76.5),
+                   ("2026-07-03", 77, 78, 76, 77.5)])
+    st, r = se.chase_row(_row(), bars, wait_bars=1)
+    # 建値74.5 / SL70 -> risk=4.5、TP1=76.0 は7/2の高値77で到達 -> (76-74.5)/4.5
+    assert st == "chase_tp1"
+    assert abs(r - 0.3333) < 1e-3
+
+
+def test_chase_does_not_judge_sl_on_the_bar_it_entered_at_the_close():
+    """終値で入った足の安値は既に過ぎている。そこで損切りにすると過去を覗く。
+
+    帯72-73へは届かず(高値71.5)、しかし安値64がSL65を割った足。
+    その足の終値71.0で入るので、64を付けたのは建てる前の出来事である。
+    """
+    row = _row(sl="65.0", tp1="90.0")   # TP1は窓内で当たらない位置に置く
+    bars = _ohlcv([("2026-07-01", 71.0, 71.5, 64.0, 71.0),
+                   ("2026-07-02", 71, 72.5, 70.0, 72.0),
+                   ("2026-07-03", 72, 73.5, 71.0, 73.0),
+                   ("2026-07-04", 73, 74.5, 72.0, 74.0),
+                   ("2026-07-05", 74, 75.5, 73.0, 75.0),
+                   ("2026-07-06", 75, 76.5, 74.0, 76.0)])
+    st, r = se.chase_row(row, bars, wait_bars=1)
+    assert st == "chase_time_exit", "入った足のSLで即死させない"
+    assert abs(r - (76.0 - 71.0) / (71.0 - 65.0)) < 1e-3
+
+
+def test_chase_refuses_when_price_already_passed_the_target():
+    """目標を過ぎてから追わない。伸びしろが無い建値を掴むだけ。"""
+    bars = _ohlcv([("2026-07-01", 76, 78, 75.5, 77.0)])   # TP1=76 を既に超えた終値
+    st, r = se.chase_row(_row(), bars, wait_bars=1)
+    assert st == "beyond_tp1"
+    assert pd.isna(r)
+
+
+def test_chase_refuses_when_price_already_broke_the_stop():
+    """損切り水準の向こうでは追わない。"""
+    bars = _ohlcv([("2026-07-01", 71, 71.5, 68, 69.0)])   # SL=70 の下で引けた
+    st, r = se.chase_row(_row(), bars, wait_bars=1)
+    assert st == "beyond_sl"
+    assert pd.isna(r)
+
+
+def test_chase_uses_the_band_price_when_the_band_did_come():
+    """帯へ来た日は追わない。従来どおりゾーン内の最悪価格で建てる。"""
+    bars = _ohlcv([("2026-07-01", 74, 74.5, 72.5, 74.0),
+                   ("2026-07-02", 74, 76.5, 73.5, 76.0)])
+    st, r = se.chase_row(_row(), bars, wait_bars=1)
+    assert st == "band_tp1"
+    assert abs(r - 1.0) < 1e-9, "worst-in-zone 73.0 建て -> (76-73)/3"
+
+
+def test_chase_does_not_build_a_price_from_a_forming_bar(monkeypatch):
+    """当日ラベルの未確定バーの終値で建値を作らない(#137/#165 と同型)。"""
+    bars = _ohlcv([("2026-07-01", 74, 75, 73.5, 74.5)])
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-01"))
+    st, r = se.chase_row(_row(), bars, wait_bars=1)
+    assert st == "open" and pd.isna(r)
+
+
+def test_chase_summary_is_separate_from_realized_r():
+    """追った場合を実現Rに混ぜない。既定の執行規約は押し目待ちのまま。"""
+    sim = pd.DataFrame([
+        {"asset": "NASDAQ", "status": "no_fill", "r_result": float("nan"),
+         "capital_pct": float("nan"), "forgone_r": 2.0, "chase_status": "chase_tp1", "chase_r": 1.0},
+        {"asset": "NASDAQ", "status": "filled_sl", "r_result": -1.0,
+         "capital_pct": -0.25, "forgone_r": float("nan"), "chase_status": "band_sl", "chase_r": -1.0},
+    ])
+    out = se.summarize(sim)
+    assert out["gross_total_r"] == -1.0, "実現Rに chase を入れない"
+    assert out["chase"]["total_r"] == 0.0
+    assert out["chase"]["chased"] == 1
+    assert out["chase"]["baseline_total_r"] == -1.0
