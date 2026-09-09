@@ -29,7 +29,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from simulate_execution import (EXIT_DEADLINE_BARS, FILL_WINDOW_BARS,  # noqa: E402
-                                MAX_REFERENCE_ANCHOR_DEVIATION, _num, normalize_side)
+                                MAX_REFERENCE_ANCHOR_DEVIATION, _current_utc_date,
+                                _num, normalize_side)
 from score_prediction_log import decision_time_anchor, load_ohlcv_frame  # noqa: E402
 
 CHASE_ASSETS = {"NASDAQ", "BTC", "USDJPY"}  # 未約定ぶんの方向Rが正で厚い資産
@@ -69,7 +70,9 @@ def run_row(row, ohlcv, wait_bars):
     # 2) 来なければ、判定できる最終バーの終値で成行
     if fill_i is None:
         k = idx0 + wait_bars - 1
-        if k >= len(ohlcv):
+        # 形成途中のバーの終値を建値にしない(#166 Codex P2 / #137・#165 と同型)。
+        # 場中に流すと、まだ確定していない日中値で「入った」ことになる。
+        if k >= len(ohlcv) or pd.Timestamp(ohlcv.iloc[k]["date"]).normalize() >= _current_utc_date():
             return "open", None
         fill_i, fill_price, chased = k, float(ohlcv.iloc[k]["close"]), True
         beyond_sl = fill_price <= sl if is_long else fill_price >= sl
@@ -99,7 +102,7 @@ def run_row(row, ohlcv, wait_bars):
             return ("chase_sl" if chased else "filled_sl"), r_of(sl)
         if tp1 == tp1 and ((float(bar["high"]) >= tp1) if is_long else (float(bar["low"]) <= tp1)):
             return ("chase_tp1" if chased else "filled_tp1"), r_of(tp1)
-    if deadline < len(ohlcv):
+    if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
         return ("chase_time" if chased else "filled_time_exit"), r_of(float(ohlcv.iloc[deadline]["close"]))
     return "open", None
 
@@ -136,8 +139,15 @@ def sweep(ledger, assets=None):
 
 def main():
     ledger = pd.read_csv("data/signal_log.csv")
-    ledger = ledger[ledger["side"].map(normalize_side).isin({"LONG", "SHORT"})]
-    print(f"方向あり {len(ledger)} 件\n")
+    # 母集団は simulate_ledger と同じ「朝に指値を出したもの」に揃える(#166 Codex P1)。
+    # 方向あり全部を入れると、rank が A/B でない行や risk_pct が 0/欠損の行
+    # (=注文ではない判断)まで採点され、待ち本数の比較そのものが歪む。
+    # 台帳には entry/SL が揃ったまま risk_pct が無い行が実在する。
+    rank = ledger["rank"].astype(str).str.strip().str.upper()
+    rp = pd.to_numeric(ledger["risk_pct"], errors="coerce")
+    ledger = ledger[ledger["side"].map(normalize_side).isin({"LONG", "SHORT"})
+                    & rank.isin({"A", "B"}) & rp.notna() & (rp > 0)]
+    print(f"注文になった方向あり {len(ledger)} 件\n")
     print("=== 全資産 ===")
     print(sweep(ledger).to_string(index=False))
     print("\n=== NASDAQ / BTC / USDJPY のみ ===")
