@@ -53,7 +53,14 @@ ACK_PREFIX = "GATE-ACK:"
 
 # 要約コメントの表: | 📝 **Code Review** | ✅ **Completed** ... | `fed98b0` | PR opened |
 ROW_SHA = re.compile(r"`([0-9a-f]{7,40})`")
-ANY_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
+# **「16進に見える文字列」ではコミットを名指したことにならない。**
+# 実行番号(34312276826)も日付(20260909)も [0-9a-f]{7,40} に当たる(#167 レビュー指摘)。
+# コミットURL・コミットと明記した表記・表のコミット欄だけを識別子として認める。
+COMMIT_REF = re.compile(
+    r"/(?:commit|commits|blob|tree)/[0-9a-f]{7,40}\b"          # コミットURL
+    r"|\bcommits?\W{0,4}`?[0-9a-f]{7,40}`?\b"                  # commit <sha>
+    r"|\bsha\W{0,4}`?[0-9a-f]{7,40}`?\b",                      # SHA: <sha>
+    re.I)
 DONE = ("completed", "complete", "finished")
 RUNNING = ("running", "in progress", "in_progress", "queued", "pending", "started")
 BROKEN = ("failed", "failure", "error", "cancelled", "canceled", "timed out")
@@ -137,10 +144,11 @@ def classify(head_sha, comments, reviews_for_head=0, unresolved_threads=0,
             continue
         if names_head:
             unreadable_for_head = True
-        elif not ANY_SHA.search(low):
-            # どのコミットの話かも分からない。いまの head の結果が無いときだけ効かせる
+        elif not COMMIT_REF.search(body):
+            # どのコミットの話かも分からない。いまの head の結果が無いときだけ効かせる。
+            # **数字が入っているだけでは「別コミットの要約」にしない。**
             unreadable_unknown = True
-        # 別コミットの SHA だけを名指している要約は、いまの判定に持ち込まない
+        # 別コミットを名指していると分かる要約だけ、いまの判定に持ち込まない
 
     # --- 1. 人の承認。権限は呼ぶ側が確認済みのものだけ受ける ---
     allowed = {str(x).strip() for x in (ack_logins or []) if str(x).strip()}

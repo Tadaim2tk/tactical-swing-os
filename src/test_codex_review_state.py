@@ -183,12 +183,39 @@ def test_stale_unreadable_summary_does_not_poison_the_current_head():
     assert classify(HEAD, [stale, _summary(HEAD), _finding(HEAD)], 0, 0, ACK)[0] == "findings"
 
 
+def _vague(extra=""):
+    return _bot("<!-- codex-pull-request-review-summary -->\n\n"
+                "Review status unavailable.\n" + extra)
+
+
 def test_unknown_commit_summary_only_poisons_when_head_has_no_result():
     """どのコミットか分からない要約は、いまの結果が無いときだけ効かせる。"""
-    vague = _bot("<!-- codex-pull-request-review-summary -->\n\n"
-                 "Review status unavailable.\n")
-    assert classify(HEAD, [vague], 0, 0, ACK)[0] == "undecidable"
-    assert classify(HEAD, [vague, _summary(HEAD)], 0, 0, ACK)[0] == "clean"
+    assert classify(HEAD, [_vague()], 0, 0, ACK)[0] == "undecidable"
+    assert classify(HEAD, [_vague(), _summary(HEAD)], 0, 0, ACK)[0] == "clean"
+
+
+def test_numbers_in_the_body_are_not_commit_identifiers():
+    """**実行番号や日付をコミットと読まない(#167 レビュー指摘)。**
+
+    どちらも [0-9a-f]{7,40} に当たるので、16進に見えるかどうかでは判別できない。
+    番号を添えただけで「別コミットの要約」になり、停止理由が消えていた。
+    """
+    for extra in ("Run ID: 34312276826\n",          # 実行番号（数字だけ）
+                  "Recorded: 20260909\n",           # 日付（数字だけ）
+                  "Attempt 1234567 of 2\n",
+                  "`34312276826`\n"):               # 番号を引用符で囲っただけ
+        assert classify(HEAD, [_vague(extra)], 0, 0, ACK)[0] == "undecidable", extra
+        # いまの head の結果があれば、当然そちらが勝つ
+        assert classify(HEAD, [_vague(extra), _summary(HEAD)], 0, 0, ACK)[0] == "clean", extra
+
+
+def test_a_real_commit_reference_still_excludes_the_summary():
+    """別コミットだと**分かる**書き方なら、これまでどおり持ち込まない。"""
+    for extra in ("https://github.com/example/example/commit/%s\n" % OLD,
+                  "https://github.com/example/example/blob/%s/x.py#L1\n" % OLD,
+                  "Reviewed commit: `%s`\n" % OLD[:7],
+                  "SHA: %s\n" % OLD):
+        assert classify(HEAD, [_vague(extra)], 0, 0, ACK)[0] == "pending", extra
 
 
 def test_unreadable_summary_is_undecidable_not_pending():
