@@ -171,11 +171,37 @@ def test_quota_does_not_override_undecidable():
     assert classify(HEAD, cs, 0, 0, ACK)[0] == "undecidable"
 
 
+def test_stale_unreadable_summary_does_not_poison_the_current_head():
+    """**古い要約が読めないというだけで、いまのコミットの結論を捨てない(#163 Codex P2)。**
+
+    捨てると、修正を push しても永久に undecidable のままで復帰できない。
+    """
+    stale = _bot("<!-- codex-pull-request-review-summary -->\n\n"
+                 "Code Review completed for %s (old layout, no table)\n" % OLD)
+    assert classify(HEAD, [stale, _summary(HEAD)], 0, 0, ACK)[0] == "clean"
+    # 指摘が来ていれば、もちろん findings が勝つ
+    assert classify(HEAD, [stale, _summary(HEAD), _finding(HEAD)], 0, 0, ACK)[0] == "findings"
+
+
+def test_unknown_commit_summary_only_poisons_when_head_has_no_result():
+    """どのコミットか分からない要約は、いまの結果が無いときだけ効かせる。"""
+    vague = _bot("<!-- codex-pull-request-review-summary -->\n\n"
+                 "Review status unavailable.\n")
+    assert classify(HEAD, [vague], 0, 0, ACK)[0] == "undecidable"
+    assert classify(HEAD, [vague, _summary(HEAD)], 0, 0, ACK)[0] == "clean"
+
+
 def test_unreadable_summary_is_undecidable_not_pending():
     """要約はあるのに表を読めない → 未到着ではない。時間切れで緑にしない。"""
     broken = _bot("<!-- codex-pull-request-review-summary -->\n\n"
                   "Code Review completed for %s (new layout, no table)\n" % HEAD)
     assert classify(HEAD, [broken], 0, 0, ACK)[0] == "undecidable"
+    # 表は読めたが head の行が無く、本文が head を名指している場合も読めていない
+    mixed = _bot("<!-- codex-pull-request-review-summary -->\n\n"
+                 "| Review | Status | Commit | Review trigger |\n| --- | --- | --- | --- |\n"
+                 "| 📝 **Code Review** | ✅ **Completed** | `%s` | PR opened |\n"
+                 "latest run targeted %s\n" % (OLD[:7], HEAD))
+    assert classify(HEAD, [mixed], 0, 0, ACK)[0] == "undecidable"
     empty_table = _bot("<!-- codex-pull-request-review-summary -->\n\n"
                        "| Review | Status |\n| --- | --- |\n")
     assert classify(HEAD, [empty_table], 0, 0, ACK)[0] == "undecidable"

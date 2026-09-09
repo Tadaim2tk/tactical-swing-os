@@ -53,6 +53,7 @@ ACK_PREFIX = "GATE-ACK:"
 
 # 要約コメントの表: | 📝 **Code Review** | ✅ **Completed** ... | `fed98b0` | PR opened |
 ROW_SHA = re.compile(r"`([0-9a-f]{7,40})`")
+ANY_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 DONE = ("completed", "complete", "finished")
 RUNNING = ("running", "in progress", "in_progress", "queued", "pending", "started")
 BROKEN = ("failed", "failure", "error", "cancelled", "canceled", "timed out")
@@ -111,24 +112,35 @@ def classify(head_sha, comments, reviews_for_head=0, unresolved_threads=0,
                 and blob in (c.get("body") or "")]
     quota = any(QUOTA_MARK in (c.get("body") or "") for c in bots)
 
+    # 要約は「いまの head のもの」と「別コミットのもの」を分ける。
+    # **古い要約が読めないというだけで、いまの判定を汚さない(#163 Codex P2)。**
+    # 汚してしまうと、修正を push しても永久に undecidable のままになる。
     summary_kind = None          # いまの head に対する要約の状態
-    unreadable_summary = False   # 要約はあるのに表を読めない
+    unreadable_for_head = False  # いまの head の要約が読めない
+    unreadable_unknown = False   # どのコミットの要約かも分からない
     for c in bots:
         body = c.get("body") or ""
         if SUMMARY_MARKER not in body:
             continue
+        low = body.lower()
+        names_head = head_sha in low or head_sha[:7] in low
         rows = _summary_rows(body)
-        if not rows:
-            unreadable_summary = True
+        if rows:
+            matched = False
+            for status, sha in rows:
+                if head_sha.startswith(sha):
+                    summary_kind = _status_kind(status)
+                    matched = True
+            # 表は読めたが head の行が無い。本文が head を名指しているなら読めていない
+            if not matched and names_head:
+                unreadable_for_head = True
             continue
-        matched = False
-        for status, sha in rows:
-            if head_sha.startswith(sha):
-                summary_kind = _status_kind(status)
-                matched = True
-        # 要約に head が書かれているのに、表の行としては拾えなかった場合も読めない扱い
-        if not matched and (head_sha in body or head_sha[:7] in body):
-            unreadable_summary = True
+        if names_head:
+            unreadable_for_head = True
+        elif not ANY_SHA.search(low):
+            # どのコミットの話かも分からない。いまの head の結果が無いときだけ効かせる
+            unreadable_unknown = True
+        # 別コミットの SHA だけを名指している要約は、いまの判定に持ち込まない
 
     # --- 1. 人の承認。権限は呼ぶ側が確認済みのものだけ受ける ---
     allowed = {str(x).strip() for x in (ack_logins or []) if str(x).strip()}
@@ -147,13 +159,13 @@ def classify(head_sha, comments, reviews_for_head=0, unresolved_threads=0,
     if findings:
         return "findings", "このコミットへの指摘が %d件 残っている" % len(findings)
     if unresolved_threads is None:
-        if summary_kind or unreadable_summary or reviews_for_head:
+        if summary_kind or unreadable_for_head or unreadable_unknown or reviews_for_head:
             return "undecidable", "未解決スレッド数を数えられなかった。レビューは来ている"
     elif unresolved_threads > 0:
         return "findings", "未解決のCodex指摘スレッドが %d件 残っている" % unresolved_threads
 
-    if unreadable_summary:
-        return "undecidable", "レビュー要約はあるが、表を読み取れなかった"
+    # **いまの head について読み取れた結果を最優先する。**
+    # 古い読めない要約より、いまのコミットの結論のほうが強い。
     if summary_kind == "broken":
         return "undecidable", "レビューが異常終了した。結論が無い"
     if summary_kind == "unknown":
@@ -164,6 +176,10 @@ def classify(head_sha, comments, reviews_for_head=0, unresolved_threads=0,
         return "clean", "このコミットのレビューが完了し、指摘が無い"
     if summary_kind == "running":
         return "pending", "このコミットのレビューが実行中"
+    if unreadable_for_head:
+        return "undecidable", "このコミットのレビュー要約を読み取れなかった"
+    if unreadable_unknown:
+        return "undecidable", "どのコミットのものか分からないレビュー要約があり、いまのコミットの結果が無い"
 
     # --- 3. いまの head について何も無いときだけ、枠切れが効く ---
     if quota:
