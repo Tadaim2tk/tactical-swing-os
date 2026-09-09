@@ -214,3 +214,52 @@ def test_time_exit_is_one_bar_later_than_scoring_horizon():
     execution_offset_from_idx0 = se.EXIT_DEADLINE_BARS   # idx0 + 5 が6本目
     assert execution_offset_from_idx0 == scoring_offset_from_k + 1, \
         "1バー差であることが前提。変えるなら両方の名前と文書を同時に直すこと"
+
+
+def test_no_fill_records_what_the_direction_would_have_earned():
+    """Entry帯へ戻らなかった判断が、方向として何Rぶん動いたかを残す。
+
+    2026-09-09 の観測: 約定した110件が -6.53R、約定しなかった32件が +24.53R。
+    Entry規則が「当たった判断ほど落とす」側に働いている可能性があり、
+    それを執行側の表だけで検算できるようにするための列。
+    """
+    # BUY entry 72-73、価格は一度も73へ戻らず上昇し続ける
+    bars = _ohlcv([(f"2026-07-0{i}", 74 + i, 75 + i, 73.5 + i, 74.5 + i) for i in range(1, 7)])
+    r = se.simulate_row(_row(), bars, "t")
+    assert r["status"] == "no_fill"
+    # 建値は約定した場合と同じ worst-in-zone (73.0)、risk = 73-70 = 3.0
+    # 5本目(FILL_WINDOW_BARS=5)の終値 = 74.5+5 = 79.5 → (79.5-73)/3 = 2.1667
+    assert abs(r["forgone_r"] - 2.1667) < 1e-3
+    assert pd.isna(r["r_result"]), "参加していないので執行Rは名乗らない"
+
+
+def test_short_no_fill_forgone_uses_short_direction():
+    """SELL は下落が利益。方向を取り違えると逆選択の符号が反転する。"""
+    bars = _ohlcv([(f"2026-07-0{i}", 70 - i, 70.5 - i, 69 - i, 69.5 - i) for i in range(1, 7)])
+    r = se.simulate_row(_row(side="SELL", entry_low="72.0", entry_high="73.0",
+                             sl="75.0", tp1="66.0"), bars, "t")
+    assert r["status"] == "no_fill"
+    # SELL の worst-in-zone は entry_low=72.0、risk = 75-72 = 3.0
+    # 5本目の終値 = 69.5-5 = 64.5 → (72-64.5)/3 = 2.5
+    assert abs(r["forgone_r"] - 2.5) < 1e-3
+
+
+def test_open_window_does_not_claim_forgone_r():
+    """窓が閉じていないうちは逃した分を名乗らない(判定不能は捏造しない)。"""
+    bars = _ohlcv([("2026-07-01", 75, 76, 74, 75.5), ("2026-07-02", 76, 77, 75, 76.5)])
+    r = se.simulate_row(_row(), bars, "t")
+    assert r["status"] == "open"
+    assert pd.isna(r["forgone_r"])
+
+
+def test_summary_reports_forgone_separately_from_realized():
+    """逃した分を実現Rに混ぜない。混ぜると建ててもいない玉の損益が成績になる。"""
+    sim = pd.DataFrame([
+        {"status": "filled_tp1", "r_result": 1.0, "capital_pct": 0.25, "forgone_r": float("nan")},
+        {"status": "no_fill", "r_result": float("nan"), "capital_pct": float("nan"), "forgone_r": 2.0},
+        {"status": "no_fill", "r_result": float("nan"), "capital_pct": float("nan"), "forgone_r": 1.0},
+    ])
+    out = se.summarize(sim)
+    assert out["gross_total_r"] == 1.0, "実現Rには no_fill を入れない"
+    assert out["no_fill_forgone_r"] == 3.0
+    assert out["no_fill_forgone_avg_r"] == 1.5
