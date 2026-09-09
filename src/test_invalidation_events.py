@@ -103,3 +103,71 @@ def test_writer_marks_retrospective_rows(tmp_path):
     assert "fired" in body and r.returncode == 0, r.stderr
     last = body.strip().splitlines()[-1].split(",")
     assert last[5] == "" and last[6] == "yes"          # fired_on 空 / 後日回収
+
+
+def test_daily_reconfirmation_does_not_create_a_new_firing(tmp_path):
+    """**毎日聞いたことは、当日発動した証拠にならない。** 再確認で発動を増やさない。"""
+    kw = _write(tmp_path, [
+        "2026-01-06,20260105_EXAMPLE_BUY,fired,example,2026-01-06T00:00:00Z,2026-01-06,no\n",
+        "2026-01-07,20260105_EXAMPLE_BUY,fired,example,2026-01-07T00:00:00Z,2026-01-06,no\n",
+        "2026-01-08,20260105_EXAMPLE_BUY,fired,example,2026-01-08T00:00:00Z,2026-01-06,no\n"])
+    got = fired_events(**kw)
+    assert len(got) == 1
+    assert got[0]["fired_on"] == "2026-01-06" and got[0]["check_date"] == "2026-01-06"
+
+
+def test_writer_does_not_invent_a_firing_date(tmp_path):
+    """日次で聞いても、回答に発動日が無ければ fired_on は空のまま。"""
+    repo = Path(__file__).resolve().parents[1]
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "signal_log.csv").write_text(
+        "date,signal_id,side\n2026-01-05,20260105_EXAMPLE_BUY,BUY\n", encoding="utf-8")
+    (tmp_path / "data" / "invalidation_checks.csv").write_text(HEAD, encoding="utf-8")
+    tool = str(repo / "tools" / "record_signal_extras.py")
+    for day in ("2026-01-06", "2026-01-07"):
+        r = subprocess.run([sys.executable, tool, "invalidation", day,
+                            "20260105_EXAMPLE_BUY=fired"], cwd=tmp_path,
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+    body = (tmp_path / "data" / "invalidation_checks.csv").read_text(encoding="utf-8")
+    for line in body.strip().splitlines()[1:]:
+        cols = line.split(",")
+        assert cols[5] == "", "翌日の再確認に新しい発動日が付いた: " + line
+    kw = {"inval_path": tmp_path / "data" / "invalidation_checks.csv",
+          "corrections_path": tmp_path / "data" / "nonexistent.csv"}
+    assert fired_events(**kw) == []
+    assert len(undated_fired(**kw)) == 1          # 判断ごとに1件
+
+
+def test_writer_accepts_an_explicit_firing_date(tmp_path):
+    repo = Path(__file__).resolve().parents[1]
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "signal_log.csv").write_text(
+        "date,signal_id,side\n2026-01-05,20260105_EXAMPLE_BUY,BUY\n", encoding="utf-8")
+    (tmp_path / "data" / "invalidation_checks.csv").write_text(HEAD, encoding="utf-8")
+    tool = str(repo / "tools" / "record_signal_extras.py")
+    r = subprocess.run([sys.executable, tool, "invalidation", "2026-01-12",
+                        "20260105_EXAMPLE_BUY=fired@2026-01-07"], cwd=tmp_path,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    cols = (tmp_path / "data" / "invalidation_checks.csv").read_text(
+        encoding="utf-8").strip().splitlines()[-1].split(",")
+    assert cols[5] == "2026-01-07" and cols[6] == "yes"
+
+
+def test_writer_rejects_impossible_or_conflicting_firing_dates(tmp_path):
+    repo = Path(__file__).resolve().parents[1]
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "signal_log.csv").write_text(
+        "date,signal_id,side\n2026-01-05,20260105_EXAMPLE_BUY,BUY\n", encoding="utf-8")
+    (tmp_path / "data" / "invalidation_checks.csv").write_text(
+        HEAD + "2026-01-08,20260105_EXAMPLE_BUY,fired,example,"
+               "2026-01-08T00:00:00Z,2026-01-07,no\n", encoding="utf-8")
+    tool = str(repo / "tools" / "record_signal_extras.py")
+    for arg in ("20260105_EXAMPLE_BUY=fired@2026-01-20",      # 確認日より後
+                "20260105_EXAMPLE_BUY=fired@2026-01-01",      # 判断が出る前
+                "20260105_EXAMPLE_BUY=fired@2026-01-09",      # 既存の発動日と食い違う
+                "20260105_EXAMPLE_BUY=not_fired@2026-01-07"):  # fired 以外に付けた
+        r = subprocess.run([sys.executable, tool, "invalidation", "2026-01-12", arg],
+                           cwd=tmp_path, capture_output=True, text=True)
+        assert r.returncode != 0, "通ってしまった: " + arg

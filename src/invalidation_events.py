@@ -62,23 +62,33 @@ def load_checks(inval_path: Path = INVAL_PATH,
 
 
 def fired_events(require_known_date: bool = True, **kw) -> list[dict]:
-    """`fired` の行を返す。
+    """`fired` の行を **1つの判断につき1件**返す。
 
     require_known_date=True（既定）では **`fired_on` が入っている行だけ**返す。
     手仕舞い日を使う較正はこちらを使うこと。`check_date` を発動日の代わりに
     しないこと。**聞いた日は発動した日ではない。**
+
+    毎日聞いていると、同じ判断が何日も `fired` と答える。**それは同じ1回の発動の
+    再確認であって、発動が増えたのではない。** 判断ごとに最初の1件だけ返す。
     """
-    out = []
+    first: dict[str, dict] = {}
     for r in load_checks(**kw):
         if (r.get("invalidation_fired") or "").strip() != "fired":
             continue
         if require_known_date and not (r.get("fired_on") or "").strip():
             continue
-        out.append(r)
-    return out
+        sid = (r.get("signal_id") or "").strip()
+        prev = first.get(sid)
+        if prev is None or (r.get("check_date") or "") < (prev.get("check_date") or ""):
+            first[sid] = r
+    return [first[k] for k in sorted(first)]
 
 
 def undated_fired(**kw) -> list[dict]:
-    """発動したが日付が分からない行。**除外した件数を黙って消さないために要る。**"""
+    """発動したが日付が分からない判断。**除外した件数を黙って消さないために要る。**
+
+    こちらも判断ごとに1件。ただし、あとから発動日が入った判断は含めない。
+    """
+    dated = {(r.get("signal_id") or "").strip() for r in fired_events(**kw)}
     return [r for r in fired_events(require_known_date=False, **kw)
-            if not (r.get("fired_on") or "").strip()]
+            if (r.get("signal_id") or "").strip() not in dated]

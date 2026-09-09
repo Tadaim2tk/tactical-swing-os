@@ -198,6 +198,19 @@ GPT出力（日次シグナルログ・週次レビュー・crypto週末レビ�
 「9/9に初めて発動を観測した行」と形がまったく同じで、`check_date >= 2026-09-09`
 で絞る較正コードは拾ってしまう。列にして、読む側でも落とすようにした。
 
+**`fired_on` は、回答に発動日が書いてあるときだけ入れる。**
+
+    python tools/record_signal_extras.py invalidation 2026-09-09 \
+      "20260903_GOLD_BUY_REVERSAL=fired@2026-09-05"
+
+`@日付` を付けなければ空のまま。**毎日聞いていることは、その日に発動した証拠に
+ならない。** 前日すでに `fired` だった判断を翌日も `fired` と答えただけで
+新しい発動日を作らない。確認日より後・判断が出る前・既存の発動日と食い違う日付は
+弾く。訂正したいときは `data/invalidation_corrections.csv` に追記する。
+
+読む側は **判断ごとに1件**だけ返す。同じ判断が何日も `fired` と答えるのは
+**同じ1回の発動の再確認**であって、発動が増えたのではない。
+
 較正から読むときは **`src/invalidation_events.py` を通すこと。**
 
     from invalidation_events import fired_events, undated_fired
