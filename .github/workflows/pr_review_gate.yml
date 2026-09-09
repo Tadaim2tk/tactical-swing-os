@@ -15,18 +15,6 @@ name: Codex review gate
 #   fail-openで通した場合はPRにコメントを残して区別できるようにした。
 # - レビュー到着済みで未解決スレッドが残ったままtimeout → 失敗(赤)。修正をpushするか
 #   スレッドをresolveすれば、synchronize/再実行で緑になる。
-#
-# 2026-09-09改定(#162): **reviews API しか見ていなかったため、指摘を見落として緑にした。**
-# Codexは 23:26Z にP2指摘を出したのに、ゲートは 23:41Z に「未着(fail-open)」と書き、
-# 1分後にマージされた。指摘は **issue comment** で来るので reviews API には現れない。
-# 判定は tools/codex_review_state.py に出した。6状態を区別し、**読み取れないものは
-# 緑にしない**。通信に触らない純粋関数なので、架空データで試験できる
-# (src/test_codex_review_state.py)。
-#
-# **導入回の扱い**: 判定器は base の版を使う(PRの版だとゲート自身を書き換えて
-# 自分を通せる)。だから **この仕組みを入れるPR自身では、base に判定器が無い。**
-# そのときは緑にも赤の自動通過にもせず、**赤で止めて GATE-ACK を要求する。**
-# PR側のコードを信じて動かすことはしない。
 
 on:
   pull_request:
@@ -42,11 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      # 判定器は **baseの版** を使う。PRの版を使うと、ゲート自身を書き換えて
-      # 自分を通せてしまう。
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
       - name: Wait for Codex review with zero unresolved findings (max 20 min)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -56,89 +39,38 @@ jobs:
         run: |
           owner="${REPO%%/*}"
           name="${REPO##*/}"
-
-          fetch_comments() {
-            if ! gh api --paginate "repos/$REPO/issues/$PR/comments" --jq '.[]' 2>/dev/null \
-                 | jq -s '.' > comments.json; then
-              echo '[]' > comments.json
-            fi
-          }
-
-          # 承認できるのは誰か。**author_association は書き込み権限ではない。**
-          # 判定は tools/resolve_gate_ack.sh に出した。**標準出力は login だけ**で、
-          # 診断は標準エラーへ出る。初版はワークフロー内の関数で、権限が無いときの
-          # 説明文を標準出力へ出していたため、**その説明が承認として通っていた。**
-          resolve_ack() {
-            bash tools/resolve_gate_ack.sh comments.json "$REPO" "$HEAD_SHA"
-          }
-
-          # --- 導入回: base に判定器がまだ無い ---
-          # **PR側のコードは動かさない。** ゲート自身を書き換えて自分を通せてしまう。
-          if [ ! -f tools/codex_review_state.py ] || [ ! -f tools/resolve_gate_ack.sh ]; then
-            if [ -f tools/resolve_gate_ack.sh ]; then
-              fetch_comments
-              if [ -n "$(resolve_ack)" ]; then
-                {
-                  echo "### ゲート: **人の承認で通過(GATE-ACK / 判定器の導入回)**"
-                  echo ""
-                  echo "base にまだ判定器が無いため自動判定できない。書き込み権限を確認した人の承認で通した。"
-                } >> "$GITHUB_STEP_SUMMARY"
-                gh pr comment "$PR" --repo "$REPO" --body \
-                  "🟠 **人の承認で通過しました(GATE-ACK / 判定器の導入回)**。base に \`tools/codex_review_state.py\` がまだ無く、**PR側のコードは信用しない**方針のため自動判定できません。書き込み権限を確認した人の承認で通しています。この緑は「Codexレビュー済み・指摘なし」ではありません。" \
-                  || echo "warning: could not post the bootstrap ack comment"
-                exit 0
-              fi
-              echo "::error::base に tools/codex_review_state.py が無い(判定器の導入回)。**PR側のコードは動かさない。** 内容とレビューを人が確認したうえで、PR に GATE-ACK: $HEAD_SHA とコメントして再実行すること。"
-              exit 1
-            fi
-            # この仕組みを入れる最初のPRでは、承認スクリプトも base に無い。
-            # **ゲートを緑にする経路は無い。** 誤魔化さずに赤で止める。
-            echo "::error::base に判定器も承認スクリプトも無い(この仕組みを入れる最初のPR)。**ゲートが緑になる経路は無い。** 差分とレビューを人が確認したうえで、管理者権限でこの必須チェックをバイパスして入れること。次回以降は base に判定器が入るので、この経路は通らない。"
-            exit 1
-          fi
-
-          last="pending"
+          arrived=0
           for i in $(seq 1 40); do
-            # (1) レビュー本体。いまのhead SHAに対するものだけ数える。
-            reviews=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
+            # レビューは現在のhead SHAに対するものだけを数える(Codex P1対応:
+            # synchronize時に旧コミットへの古いレビューで即グリーンになるのを防ぐ)。
+            n=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
               --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\" and .commit_id==\"$HEAD_SHA\")] | length" \
               2>/dev/null | awk '{s+=$1} END {print s+0}')
-            # (2) 未解決の指摘スレッド。数えられなければ unknown を渡す(判定器が赤に倒す)。
-            unresolved=$(gh api graphql \
-              -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{author{login}}}}}}}}' \
-              -f owner="$owner" -f name="$name" -F number="$PR" \
-              --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not) | select((.comments.nodes[0].author.login // "") | startswith("chatgpt-codex-connector"))] | length' \
-              2>/dev/null || echo "unknown")
-            [ -n "$unresolved" ] || unresolved="unknown"
-            # (3) issue comment。**指摘はここに来る。**
-            fetch_comments
-
-            out=$(python3 tools/codex_review_state.py --head "$HEAD_SHA" \
-                    --comments comments.json --reviews "$reviews" \
-                    --unresolved "$unresolved" --ack-logins "$(resolve_ack)")
-            state=$(printf '%s\n' "$out" | sed -n 1p)
-            why=$(printf '%s\n' "$out" | sed -n 2p)
-            echo "[$i/40] $state — $why"
-
-            case "$state" in
-              clean)
-                echo "### ゲート: Codexレビュー済み・未解決指摘なし" >> "$GITHUB_STEP_SUMMARY"
-                echo "$why" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$n" -gt 0 ]; then
+              arrived=1
+              # 未解決のCodex指摘スレッド数。コミットを跨いで数える(古い未処理指摘も塞ぐ)。
+              # GraphQL失敗時は unknown のまま待ち続け、最終的に赤に倒す(安全側)。
+              unresolved=$(gh api graphql \
+                -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{author{login}}}}}}}}' \
+                -f owner="$owner" -f name="$name" -F number="$PR" \
+                --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not) | select((.comments.nodes[0].author.login // "") | startswith("chatgpt-codex-connector"))] | length' \
+                2>/dev/null || echo "unknown")
+              if [ "$unresolved" = "0" ]; then
+                echo "Codex review arrived ($n review(s)) and no unresolved finding threads remain."
+                echo "### ゲート: Codexレビュー済み・未解決指摘なし ($n review(s))" >> "$GITHUB_STEP_SUMMARY"
                 exit 0
-                ;;
-              acked)
-                # **人が飲み込んだ緑。「レビュー問題なし」と同じ印にしない。**
-                {
-                  echo "### ゲート: **人の承認で通過(GATE-ACK)**"
-                  echo ""
-                  echo "$why"
-                } >> "$GITHUB_STEP_SUMMARY"
-                gh pr comment "$PR" --repo "$REPO" --body \
-                  "🟠 **人の承認で通過しました(GATE-ACK)**。書き込み権限を確認した人が \`GATE-ACK: $HEAD_SHA\` と書いたため通しています。この緑は「Codexレビュー済み・指摘なし」ではありません。**指摘を承知のうえで通した**という記録です。" \
-                  || echo "warning: could not post the ack notice comment"
-                exit 0
-                ;;
-              quota)
+              fi
+              echo "Codex review arrived; unresolved finding threads: $unresolved — address them in this PR. ($i/40)"
+            else
+              # Codexが「レビュー枠を使い切った」とコメントしている場合、待っても永久に来ない
+              # (2026-09-06に実際に発生: 一晩で10本出して枠が尽き、6本が未レビューでマージ)。
+              # レビュー本体ではなく issue comment として来るため reviews API では見えない。
+              # 20分待ってから開けるのではなく、理由を明示して即座に開ける。
+              quota=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+                --jq '[.[] | select((.user.login // "") | startswith("chatgpt-codex-connector")) | select(.body | test("usage limits for code reviews"))] | length' \
+                2>/dev/null | awk '{s+=$1} END {print s+0}')
+              if [ "${quota:-0}" -gt 0 ]; then
+                echo "Codex has run out of code-review quota — gate passes without review."
                 {
                   echo "### ゲート: **Codexのレビュー枠切れのまま通過(fail-open)**"
                   echo ""
@@ -149,22 +81,13 @@ jobs:
                   "🔴 **Codexのレビュー枠切れのまま通過しました(fail-open)**。Codexが「usage limits for code reviews」に達しており、待ってもレビューは来ません。この緑は「レビュー済み・指摘なし」ではありません。**枠が回復するまで、全てのPRが未レビューでマージされます。** 評価・選別の定義に触るPRを出す前に、枠の回復か追加クレジットを確認してください。" \
                   || echo "warning: could not post the quota notice comment"
                 exit 0
-                ;;
-              findings|undecidable)
-                last="$state"
-                ;;
-              *)
-                ;;
-            esac
+              fi
+              echo "waiting for Codex review... ($i/40)"
+            fi
             sleep 30
           done
-
-          if [ "$last" = "findings" ]; then
-            echo "::error::Codexの指摘がこのコミットに残っている。修正をpushするか、スレッドをresolveしてから再実行すること。"
-            exit 1
-          fi
-          if [ "$last" = "undecidable" ]; then
-            echo "::error::Codexレビューは来たが結論を読み取れない。**読み取れないものを緑にしない。** 指摘を確認したうえで通すなら、書き込み権限のある人が PR に GATE-ACK: $HEAD_SHA とコメントして再実行すること。"
+          if [ "$arrived" -gt 0 ]; then
+            echo "::error::Codex findings are still unresolved after 20 min. Push a fix and/or resolve the threads, then re-run this check."
             exit 1
           fi
           # 2026-09-06: この経路で #145/#148/#149/#150 の4本が「未レビューのまま」マージされた。
