@@ -15,14 +15,18 @@ OLD = "b" * 40
 BOT = {"login": "codex-bot-placeholder", "type": "Bot"}
 
 
-def _bot(body):
+T0 = "2026-01-01T00:00:00Z"      # レビュー事象の既定時刻
+T1 = "2026-01-02T00:00:00Z"      # 承認の既定時刻（レビューより後）
+
+
+def _bot(body, created_at=T0):
     return {"user": {"login": "chatgpt-codex-connector[bot]", "type": "Bot"},
-            "author_association": "NONE", "body": body}
+            "author_association": "NONE", "body": body, "created_at": created_at}
 
 
-def _human(body, login="example-maintainer"):
+def _human(body, login="example-maintainer", created_at=T1):
     return {"user": {"login": login, "type": "User"},
-            "author_association": "NONE", "body": body}
+            "author_association": "NONE", "body": body, "created_at": created_at}
 
 
 def _other_bot(body, login="example-other-bot"):
@@ -30,17 +34,18 @@ def _other_bot(body, login="example-other-bot"):
             "author_association": "MEMBER", "body": body}
 
 
-def _summary(sha, status="✅ **Completed**"):
+def _summary(sha, status="✅ **Completed**", at=T0):
     return _bot("<!-- codex-pull-request-review-summary -->\n\n"
                 "| Review | Status | Commit | Review trigger |\n"
                 "| --- | --- | --- | --- |\n"
-                "| 📝 **Code Review** | %s | `%s` | PR opened |\n" % (status, sha[:7]))
+                "| 📝 **Code Review** | %s <relative-time datetime=\"%s\">%s</relative-time> "
+                "| `%s` | PR opened |\n" % (status, at, at, sha[:7]))
 
 
-def _finding(sha, title="Example finding"):
+def _finding(sha, title="Example finding", at=T0):
     return _bot("\n### 💡 Codex Review\n\n"
                 "https://github.com/example/example/blob/%s/data/example.csv#L1\n"
-                "**![P2 Badge]  %s**\n\nExample body.\n" % (sha, title))
+                "**![P2 Badge]  %s**\n\nExample body.\n" % (sha, title), created_at=at)
 
 
 def test_issue_comment_finding_blocks():
@@ -236,3 +241,49 @@ def test_unreadable_summary_is_undecidable_not_pending():
 
 def test_bad_head_sha_is_undecidable():
     assert classify("not-a-sha", [_summary(HEAD)], 0, 0)[0] == "undecidable"
+
+
+# ---- #167 レビュー P1: 承認は指摘より後でなければ意味を持たない ----
+
+def test_ack_before_the_finding_does_not_count():
+    """レビュー保留中に先回りで書いた ACK は、あとから届いた指摘を承認したことにならない。"""
+    early = _human("GATE-ACK: %s" % HEAD, created_at="2026-01-01T00:00:00Z")
+    late_finding = _finding(HEAD, at="2026-01-03T00:00:00Z")
+    st, why = classify(HEAD, [_summary(HEAD), late_finding, early], 0, 0, ACK)
+    assert st == "findings"
+    assert "無効" in why
+
+
+def test_ack_after_the_finding_counts():
+    st, _ = classify(HEAD, [_summary(HEAD), _finding(HEAD, at="2026-01-03T00:00:00Z"),
+                            _human("GATE-ACK: %s" % HEAD, created_at="2026-01-04T00:00:00Z")],
+                     0, 0, ACK)
+    assert st == "acked"
+
+
+def test_ack_before_summary_completion_does_not_count():
+    """要約の完了時刻（表の datetime）も事象として数える。"""
+    st, _ = classify(HEAD, [_summary(HEAD, "❌ **Failed**", at="2026-01-05T00:00:00Z"),
+                            _human("GATE-ACK: %s" % HEAD, created_at="2026-01-02T00:00:00Z")],
+                     0, 0, ACK)
+    assert st == "undecidable"
+
+
+def test_ack_before_latest_review_submission_does_not_count():
+    """reviews API 側の提出時刻は呼ぶ側が渡す。それより前の ACK も無効。"""
+    st, _ = classify(HEAD, [_summary(HEAD), _finding(HEAD),
+                            _human("GATE-ACK: %s" % HEAD, created_at="2026-01-02T00:00:00Z")],
+                     1, 1, ACK, latest_review_at="2026-01-06T00:00:00Z")
+    assert st == "findings"
+
+
+def test_ack_without_timestamp_does_not_count():
+    st, _ = classify(HEAD, [_summary(HEAD), _finding(HEAD),
+                            _human("GATE-ACK: %s" % HEAD, created_at=None)], 0, 0, ACK)
+    assert st == "findings"
+
+
+def test_ack_with_nothing_reviewed_is_ignored():
+    """何も来ていない head への ACK は「見て受け入れた」ことにならない。未到着のまま。"""
+    st, _ = classify(HEAD, [_human("GATE-ACK: %s" % HEAD)], 0, 0, ACK)
+    assert st == "pending"
