@@ -20,9 +20,14 @@ def _bot(body):
             "author_association": "NONE", "body": body}
 
 
-def _human(body, role="OWNER"):
-    return {"user": {"login": "example-maintainer", "type": "User"},
-            "author_association": role, "body": body}
+def _human(body, login="example-maintainer"):
+    return {"user": {"login": login, "type": "User"},
+            "author_association": "NONE", "body": body}
+
+
+def _other_bot(body, login="example-other-bot"):
+    return {"user": {"login": login, "type": "Bot"},
+            "author_association": "MEMBER", "body": body}
 
 
 def _summary(sha, status="✅ **Completed**"):
@@ -114,19 +119,66 @@ def test_review_thread_findings_still_block():
     assert state == "findings"
 
 
+ACK = ["example-maintainer"]
+
+
 def test_ack_is_recorded_apart_from_clean():
     """人が飲み込んだことを「レビュー問題なし」と同じ緑にしない。"""
     assert classify(HEAD, [_summary(HEAD), _finding(HEAD),
                            _human("GATE-ACK: %s 確認済み" % HEAD)],
-                    0, 0)[0] == "acked"
-    assert classify(HEAD, [_summary(HEAD)], 0, 0)[0] == "clean"
+                    0, 0, ACK)[0] == "acked"
+    assert classify(HEAD, [_summary(HEAD)], 0, 0, ACK)[0] == "clean"
 
 
-def test_ack_needs_write_role_and_matching_sha():
+def test_ack_needs_verified_login_and_matching_sha():
+    # 別のコミット向けの承認は効かない
     assert classify(HEAD, [_summary(HEAD), _finding(HEAD),
-                           _human("GATE-ACK: %s" % OLD)], 0, 0)[0] == "findings"
+                           _human("GATE-ACK: %s" % OLD)], 0, 0, ACK)[0] == "findings"
+    # 権限を確認していない login の承認は効かない
     assert classify(HEAD, [_summary(HEAD), _finding(HEAD),
-                           _human("GATE-ACK: %s" % HEAD, role="NONE")], 0, 0)[0] == "findings"
+                           _human("GATE-ACK: %s" % HEAD, login="example-stranger")],
+                    0, 0, ACK)[0] == "findings"
+    # ack_logins を渡さなければ、承認そのものが成立しない
+    assert classify(HEAD, [_summary(HEAD), _finding(HEAD),
+                           _human("GATE-ACK: %s" % HEAD)], 0, 0, None)[0] == "findings"
+
+
+def test_bot_cannot_ack_even_with_member_association():
+    """`author_association` は書き込み権限ではない。Botに承認させない。"""
+    for c in (_other_bot("GATE-ACK: %s" % HEAD),
+              _other_bot("GATE-ACK: %s" % HEAD, login="example-maintainer")):
+        assert classify(HEAD, [_summary(HEAD), _finding(HEAD), c],
+                        0, 0, ACK)[0] == "findings"
+
+
+def test_quota_does_not_override_current_findings():
+    """枠切れ通知は head を持たない。**いまの指摘を古い通知で上書きしない。**"""
+    cs = [_bot("Codex has hit usage limits for code reviews."),
+          _summary(HEAD), _finding(HEAD)]
+    assert classify(HEAD, cs, 0, 2, ACK)[0] == "findings"
+    assert classify(HEAD, cs, 0, 0, ACK)[0] == "findings"
+    # 未解決スレッドだけでも、枠切れより優先する
+    assert classify(HEAD, [_bot("Codex has hit usage limits for code reviews.")],
+                    1, 3, ACK)[0] == "findings"
+    # いまの head について何も無いときだけ、枠切れが効く
+    assert classify(HEAD, [_bot("Codex has hit usage limits for code reviews.")],
+                    0, 0, ACK)[0] == "quota"
+
+
+def test_quota_does_not_override_undecidable():
+    cs = [_bot("Codex has hit usage limits for code reviews."),
+          _summary(HEAD, "❌ **Failed**")]
+    assert classify(HEAD, cs, 0, 0, ACK)[0] == "undecidable"
+
+
+def test_unreadable_summary_is_undecidable_not_pending():
+    """要約はあるのに表を読めない → 未到着ではない。時間切れで緑にしない。"""
+    broken = _bot("<!-- codex-pull-request-review-summary -->\n\n"
+                  "Code Review completed for %s (new layout, no table)\n" % HEAD)
+    assert classify(HEAD, [broken], 0, 0, ACK)[0] == "undecidable"
+    empty_table = _bot("<!-- codex-pull-request-review-summary -->\n\n"
+                       "| Review | Status |\n| --- | --- |\n")
+    assert classify(HEAD, [empty_table], 0, 0, ACK)[0] == "undecidable"
 
 
 def test_bad_head_sha_is_undecidable():

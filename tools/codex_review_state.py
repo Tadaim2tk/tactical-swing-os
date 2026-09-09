@@ -27,10 +27,19 @@ issue comment で出すので、reviews API には現れない。** ワークフ
   - 投稿者は `chatgpt-codex-connector[bot]` かつ Bot に限る（なりすまし避け）
 
 行き詰まったときの逃げ道は、**明示して記録に残す**形だけを認める。
-書き込み権のある人が `GATE-ACK: <head SHAの40桁>` とコメントすると通る。
-ただし **clean とは別の `acked` を返す。** 人が飲み込んだことと、レビューが
-問題なしと言ったことは別の事実で、同じ緑にすると後から区別できない。
+`GATE-ACK: <head SHAの40桁>` とコメントすると通る。ただし
+**clean とは別の `acked` を返す。** 人が飲み込んだことと、レビューが問題なしと
+言ったことは別の事実で、同じ緑にすると後から区別できない。
 SHAを含めるので、コミットが変われば承認は自動的に切れる。
+
+**誰が承認できるかは、ここでは決めない。** `author_association` は書き込み権限
+ではない（`MEMBER` を名乗るBotでも通ってしまった）。呼ぶ側が
+`repos/{owner}/{repo}/collaborators/{login}/permission` で **現在の書き込み権限を
+確かめ**、その結果を `ack_logins` に入れて渡す。渡されなければ承認は成立しない。
+投稿者が User であることもここで確かめる。
+
+判定の順番も設計のうち。**枠切れを先に見ると、いまの指摘を古い通知が上書きする。**
+枠切れ通知は head を持たないので、**いまの head について何も無いときだけ**効かせる。
 """
 import argparse
 import json
@@ -41,7 +50,6 @@ BOT_LOGIN = "chatgpt-codex-connector[bot]"
 SUMMARY_MARKER = "codex-pull-request-review-summary"
 QUOTA_MARK = "usage limits for code reviews"
 ACK_PREFIX = "GATE-ACK:"
-WRITE_ROLES = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 # 要約コメントの表: | 📝 **Code Review** | ✅ **Completed** ... | `fed98b0` | PR opened |
 ROW_SHA = re.compile(r"`([0-9a-f]{7,40})`")
@@ -81,64 +89,85 @@ def _status_kind(text):
     return "unknown"
 
 
-def classify(head_sha, comments, reviews_for_head=0, unresolved_threads=0):
+def classify(head_sha, comments, reviews_for_head=0, unresolved_threads=0,
+             ack_logins=None):
     """(state, reason) を返す。**ネットワークに触らない。**
 
     unresolved_threads に None を渡すと「数えられなかった」の意味になり、
     レビューが来ている場合は undecidable に倒す。
+
+    ack_logins は **呼ぶ側が書き込み権限を確認済みの login 集合**。
+    None または空なら、GATE-ACK は成立しない。
     """
     head_sha = (head_sha or "").strip().lower()
     if not re.fullmatch(r"[0-9a-f]{40}", head_sha):
         return "undecidable", "head SHA が40桁の16進ではない: %r" % head_sha
 
-    # 人による明示の承認。SHA付きなので、コミットが変われば効かなくなる。
-    for c in comments:
-        if (c.get("author_association") or "").upper() not in WRITE_ROLES:
-            continue
-        if _bot(c):
-            continue
-        if ("%s %s" % (ACK_PREFIX, head_sha)) in (c.get("body") or "").replace("\r", ""):
-            return "acked", "書き込み権のある人が GATE-ACK でこのコミットを承認した。**レビューが問題なしと言ったのではない**"
-
+    # --- 材料を先に全部そろえる。順番の都合で見落とさないため ---
     bots = [c for c in comments if _bot(c)]
-    if any(QUOTA_MARK in (c.get("body") or "") for c in bots):
-        return "quota", "Codexが利用上限に達している。待っても来ない"
-
-    # いまの head を指す指摘。blob URL の40桁で照合する。
     blob = "/blob/%s/" % head_sha
     findings = [c for c in bots
                 if SUMMARY_MARKER not in (c.get("body") or "")
                 and blob in (c.get("body") or "")]
+    quota = any(QUOTA_MARK in (c.get("body") or "") for c in bots)
 
-    # いまの head に対する要約（最後のものを見る。要約は編集で更新される）
-    summary_kind = None
+    summary_kind = None          # いまの head に対する要約の状態
+    unreadable_summary = False   # 要約はあるのに表を読めない
     for c in bots:
         body = c.get("body") or ""
         if SUMMARY_MARKER not in body:
             continue
-        for status, sha in _summary_rows(body):
+        rows = _summary_rows(body)
+        if not rows:
+            unreadable_summary = True
+            continue
+        matched = False
+        for status, sha in rows:
             if head_sha.startswith(sha):
                 summary_kind = _status_kind(status)
+                matched = True
+        # 要約に head が書かれているのに、表の行としては拾えなかった場合も読めない扱い
+        if not matched and (head_sha in body or head_sha[:7] in body):
+            unreadable_summary = True
 
-    if unresolved_threads is None:
-        if summary_kind or reviews_for_head or findings:
-            return "undecidable", "未解決スレッド数を数えられなかった。レビューは来ている"
-        return "pending", "未解決スレッド数を数えられなかったが、レビューもまだ無い"
+    # --- 1. 人の承認。権限は呼ぶ側が確認済みのものだけ受ける ---
+    allowed = {str(x).strip() for x in (ack_logins or []) if str(x).strip()}
+    if allowed:
+        needle = "%s %s" % (ACK_PREFIX, head_sha)
+        for c in comments:
+            u = c.get("user") or {}
+            if u.get("type") != "User" or u.get("login") not in allowed:
+                continue
+            if needle in (c.get("body") or "").replace("\r", ""):
+                return ("acked",
+                        "書き込み権限を確認した %s が GATE-ACK でこのコミットを承認した。"
+                        "**レビューが問題なしと言ったのではない**" % u.get("login"))
 
+    # --- 2. いまの head についての事実を先に見る。枠切れより優先する ---
     if findings:
         return "findings", "このコミットへの指摘が %d件 残っている" % len(findings)
-    if unresolved_threads > 0:
+    if unresolved_threads is None:
+        if summary_kind or unreadable_summary or reviews_for_head:
+            return "undecidable", "未解決スレッド数を数えられなかった。レビューは来ている"
+    elif unresolved_threads > 0:
         return "findings", "未解決のCodex指摘スレッドが %d件 残っている" % unresolved_threads
 
-    if summary_kind == "done":
-        return "clean", "このコミットのレビューが完了し、指摘が無い"
-    if summary_kind == "running":
-        return "pending", "このコミットのレビューが実行中"
+    if unreadable_summary:
+        return "undecidable", "レビュー要約はあるが、表を読み取れなかった"
     if summary_kind == "broken":
         return "undecidable", "レビューが異常終了した。結論が無い"
     if summary_kind == "unknown":
         return "undecidable", "要約の状態欄を読み取れなかった"
+    if unresolved_threads is None:
+        return "pending", "未解決スレッド数を数えられなかったが、レビューもまだ無い"
+    if summary_kind == "done":
+        return "clean", "このコミットのレビューが完了し、指摘が無い"
+    if summary_kind == "running":
+        return "pending", "このコミットのレビューが実行中"
 
+    # --- 3. いまの head について何も無いときだけ、枠切れが効く ---
+    if quota:
+        return "quota", "Codexが利用上限に達している。待っても来ない"
     if reviews_for_head > 0:
         return "clean", "このコミットへのレビューが %d件 あり、未解決スレッドが無い" % reviews_for_head
     return "pending", "このコミットへのレビューがまだ無い"
@@ -150,6 +179,8 @@ def main():
     ap.add_argument("--comments", required=True, help="issue comments の JSON 配列ファイル")
     ap.add_argument("--reviews", default="0")
     ap.add_argument("--unresolved", default="0", help="数えられなかったときは unknown")
+    ap.add_argument("--ack-logins", default="",
+                    help="書き込み権限を確認済みの login をカンマ区切りで。**確認は呼ぶ側の仕事**")
     a = ap.parse_args()
     try:
         comments = json.load(open(a.comments, encoding="utf-8"))
@@ -162,7 +193,8 @@ def main():
     except ValueError:
         reviews = 0
     unresolved = None if a.unresolved.strip() in ("", "unknown") else int(a.unresolved)
-    state, why = classify(a.head, comments, reviews, unresolved)
+    state, why = classify(a.head, comments, reviews, unresolved,
+                          [x for x in a.ack_logins.split(",") if x.strip()])
     print(state); print(why)
     return 0
 
