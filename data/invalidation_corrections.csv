@@ -1,0 +1,5 @@
+check_date,signal_id,field,value,reason,recorded_at
+2026-09-09,20260903_GOLD_BUY_REVERSAL,retrospective,yes,#162: 5営業日ぶんを2026-09-09にまとめて聞き直して回収した回答。check_date は聞いた日であって発動した日ではない,2026-09-09T00:15:00Z
+2026-09-09,20260903_GOLD_BUY_REVERSAL,fired_on,,#162: 発動日は 5営業日の窓のどこかで特定できない。**不明のまま残す**,2026-09-09T00:15:00Z
+2026-09-09,20260904_GOLD_BUY_PULLBACK,retrospective,yes,#162: 5営業日ぶんを2026-09-09にまとめて聞き直して回収した回答。check_date は聞いた日であって発動した日ではない,2026-09-09T00:15:00Z
+2026-09-09,20260904_GOLD_BUY_PULLBACK,fired_on,,#162: 発動日は 5営業日の窓のどこかで特定できない。**不明のまま残す**,2026-09-09T00:15:00Z

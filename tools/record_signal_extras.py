@@ -14,6 +14,8 @@ LOG28列は不変（append-only契約）なので、本文の1行申告はサイ
 usage:
   python tools/record_signal_extras.py basis 2026-09-07 two_point
   python tools/record_signal_extras.py invalidation 2026-09-07 "20260906_WTI_BUY_PULLBACK=not_fired,20260906_GOLD_BUY_REVERSAL=fired"
+  # 回答に発動日が書いてあるときだけ @日付 を付ける。**推定して埋めない**
+  python tools/record_signal_extras.py invalidation 2026-09-09 "20260903_GOLD_BUY_REVERSAL=fired@2026-09-05"
 
 第4引数で生成経路を指定する(既定 chatgpt_app)。同じプロンプトを
 scripts/tso_daily_gpt.sh のターミナル経路でも使うため、決め打ちにすると provenance が
@@ -89,6 +91,69 @@ def _business_days_since(start: str, end: str) -> int:
     return n
 
 
+def _ledger_dates() -> dict[str, str]:
+    return {(r.get("signal_id") or "").strip(): (r.get("date") or "").strip()
+            for r in _read(LEDGER_PATH)}
+
+
+def _fired_dating(sid: str, verdict: str, check_date: str, fired_on: str,
+                  history: list[dict], ledger: dict[str, str]) -> tuple[str, str]:
+    """(fired_on, retrospective) を決める。**聞いた日を発動日にしない(#162 Codex P2)。**
+
+    初版は「前回から1営業日以内なら fired_on = check_date」にしていた。**誤り。**
+    毎日聞いたことは、その日に発動した証拠にならない。前日すでに fired だった判断を
+    翌日も fired と答えただけで、新しい発動日が生まれていた。
+
+    **fired_on は、回答に発動日が明示されたときだけ入れる。** 無ければ空のまま。
+    空は「発動したが日付は不明」であって「発動していない」ではない。
+
+    retrospective は別の話で、**聞き方**についての事実。前回聞いた日（無ければ
+    判断が出た日）から1営業日を超えていれば、まとめて回収した回答である。
+    """
+    prior = max((r.get("check_date", "") for r in history
+                 if r.get("signal_id") == sid and r.get("check_date", "") < check_date),
+                default="")
+    base = prior or ledger.get(sid, "")
+    if not base:
+        retro = "unknown"
+    else:
+        retro = "no" if _business_days_since(base, check_date) <= 1 else "yes"
+    if verdict != "fired":
+        return "", retro
+    return fired_on, retro
+
+
+def _parse_fired_on(sid: str, verdict: str, token: str, check_date: str,
+                    history: list[dict], ledger: dict[str, str]) -> str:
+    """`<signal_id>=fired@YYYY-MM-DD` の日付部分を検査して返す。
+
+    **発動日は明示された根拠があるときだけ受け取る。** 推定して埋めない。
+    """
+    if not token:
+        return ""
+    if verdict != "fired":
+        raise SystemExit(f"{sid}: 発動日は fired にしか付けられない ('{verdict}@{token}')")
+    try:
+        d = date.fromisoformat(token)
+    except ValueError:
+        raise SystemExit(f"{sid}: 発動日 '{token}' が YYYY-MM-DD ではない")
+    if d.isoformat() > check_date:
+        raise SystemExit(f"{sid}: 発動日 {token} が確認日 {check_date} より後")
+    opened = ledger.get(sid, "")
+    if opened and d.isoformat() < opened:
+        raise SystemExit(f"{sid}: 発動日 {token} が判断の出た日 {opened} より前")
+    # すでに別の発動日が記録されていれば、どちらが本当か分からない。黙って上書きしない。
+    for r in history:
+        if r.get("signal_id") != sid:
+            continue
+        prev = (r.get("fired_on") or "").strip()
+        if prev and prev != d.isoformat():
+            raise SystemExit(
+                f"{sid}: すでに発動日 {prev} が記録されている（{r.get('check_date')} の行）。"
+                f"{token} と食い違う。訂正するなら data/invalidation_corrections.csv に追記すること")
+    return d.isoformat()
+
+
 def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
     """台帳上まだ窓の内側にある方向あり判断のうち、過去に fired と記録されておらず、
     今回の申告にも含まれていない signal_id を返す。
@@ -152,8 +217,13 @@ def main() -> int:
             if not part:
                 continue
             if "=" not in part:
-                raise SystemExit(f"書式違反: '<signal_id>=fired|not_fired|unknown' が必要 ('{part}')")
+                raise SystemExit(
+                    "書式違反: '<signal_id>=fired|not_fired|unknown' が必要 "
+                    f"(発動日が分かるときだけ '=fired@YYYY-MM-DD') ('{part}')")
             sid, verdict = (x.strip() for x in part.split("=", 1))
+            fired_on_token = ""
+            if "@" in verdict:
+                verdict, fired_on_token = (x.strip() for x in verdict.split("@", 1))
             if verdict not in INVAL_VOCAB:
                 raise SystemExit(f"{sid}: '{verdict}' は閉じた語彙にない。許容 {sorted(INVAL_VOCAB)}")
             if not sid:
@@ -166,14 +236,26 @@ def main() -> int:
                     f"{sid} が同じ行に矛盾する値で2回現れている: "
                     f"'{prev[sid]}' と '{verdict}'。どちらが正しいか確認して出し直すこと")
             rows.append({"check_date": day, "signal_id": sid, "invalidation_fired": verdict,
-                         "source": source, "recorded_at": NOW})
+                         "source": source, "recorded_at": NOW,
+                         "_fired_on_token": fired_on_token})
+        hist, led = _read(INVAL_PATH), _ledger_dates()
+        for r in rows:
+            token = _parse_fired_on(r["signal_id"], r["invalidation_fired"],
+                                    r.pop("_fired_on_token"), day, hist, led)
+            r["fired_on"], r["retrospective"] = _fired_dating(
+                r["signal_id"], r["invalidation_fired"], day, token, hist, led)
         if not rows:
             raise SystemExit("記録する項目が無い")
         missing = _undeclared_open(day, {r["signal_id"] for r in rows})
-        n = _append(INVAL_PATH, ["check_date", "signal_id", "invalidation_fired", "source", "recorded_at"],
+        n = _append(INVAL_PATH,
+                    ["check_date", "signal_id", "invalidation_fired", "source", "recorded_at",
+                     "fired_on", "retrospective"],
                     rows, ("check_date", "signal_id"))
         for r in rows[:n]:
-            print(f"recorded invalidation: {r['signal_id']} -> {r['invalidation_fired']}")
+            when = r["fired_on"] or ("発動日 **不明**（後日まとめて回収）"
+                                     if r["invalidation_fired"] == "fired" else "")
+            print(f"recorded invalidation: {r['signal_id']} -> {r['invalidation_fired']}"
+                  + (f"  {when}" if when else ""))
         if missing:
             print(f"!! 申告漏れ: 未決着の方向あり判断 {len(missing)} 件が今回の申告に無い: "
                   + ", ".join(missing), file=sys.stderr)
