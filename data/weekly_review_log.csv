@@ -1,2 +1,3 @@
 week_start,week_end,total_signals,a_signals,b_signals,no_trade_signals,closed_signals,pending_signals,skipped_signals,not_applicable_signals,win_rate,profit_factor,total_r,average_r,max_win_r,max_loss_r,best_asset,worst_asset,next_week_mode,max_daily_risk_pct,rule_change_1,rule_change_2,rule_change_3,evaluation_source,latest_evaluations_available,fallback_used,signal_source,prediction_log_rows,prediction_score_rows,prediction_awaiting_rows
 2026-08-30,2026-09-05,70,0,13,57,0,70,0,0,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,予測ログは評価期間中（awaiting_horizon）,データ不足,,prediction_log_scores,False,True,prediction_log,70,70,70
+2026-09-06,2026-09-12,40,0,6,34,0,6,0,34,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,予測ログは評価期間中（awaiting_horizon）,データ不足,,prediction_log_scores,False,True,prediction_log,40,40,40
