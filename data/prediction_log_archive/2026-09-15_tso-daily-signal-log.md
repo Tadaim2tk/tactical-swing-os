@@ -1,5 +1,5 @@
 <!-- source: ChatGPT会話「TSO Daily Signal Log v2」定時実行 2026-09-15 07:00 JST -->
-<!-- transport: DOM innerText -> Blob download -> tools/archive_gpt_prose.py -->
+<!-- transport: /backend-api/conversation (raw markdown, Bearer=/api/auth/session) -> Blob file with TSO_DAILY delimiter -> tools/archive_gpt_prose.py -->
 <!-- archived_at: 2026-09-15T03:04:24Z / chars: 18024 / 値は無修正 -->
 
 # TSO Daily Signal Log v2 — 2026-09-15
