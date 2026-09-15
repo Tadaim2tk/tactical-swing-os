@@ -39,6 +39,12 @@ ARCHIVE = Path("data/prediction_log_archive")
 HEADER = re.compile(r"^===== TSO_DAILY (\d{4}-\d{2}-\d{2}|unknown) \((\d+) chars\) =====$", re.M)
 JP_DATE = re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日")
 ISO_DATE = re.compile(r"— (\d{4}-\d{2}-\d{2})")
+# レポート自身が名乗る実行日。前置きの後に来ることがある(7/27)
+RUN_DATE = re.compile(r"実行日[：:]\s*\**\s*(\d{4})年(\d{1,2})月(\d{1,2})日")
+# 見出し行「# TSO Daily Signal Log v2 — <日付>」が先頭以外にある場合
+TITLE_LINE = re.compile(
+    r"^#*\s*\**\s*TSO Daily Signal Log v2[^\n]{0,20}?"
+    r"(?:(?P<iso>\d{4}-\d{2}-\d{2})|(?P<y>\d{4})年(?P<mo>\d{1,2})月(?P<d>\d{1,2})日)", re.M)
 
 
 def detect_day(text: str):
@@ -53,6 +59,18 @@ def detect_day(text: str):
     m = JP_DATE.search(text[:300])
     if m:
         return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    # 先頭300字に無い場合(#171 Codex P2): 7/27 は「タスクのプロンプトを修正しました…」
+    # という前置きの後に「**実行日：2026年7月27日**」が来ていて、台帳には10行入って
+    # いるのにアーカイブから落ちた。窓を広げるだけだと本文中の「7月28日の終値」の
+    # ような日付を拾うので、**レポート自身の見出し語彙に限って**全文を探す。
+    m = RUN_DATE.search(text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    m = TITLE_LINE.search(text)
+    if m:
+        if m.group("iso"):
+            return m.group("iso")
+        return f"{m.group('y')}-{int(m.group('mo')):02d}-{int(m.group('d')):02d}"
     return None
 
 
