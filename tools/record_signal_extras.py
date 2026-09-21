@@ -89,19 +89,31 @@ def _business_days_since(start: str, end: str) -> int:
     return n
 
 
+def _fifth_business_day(day: str) -> date:
+    """day の翌日から数えて5本目の平日。祝日は考慮しない(_business_days_since と同じ)。"""
+    cur, n = date.fromisoformat(day), 0
+    while n < WINDOW_BUSINESS_DAYS:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            n += 1
+    return cur
+
+
 def _window_open(day: str, check_date: str) -> bool:
-    """check_date の朝の時点で、day に出した判断の5営業日窓がまだ閉じていないか。
+    """check_date の朝の確認で、day に出した判断をまだ聞く必要があるか。
 
-    窓は day の翌営業日から5本。朝の確認で見えているのは前日の終値までなので、
-    (day, check_date の前日] の平日数が5未満なら、5本目はまだ終わっていない。
+    窓は day の翌営業日から5本。**5本目の値動きを観測できるのは、その翌朝の確認が最初**
+    なので、5本目の翌日の確認までは開けておく(#172 Codex P1)。
 
-    以前は (day, check_date] の平日数が5を超えたら閉じた、としていた。平日の確認では
-    同じ結果になるが、**週末の確認では平日カウントが進まない**ため、金曜に5本目が
-    終わった判断を土日も「未決着」と数え続け、GPTが正しく外したものを申告漏れと
-    警告していた(2026-09-19/20 の 20260912_BTC_SELL_PULLBACK)。
+    経緯: 最初は (day, check_date] の平日数 > 5 で閉じていた。これは平日だと5本目の
+    翌朝に既に閉じていて最終日を一度も観測できず、週末だけ偶然開いていた。それを
+    「週末に閉じない誤警告」と読み違えて前日基準に直したら、最終日の観測が常に
+    落ちる形になった。実例: 20260912_BTC_SELL は 9/18(5本目)に 80850 を超え、
+    9/19 の本文は FINAL_DAY_INVALIDATION_FIRED と書いているのに、1行欄に無く、
+    突合も黙っていたため fired が台帳に入らなかった。
+    最終日の発動が落ちると、発動率は系統的に低く出る。
     """
-    prev = (date.fromisoformat(check_date) - timedelta(days=1)).isoformat()
-    return _business_days_since(day, prev) < WINDOW_BUSINESS_DAYS
+    return date.fromisoformat(check_date) <= _fifth_business_day(day) + timedelta(days=1)
 
 
 def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:

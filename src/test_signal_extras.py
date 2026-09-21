@@ -102,13 +102,13 @@ def test_no_trade_rows_are_not_warned(repo):
 
 
 def test_signal_past_the_window_is_not_warned(repo):
-    """5営業日を過ぎたものは聞き直す対象ではない(契約側の窓に合わせる)。
+    """5本目の翌朝の確認を過ぎたものは聞き直す対象ではない。
 
-    2026-09-01(火)から 09-09(水)までの平日は6日なので窓の外。
+    2026-09-01(火)の5本目は 9/8。9/9 の朝が 9/8 を観測する最後の確認で、9/10 には閉じる。
     """
     _ledger(repo, [("2026-09-01", "OLD", "WTI", "BUY")])
-    r = run(["invalidation", "2026-09-09", "X=not_fired"], repo)
-    assert "OLD" not in r.stderr
+    assert "OLD" in run(["invalidation", "2026-09-09", "X=not_fired"], repo).stderr
+    assert "OLD" not in run(["invalidation", "2026-09-10", "X=not_fired"], repo).stderr
 
 
 def test_same_day_signal_is_not_warned(repo):
@@ -148,17 +148,17 @@ def test_other_day_record_does_not_count_as_declared(repo):
     assert "A_WTI" in r.stderr
 
 
-def test_weekend_check_does_not_keep_a_finished_window_open(repo):
-    """金曜に5本目が終わった判断を、土日の確認で未決着と数えない。
+def test_final_day_is_observed_on_the_morning_after_even_on_a_weekend(repo):
+    """5本目が金曜なら、土曜の朝の確認がその値動きを観測する最初で最後の機会(#172 Codex P1)。
 
-    2026-09-12(土)の判断の窓は 9/14〜9/18。9/19(土)の朝には終わっている。
-    平日カウントは週末に進まないので、(day, check_date] で数えると土日のあいだ
-    ずっと「5本=まだ窓の内側」に見え、GPTが正しく外したものを申告漏れと警告していた。
+    2026-09-12(土)の判断の5本目は 9/18(金)。9/19(土)の朝にまだ聞く。ここで閉じると
+    最終日の発動が永久に落ち、発動率が系統的に低く出る(実例: 20260912_BTC_SELL)。
+    日曜(9/20)には閉じる。平日カウントは週末に進まないので、日曜を開けたままにしない。
     """
     _ledger(repo, [("2026-09-12", "BTC_SAT", "BTC", "SELL")])
-    for c in ("2026-09-19", "2026-09-20", "2026-09-21"):
-        r = run(["invalidation", c, "X=not_fired"], repo)
-        assert "BTC_SAT" not in r.stderr, c
+    assert "BTC_SAT" in run(["invalidation", "2026-09-19", "X=not_fired"], repo).stderr
+    for c in ("2026-09-20", "2026-09-21"):
+        assert "BTC_SAT" not in run(["invalidation", c, "Y=not_fired"], repo).stderr, c
 
 
 def test_last_business_day_of_the_window_is_still_open(repo):
