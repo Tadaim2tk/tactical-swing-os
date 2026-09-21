@@ -89,6 +89,21 @@ def _business_days_since(start: str, end: str) -> int:
     return n
 
 
+def _window_open(day: str, check_date: str) -> bool:
+    """check_date の朝の時点で、day に出した判断の5営業日窓がまだ閉じていないか。
+
+    窓は day の翌営業日から5本。朝の確認で見えているのは前日の終値までなので、
+    (day, check_date の前日] の平日数が5未満なら、5本目はまだ終わっていない。
+
+    以前は (day, check_date] の平日数が5を超えたら閉じた、としていた。平日の確認では
+    同じ結果になるが、**週末の確認では平日カウントが進まない**ため、金曜に5本目が
+    終わった判断を土日も「未決着」と数え続け、GPTが正しく外したものを申告漏れと
+    警告していた(2026-09-19/20 の 20260912_BTC_SELL_PULLBACK)。
+    """
+    prev = (date.fromisoformat(check_date) - timedelta(days=1)).isoformat()
+    return _business_days_since(day, prev) < WINDOW_BUSINESS_DAYS
+
+
 def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
     """台帳上まだ窓の内側にある方向あり判断のうち、過去に fired と記録されておらず、
     今回の申告にも含まれていない signal_id を返す。
@@ -119,7 +134,7 @@ def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
             continue
         if not day or day >= check_date:
             continue          # 当日ぶんはまだ確認しようがない
-        if _business_days_since(day, check_date) > WINDOW_BUSINESS_DAYS:
+        if not _window_open(day, check_date):
             continue          # 窓が閉じた
         if sid in fired or sid in declared:
             continue

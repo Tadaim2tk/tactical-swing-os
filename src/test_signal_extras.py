@@ -146,3 +146,23 @@ def test_other_day_record_does_not_count_as_declared(repo):
     assert run(["invalidation", "2026-09-08", "A_WTI=not_fired"], repo).returncode == 0
     r = run(["invalidation", "2026-09-09", "OTHER=not_fired"], repo)
     assert "A_WTI" in r.stderr
+
+
+def test_weekend_check_does_not_keep_a_finished_window_open(repo):
+    """金曜に5本目が終わった判断を、土日の確認で未決着と数えない。
+
+    2026-09-12(土)の判断の窓は 9/14〜9/18。9/19(土)の朝には終わっている。
+    平日カウントは週末に進まないので、(day, check_date] で数えると土日のあいだ
+    ずっと「5本=まだ窓の内側」に見え、GPTが正しく外したものを申告漏れと警告していた。
+    """
+    _ledger(repo, [("2026-09-12", "BTC_SAT", "BTC", "SELL")])
+    for c in ("2026-09-19", "2026-09-20", "2026-09-21"):
+        r = run(["invalidation", c, "X=not_fired"], repo)
+        assert "BTC_SAT" not in r.stderr, c
+
+
+def test_last_business_day_of_the_window_is_still_open(repo):
+    """5本目の当日朝(9/18 金)はまだ窓の内側。ここで外すと最後の1日を聞き漏らす。"""
+    _ledger(repo, [("2026-09-12", "BTC_SAT", "BTC", "SELL")])
+    r = run(["invalidation", "2026-09-18", "X=not_fired"], repo)
+    assert "BTC_SAT" in r.stderr
