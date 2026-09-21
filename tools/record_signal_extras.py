@@ -89,6 +89,33 @@ def _business_days_since(start: str, end: str) -> int:
     return n
 
 
+def _fifth_business_day(day: str) -> date:
+    """day の翌日から数えて5本目の平日。祝日は考慮しない(_business_days_since と同じ)。"""
+    cur, n = date.fromisoformat(day), 0
+    while n < WINDOW_BUSINESS_DAYS:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            n += 1
+    return cur
+
+
+def _window_open(day: str, check_date: str) -> bool:
+    """check_date の朝の確認で、day に出した判断をまだ聞く必要があるか。
+
+    窓は day の翌営業日から5本。**5本目の値動きを観測できるのは、その翌朝の確認が最初**
+    なので、5本目の翌日の確認までは開けておく(#172 Codex P1)。
+
+    経緯: 最初は (day, check_date] の平日数 > 5 で閉じていた。これは平日だと5本目の
+    翌朝に既に閉じていて最終日を一度も観測できず、週末だけ偶然開いていた。それを
+    「週末に閉じない誤警告」と読み違えて前日基準に直したら、最終日の観測が常に
+    落ちる形になった。実例: 20260912_BTC_SELL は 9/18(5本目)に 80850 を超え、
+    9/19 の本文は FINAL_DAY_INVALIDATION_FIRED と書いているのに、1行欄に無く、
+    突合も黙っていたため fired が台帳に入らなかった。
+    最終日の発動が落ちると、発動率は系統的に低く出る。
+    """
+    return date.fromisoformat(check_date) <= _fifth_business_day(day) + timedelta(days=1)
+
+
 def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
     """台帳上まだ窓の内側にある方向あり判断のうち、過去に fired と記録されておらず、
     今回の申告にも含まれていない signal_id を返す。
@@ -119,7 +146,7 @@ def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
             continue
         if not day or day >= check_date:
             continue          # 当日ぶんはまだ確認しようがない
-        if _business_days_since(day, check_date) > WINDOW_BUSINESS_DAYS:
+        if not _window_open(day, check_date):
             continue          # 窓が閉じた
         if sid in fired or sid in declared:
             continue
