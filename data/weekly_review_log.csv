@@ -2,3 +2,4 @@ week_start,week_end,total_signals,a_signals,b_signals,no_trade_signals,closed_si
 2026-08-30,2026-09-05,70,0,13,57,0,70,0,0,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,予測ログは評価期間中（awaiting_horizon）,データ不足,,prediction_log_scores,False,True,prediction_log,70,70,70
 2026-09-06,2026-09-12,40,0,6,34,0,6,0,34,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,予測ログは評価期間中（awaiting_horizon）,データ不足,,prediction_log_scores,False,True,prediction_log,40,40,40
 2026-09-13,2026-09-19,30,0,0,30,0,0,0,30,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,データ不足,,,prediction_log_scores,False,True,prediction_log,30,30,30
+2026-09-20,2026-09-26,20,0,0,20,0,0,0,20,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,データ不足,,,prediction_log_scores,False,True,prediction_log,20,20,20
