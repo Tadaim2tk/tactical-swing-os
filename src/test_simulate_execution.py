@@ -475,3 +475,24 @@ def test_half_exit_breakeven_cannot_record_a_loss_when_tp1_lands_on_the_deadline
     assert abs(r - (0.5 * 1.0 + 0.5 * (72.5 - 73.0) / 3.0)) < 1e-3, "元のSL版は終値で返上"
     assert abs(r_be - 0.5) < 1e-3, "建値版は建値で止まる。残りは0"
     assert r_be > r
+
+
+# --- 確定した行を、価格窓の短い再実行で open に戻さない(#173 Codex P2) ---
+
+def test_finalized_row_survives_a_rerun_that_only_knows_less():
+    """main の夜間実行が no_fill で閉じた行を、古い価格で回した手元の open で上書きしない。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "no_fill", "forgone_r": 0.5269,
+                          "chase_status": "chase_tp1", "chase_r": 0.23, "r_result": float("nan")}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "open", "forgone_r": float("nan"),
+                         "chase_status": "open", "chase_r": float("nan"), "r_result": float("nan")}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS))
+    r = out.set_index("signal_id").loc["S"]
+    assert r["status"] == "no_fill" and abs(r["forgone_r"] - 0.5269) < 1e-9 and r["chase_status"] == "chase_tp1"
+
+
+def test_new_final_result_replaces_open():
+    """open → 確定は普通の前進。止めない。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "open"}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "filled_tp1", "r_result": 1.0}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS))
+    assert out.set_index("signal_id").loc["S", "status"] == "filled_tp1"
