@@ -41,6 +41,7 @@ def test_contradictory_duplicate_in_one_batch_is_rejected(repo):
 
 
 def test_identical_duplicate_in_one_batch_writes_once(repo):
+    _ledger(repo, [("2026-08-03", "S1", "WTI", "BUY")])   # 台帳に無い id は拒否される(#173)
     r = run(["invalidation", "2026-09-09", "S1=fired,S1=fired"], repo)
     assert r.returncode == 0
     assert len(_rows(repo, "invalidation_checks.csv")) == 1
@@ -65,6 +66,7 @@ def test_bad_invalidation_syntax_is_rejected(repo, bad):
 
 
 def test_append_only_across_runs(repo):
+    _ledger(repo, [("2026-08-03", "S1", "WTI", "BUY")])   # 台帳に無い id は拒否される(#173)
     run(["invalidation", "2026-09-09", "S1=not_fired"], repo)
     run(["invalidation", "2026-09-09", "S1=fired"], repo)   # 2回目は無視される
     rows = _rows(repo, "invalidation_checks.csv")
@@ -106,7 +108,7 @@ def test_signal_past_the_window_is_not_warned(repo):
 
     2026-09-01(火)の5本目は 9/8。9/9 の朝が 9/8 を観測する最後の確認で、9/10 には閉じる。
     """
-    _ledger(repo, [("2026-09-01", "OLD", "WTI", "BUY")])
+    _ledger(repo, [("2026-08-03", "X", "WTI", "BUY"), ("2026-09-01", "OLD", "WTI", "BUY")])
     assert "OLD" in run(["invalidation", "2026-09-09", "X=not_fired"], repo).stderr
     assert "OLD" not in run(["invalidation", "2026-09-10", "X=not_fired"], repo).stderr
 
@@ -142,7 +144,7 @@ def test_previously_recorded_same_day_counts_as_declared(repo):
 
 def test_other_day_record_does_not_count_as_declared(repo):
     """別の日の記録では今日の申告漏れは埋まらない。毎日聞き直すのが契約。"""
-    _ledger(repo, [("2026-09-07", "A_WTI", "WTI", "BUY")])
+    _ledger(repo, [("2026-08-03", "OTHER", "WTI", "BUY"), ("2026-09-07", "A_WTI", "WTI", "BUY")])
     assert run(["invalidation", "2026-09-08", "A_WTI=not_fired"], repo).returncode == 0
     r = run(["invalidation", "2026-09-09", "OTHER=not_fired"], repo)
     assert "A_WTI" in r.stderr
@@ -155,7 +157,7 @@ def test_final_day_is_observed_on_the_morning_after_even_on_a_weekend(repo):
     最終日の発動が永久に落ち、発動率が系統的に低く出る(実例: 20260912_BTC_SELL)。
     日曜(9/20)には閉じる。平日カウントは週末に進まないので、日曜を開けたままにしない。
     """
-    _ledger(repo, [("2026-09-12", "BTC_SAT", "BTC", "SELL")])
+    _ledger(repo, [("2026-08-03", "X", "WTI", "BUY"), ("2026-08-03", "Y", "WTI", "BUY"), ("2026-09-12", "BTC_SAT", "BTC", "SELL")])
     assert "BTC_SAT" in run(["invalidation", "2026-09-19", "X=not_fired"], repo).stderr
     for c in ("2026-09-20", "2026-09-21"):
         assert "BTC_SAT" not in run(["invalidation", c, "Y=not_fired"], repo).stderr, c
@@ -163,6 +165,32 @@ def test_final_day_is_observed_on_the_morning_after_even_on_a_weekend(repo):
 
 def test_last_business_day_of_the_window_is_still_open(repo):
     """5本目の当日朝(9/18 金)はまだ窓の内側。ここで外すと最後の1日を聞き漏らす。"""
-    _ledger(repo, [("2026-09-12", "BTC_SAT", "BTC", "SELL")])
+    _ledger(repo, [("2026-08-03", "X", "WTI", "BUY"), ("2026-09-12", "BTC_SAT", "BTC", "SELL")])
     r = run(["invalidation", "2026-09-18", "X=not_fired"], repo)
     assert "BTC_SAT" in r.stderr
+
+
+# --- 台帳に無い / 判断日より前の確認は記録しない、--check-only は書かない（#173 Codex P2） ---
+
+def test_check_before_signal_date_is_refused(repo):
+    """9/22 に 9/24 の判断を確認した行は時系列上あり得ない。入口で止める。"""
+    _ledger(repo, [("2026-09-24", "BTC_24", "BTC", "BUY")])
+    r = run(["invalidation", "2026-09-22", "BTC_24=not_fired"], repo)
+    assert r.returncode != 0 and "前の確認日" in r.stdout + r.stderr
+    assert _rows(repo, "invalidation_checks.csv") == []
+
+
+def test_unknown_signal_id_is_refused(repo):
+    """台帳に無い signal_id は転記ミスか未取込。黙って記録しない。"""
+    _ledger(repo, [("2026-09-24", "BTC_24", "BTC", "BUY")])
+    r = run(["invalidation", "2026-09-25", "BTC_42=not_fired"], repo)
+    assert r.returncode != 0 and "台帳" in r.stdout + r.stderr
+    assert _rows(repo, "invalidation_checks.csv") == []
+
+
+def test_check_only_reports_gaps_without_writing(repo):
+    """突合だけ見る用。記録コマンドを読み取りに使って偽の行を作った事故の再発防止。"""
+    _ledger(repo, [("2026-09-24", "BTC_24", "BTC", "BUY"), ("2026-09-24", "GOLD_24", "GOLD", "BUY")])
+    r = run(["invalidation", "2026-09-25", "BTC_24=not_fired", "--check-only"], repo)
+    assert r.returncode == 0 and "GOLD_24" in r.stderr
+    assert _rows(repo, "invalidation_checks.csv") == [], "何も書かない"

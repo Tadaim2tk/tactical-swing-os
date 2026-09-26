@@ -411,7 +411,30 @@ def half_exit_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, float]:
             round(booked + rest * r_be, 4))
 
 
-def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None) -> pd.DataFrame:
+# 確定した行を、価格窓の短い再実行で open に戻さない(#173 Codex P2)。
+# 採点側の _keep_observed_horizons と同じ理由。main の夜間実行が5本の約定窓を閉じて
+# no_fill(+forgone_r, chase_tp1)にした行が、手元の古い価格で回すと open に戻り、
+# 逃した分と追った場合の結果が消えていた(2026-09-26: 20260919_USDJPY_BUY_PULLBACK)。
+# open は「まだ分からない」であって観測ではないので、確定を上書きできない。
+_FINAL_STATUSES = {"filled_sl", "filled_tp1", "filled_time_exit", "no_fill"}
+
+
+def _keep_finalized_rows(sim: pd.DataFrame, previous: pd.DataFrame | None) -> pd.DataFrame:
+    if previous is None or previous.empty or "signal_id" not in previous.columns or sim.empty:
+        return sim
+    prev = previous.drop_duplicates("signal_id", keep="last").set_index("signal_id")
+    out = sim.set_index("signal_id")
+    common = out.index.intersection(prev.index)
+    regress = common[(out.loc[common, "status"] == "open").values
+                     & prev.loc[common, "status"].isin(_FINAL_STATUSES).values]
+    if len(regress):
+        keep_cols = [c for c in COLUMNS if c in prev.columns and c != "signal_id"]
+        out.loc[regress, keep_cols] = prev.loc[regress, keep_cols].values
+    return out.reset_index().reindex(columns=COLUMNS)
+
+
+def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None,
+                    previous: pd.DataFrame | None = None) -> pd.DataFrame:
     if ledger is None or ledger.empty:
         return pd.DataFrame(columns=COLUMNS)
     simulated_at = format_utc(now_utc())
@@ -436,7 +459,8 @@ def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None) -> pd.Dat
             (out["half_exit_status"], out["half_exit_r"],
              out["half_exit_be_r"]) = half_exit_row(row, cache[asset])
         rows.append(out)
-    return pd.DataFrame(rows, columns=COLUMNS)
+    sim = pd.DataFrame(rows, columns=COLUMNS)
+    return _keep_finalized_rows(sim, previous)
 
 
 def summarize(sim: pd.DataFrame) -> dict:
@@ -530,7 +554,8 @@ def summarize(sim: pd.DataFrame) -> dict:
 
 def main() -> int:
     ledger = pd.read_csv(LEDGER_PATH, dtype=str, keep_default_na=False) if LEDGER_PATH.exists() else pd.DataFrame()
-    sim = simulate_ledger(ledger)
+    prev = pd.read_csv(OUT_CSV) if OUT_CSV.exists() else None
+    sim = simulate_ledger(ledger, previous=prev)
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     sim.to_csv(OUT_CSV, index=False)
     summary = summarize(sim)

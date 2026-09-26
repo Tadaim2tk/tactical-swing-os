@@ -242,6 +242,36 @@ def score_ledger(ledger: pd.DataFrame, *, raw_dir: Path = RAW_DIR, scored_at: st
 _STATUS_RANK = {"scored": 2, "awaiting_horizon": 1, "invalid_data": 0}
 
 
+# 既に観測済みの horizon を、価格窓の短い再採点で空白に戻さない(#173 Codex P1)。
+# main は夜間ワークフローが毎日自分で価格を取って採点するため、手元の価格系列より
+# 先まで埋まっていることがある。手元で再採点すると、status は同格(awaiting_horizon)
+# のまま fwd_return_5d などのセルだけが空白になり、確定していた result_5d が
+# awaiting に戻る(2026-09-26: 5d が54行、3d が36行消えた)。
+# 「観測できた値は、より新しい観測でしか置き換えない」。空白は観測ではない。
+_HORIZON_CELLS = [c for c in SCORE_COLUMNS if c.startswith(("fwd_return_", "r_close_"))] + \
+                 ["entry_touched_5d", "result_5d", "result_10d"]
+
+
+def _keep_observed_horizons(merged: pd.DataFrame, existing: pd.DataFrame) -> pd.DataFrame:
+    if existing is None or existing.empty or "signal_id" not in existing.columns:
+        return merged
+    old = existing.drop_duplicates("signal_id", keep="last").set_index("signal_id")
+    out = merged.set_index("signal_id")
+    common = out.index.intersection(old.index)
+    for col in _HORIZON_CELLS:
+        if col not in out.columns or col not in old.columns:
+            continue
+        new_v = out.loc[common, col]
+        old_v = old.loc[common, col]
+        blank_new = new_v.isna() | (new_v.astype(str).str.strip() == "")
+        unresolved_new = new_v.astype(str).isin(["awaiting", ""])
+        has_old = old_v.notna() & (old_v.astype(str).str.strip() != "") & ~old_v.astype(str).isin(["awaiting"])
+        take = (blank_new | unresolved_new) & has_old
+        if take.any():
+            out.loc[common[take.values], col] = old_v[take].values
+    return out.reset_index().reindex(columns=SCORE_COLUMNS)
+
+
 def append_scores(new_scores: pd.DataFrame, path: Path = SCORES_PATH) -> pd.DataFrame:
     """signal_id で重複排除(awaiting→確定の更新は許可・確定→取得不能の降格は禁止)して保存。"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -262,6 +292,7 @@ def append_scores(new_scores: pd.DataFrame, path: Path = SCORES_PATH) -> pd.Data
               .drop_duplicates(subset=["signal_id"], keep="last")
               .drop(columns=["_rank", "_ord"]))
     merged = merged.reindex(columns=SCORE_COLUMNS).sort_values(["date", "signal_id"]).reset_index(drop=True)
+    merged = _keep_observed_horizons(merged, existing)
     merged = _preserve_unchanged_score_timestamps(merged, existing)
     _warn_if_finalized_anchors_changed(merged, existing)
     merged.to_csv(path, index=False)

@@ -19,6 +19,9 @@ usage:
 scripts/tso_daily_gpt.sh のターミナル経路でも使うため、決め打ちにすると provenance が
 壊れ、経路別の比較・監査ができなくなる(#157 Codex P2)。
   python tools/record_signal_extras.py basis 2026-09-07 two_point gpt_terminal
+
+突合だけ見たいとき(何も書かない):
+  python tools/record_signal_extras.py invalidation 2026-09-09 "<既知の1件>=not_fired" --check-only
 """
 from __future__ import annotations
 
@@ -155,11 +158,13 @@ def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
 
 
 def main() -> int:
-    if len(sys.argv) < 4:
+    argv = [a for a in sys.argv[1:] if a != "--check-only"]
+    check_only = "--check-only" in sys.argv
+    if len(argv) < 3:
         print(__doc__)
         return 1
-    kind, day, value = sys.argv[1], _check_date(sys.argv[2]), sys.argv[3]
-    source = sys.argv[4] if len(sys.argv) > 4 else "chatgpt_app"
+    kind, day, value = argv[0], _check_date(argv[1]), argv[2]
+    source = argv[3] if len(argv) > 3 else "chatgpt_app"
     if source not in SOURCE_VOCAB:
         raise SystemExit(f"source: '{source}' は閉じた語彙にない。許容 {sorted(SOURCE_VOCAB)}")
 
@@ -196,7 +201,26 @@ def main() -> int:
                          "source": source, "recorded_at": NOW})
         if not rows:
             raise SystemExit("記録する項目が無い")
+        # 台帳に無い signal_id、判断日より前の check_date は記録しない(#173 Codex P2)。
+        # 突合の警告を見るために記録コマンドを「読み取り」として叩いたところ、
+        # まだ存在しない判断の (check_date, signal_id) が新規扱いで追記され、
+        # 9/16 に 9/17 の判断、9/22-23 に 9/24 の判断の確認行が台帳に入った。
+        # append-only 台帳では後から消せないので、入口で止める。読み取りは --check-only。
+        ledger_days = {r["signal_id"]: r["date"] for r in _read(LEDGER_PATH)}
+        for r in rows:
+            sid = r["signal_id"]
+            if sid not in ledger_days:
+                raise SystemExit(f"{sid}: 台帳(data/signal_log.csv)に無い signal_id。転記ミスか、まだ取り込んでいない")
+            if day < ledger_days[sid]:
+                raise SystemExit(f"{sid}: 判断日 {ledger_days[sid]} より前の確認日 {day} は記録できない")
         missing = _undeclared_open(day, {r["signal_id"] for r in rows})
+        if check_only:
+            if missing:
+                print(f"!! 申告漏れ: 未決着の方向あり判断 {len(missing)} 件が今回の申告に無い: "
+                      + ", ".join(missing), file=sys.stderr)
+            else:
+                print("申告漏れなし", file=sys.stderr)
+            return 0
         n = _append(INVAL_PATH, ["check_date", "signal_id", "invalidation_fired", "source", "recorded_at"],
                     rows, ("check_date", "signal_id"))
         for r in rows[:n]:
