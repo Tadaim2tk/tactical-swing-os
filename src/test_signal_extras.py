@@ -194,3 +194,47 @@ def test_check_only_reports_gaps_without_writing(repo):
     r = run(["invalidation", "2026-09-25", "BTC_24=not_fired", "--check-only"], repo)
     assert r.returncode == 0 and "GOLD_24" in r.stderr
     assert _rows(repo, "invalidation_checks.csv") == [], "何も書かない"
+
+
+# --- 語彙の外の決着語は、捨てずに隔離する(2026-09-30) ---
+
+def test_unknown_word_is_quarantined_not_dropped(repo):
+    """target_before_entry のような語: 本体は unknown、原文は隔離ファイルへ。止めない。"""
+    _ledger(repo, [("2026-09-19", "USDJPY_19", "USDJPY", "BUY")])
+    r = run(["invalidation", "2026-09-24", "USDJPY_19=target_before_entry"], repo)
+    assert r.returncode == 0 and "語彙の外" in r.stderr
+    assert _rows(repo, "invalidation_checks.csv")[0]["invalidation_fired"] == "unknown"
+    q = _rows(repo, "invalidation_raw_verdicts.csv")
+    assert q[0]["raw_verdict"] == "target_before_entry" and q[0]["signal_id"] == "USDJPY_19"
+
+
+def test_in_vocab_words_leave_no_quarantine_file(repo):
+    _ledger(repo, [("2026-09-19", "USDJPY_19", "USDJPY", "BUY")])
+    assert run(["invalidation", "2026-09-22", "USDJPY_19=not_fired"], repo).returncode == 0
+    assert not (repo / "data" / "invalidation_raw_verdicts.csv").exists()
+
+
+def test_unreadable_word_is_still_refused(repo):
+    """空や記号混じりは語として読めない。隔離ではなく差し戻す。"""
+    _ledger(repo, [("2026-09-19", "USDJPY_19", "USDJPY", "BUY")])
+    r = run(["invalidation", "2026-09-24", "USDJPY_19=fired?!"], repo)
+    assert r.returncode != 0
+
+
+def test_raw_word_conflicting_with_a_concrete_verdict_is_refused(repo):
+    """本体に fired があるのに target_before_entry を隔離すると台帳同士が食い違う(#177 Codex P2)。"""
+    _ledger(repo, [("2026-09-19", "S", "USDJPY", "BUY")])
+    assert run(["invalidation", "2026-09-24", "S=fired"], repo).returncode == 0
+    r = run(["invalidation", "2026-09-24", "S=target_before_entry"], repo)
+    assert r.returncode != 0 and "食い違う" in r.stdout + r.stderr
+    assert _rows(repo, "invalidation_checks.csv")[0]["invalidation_fired"] == "fired"
+    assert not (repo / "data" / "invalidation_raw_verdicts.csv").exists(), "隔離側にも書かない"
+
+
+def test_raw_word_may_annotate_an_existing_unknown(repo):
+    """本体が unknown なら、後から原文を隔離に足してよい(情報が増えるだけで矛盾しない)。"""
+    _ledger(repo, [("2026-09-19", "S", "USDJPY", "BUY")])
+    assert run(["invalidation", "2026-09-24", "S=unknown"], repo).returncode == 0
+    r = run(["invalidation", "2026-09-24", "S=target_before_entry"], repo)
+    assert r.returncode == 0
+    assert _rows(repo, "invalidation_raw_verdicts.csv")[0]["raw_verdict"] == "target_before_entry"

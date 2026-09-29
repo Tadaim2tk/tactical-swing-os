@@ -1,0 +1,3 @@
+check_date,signal_id,raw_verdict,source,recorded_at
+2026-09-16,20260911_NASDAQ_SELL_PULLBACK,CLOSED_PROFIT,chatgpt_app,2026-09-29T20:04:32Z
+2026-09-24,20260919_USDJPY_BUY_PULLBACK,target_before_entry,chatgpt_app,2026-09-29T20:04:32Z

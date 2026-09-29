@@ -32,6 +32,12 @@ from pathlib import Path
 
 BASIS_PATH = Path("data/expected_r_basis.csv")
 INVAL_PATH = Path("data/invalidation_checks.csv")
+# 閉じた語彙の外の決着語を、捨てずに原文のまま残す場所(2026-09-30)。
+# GPT は resolved_today / target_before_entry / CLOSED_PROFIT のような語を勝手に増やす。
+# 以前は SystemExit で止め、止まった後に人間もエージェントも転記しなかったので、
+# 9/24 の 20260919_USDJPY_BUY_PULLBACK=target_before_entry は台帳に残らなかった。
+# 語彙を増やす代わりに、本体には unknown、原文はここへ。対応表は後から足せる。
+RAW_VERDICT_PATH = Path("data/invalidation_raw_verdicts.csv")
 LEDGER_PATH = Path("data/signal_log.csv")
 WINDOW_BUSINESS_DAYS = 5  # prompts/tso_daily_signal_log.md の「5営業日を過ぎるまで毎日聞き直す」
 BASIS_VOCAB = {"subjective", "two_point"}
@@ -186,18 +192,21 @@ def main() -> int:
             if "=" not in part:
                 raise SystemExit(f"書式違反: '<signal_id>=fired|not_fired|unknown' が必要 ('{part}')")
             sid, verdict = (x.strip() for x in part.split("=", 1))
+            raw = None
             if verdict not in INVAL_VOCAB:
-                raise SystemExit(f"{sid}: '{verdict}' は閉じた語彙にない。許容 {sorted(INVAL_VOCAB)}")
+                if not verdict or not all(c.isalnum() or c in "_-" for c in verdict):
+                    raise SystemExit(f"{sid}: '{verdict}' は語として読めない。原文の1語をそのまま渡すこと")
+                raw, verdict = verdict, "unknown"   # 本体は閉じた語彙のまま。原文は隔離して残す
             if not sid:
                 raise SystemExit("signal_id が空")
-            prev = {r["signal_id"]: r["invalidation_fired"] for r in rows}
-            if sid in prev and prev[sid] != verdict:
+            prev = {r["signal_id"]: (r.get("_raw") or r["invalidation_fired"]) for r in rows}
+            if sid in prev and prev[sid] != (raw or verdict):
                 # 同じ行の中で矛盾している。先勝ちで黙って通すと、どちらが本当か
                 # 分からない値が append-only 台帳に入る(#157 Codex P2)。全体を弾く。
                 raise SystemExit(
                     f"{sid} が同じ行に矛盾する値で2回現れている: "
                     f"'{prev[sid]}' と '{verdict}'。どちらが正しいか確認して出し直すこと")
-            rows.append({"check_date": day, "signal_id": sid, "invalidation_fired": verdict,
+            rows.append({"check_date": day, "signal_id": sid, "invalidation_fired": verdict, "_raw": raw,
                          "source": source, "recorded_at": NOW})
         if not rows:
             raise SystemExit("記録する項目が無い")
@@ -221,8 +230,28 @@ def main() -> int:
             else:
                 print("申告漏れなし", file=sys.stderr)
             return 0
+        raws = [{"check_date": r["check_date"], "signal_id": r["signal_id"], "raw_verdict": r["_raw"],
+                 "source": r["source"], "recorded_at": r["recorded_at"]} for r in rows if r.get("_raw")]
+        # 本体に同じ (check_date, signal_id) の確定値が既にあるのに、語彙の外の語を隔離
+        # すると、本体は fired のまま隔離側には別の語が残り、二つの append-only 台帳が
+        # 食い違って再実行でも直せない(#177 Codex P2)。本体が unknown のときだけ隔離を
+        # 足してよい。確定値とぶつかる入力は、どちらにも書かずに全体を弾く。
+        canon = {(r["check_date"], r["signal_id"]): r["invalidation_fired"] for r in _read(INVAL_PATH)}
+        for q in raws:
+            have = canon.get((q["check_date"], q["signal_id"]))
+            if have is not None and have != "unknown":
+                raise SystemExit(
+                    f"{q['signal_id']}: {q['check_date']} は既に '{have}' と記録済み。語彙の外の "
+                    f"'{q['raw_verdict']}' を隔離すると台帳同士が食い違うので記録しない。どちらが正しいか確認すること")
+        rows = [{k: v for k, v in r.items() if k != "_raw"} for r in rows]
         n = _append(INVAL_PATH, ["check_date", "signal_id", "invalidation_fired", "source", "recorded_at"],
                     rows, ("check_date", "signal_id"))
+        if raws:
+            _append(RAW_VERDICT_PATH, ["check_date", "signal_id", "raw_verdict", "source", "recorded_at"],
+                    raws, ("check_date", "signal_id"))
+            for r in raws:
+                print(f"~~ 語彙の外: {r['signal_id']}='{r['raw_verdict']}' → 本体は unknown、原文を "
+                      f"{RAW_VERDICT_PATH} に隔離した(対応表は後から足す)", file=sys.stderr)
         for r in rows[:n]:
             print(f"recorded invalidation: {r['signal_id']} -> {r['invalidation_fired']}")
         if missing:
