@@ -100,6 +100,10 @@ def _num(value) -> float:
     return float(v) if pd.notna(v) else float("nan")
 
 
+# 週7日で日足が立つ資産。それ以外(米先物・指数・FX・金利)は週5日。
+SEVEN_DAY_ASSETS = frozenset({"BTC", "ETH"})
+
+
 def load_ohlcv_frame(asset: str, raw_dir: Path = RAW_DIR) -> pd.DataFrame:
     path = raw_dir / f"{asset}.csv"
     if not path.exists():
@@ -116,7 +120,19 @@ def load_ohlcv_frame(asset: str, raw_dir: Path = RAW_DIR) -> pd.DataFrame:
         if c not in df.columns:
             df[c] = np.nan
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
+    df = df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
+    # 週5日資産の週末ラベルの行は捨てる(2026-09-30、#174/#175 で Codex が指摘)。
+    # yfinance は週末に取得すると「当日」の行を末尾に付ける(JPY=X に 9/26(土)・9/27(日))。
+    # decision_time_anchor は週末の行が1本でもあると週7日資産と判定するので、
+    # その1本で USDJPY の全アンカーが k-1 → k-2 にずれていた。平日に取得すると
+    # その行は無いため、**採点がどの曜日に取得したかで変わる**状態だった
+    # (夜間ワークフローは週末も毎日採点する)。暦は資産の性質であってデータの偶然ではない。
+    # 金曜へ畳み込まず捨てるのは、日曜夜のアジア寄り付きの値が混ざると先読みになるから。
+    if asset not in SEVEN_DAY_ASSETS:
+        weekend = df["date"].dt.dayofweek >= 5
+        df = df[~weekend].reset_index(drop=True)
+        df.attrs["dropped_weekend_bars"] = int(weekend.sum())
+    return df
 
 
 def _current_utc_date() -> pd.Timestamp:
