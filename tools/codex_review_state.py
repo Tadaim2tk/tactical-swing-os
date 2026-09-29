@@ -231,15 +231,18 @@ def classify(head_sha, comments, reviews_for_head=0, unresolved_threads=0,
         return "undecidable", "レビューが異常終了した。結論が無い"
     if summary_kind == "unknown":
         return "undecidable", "要約の状態欄を読み取れなかった"
+    # **いまの head を名指す要約が1つでも読めなければ、読めた要約があっても止める(#167 Codex P1)。**
+    # 先に「完了」と読めた要約があると、後から来た読めない要約を無視して clean を返していた。
+    # 別コミットの読めない要約（unreadable_unknown）とは違い、これは いまの結果 そのもの。
+    if unreadable_for_head:
+        why = "このコミットのレビュー要約を読み取れなかった"
+        return "undecidable", (why + "。" + stale_ack) if stale_ack else why
     if unresolved_threads is None:
         return "pending", "未解決スレッド数を数えられなかったが、レビューもまだ無い"
     if summary_kind == "done":
         return "clean", "このコミットのレビューが完了し、指摘が無い"
     if summary_kind == "running":
         return "pending", "このコミットのレビューが実行中"
-    if unreadable_for_head:
-        why = "このコミットのレビュー要約を読み取れなかった"
-        return "undecidable", (why + "。" + stale_ack) if stale_ack else why
     if unreadable_unknown:
         return "undecidable", "どのコミットのものか分からないレビュー要約があり、いまのコミットの結果が無い"
 

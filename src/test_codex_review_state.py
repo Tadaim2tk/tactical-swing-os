@@ -287,3 +287,22 @@ def test_ack_with_nothing_reviewed_is_ignored():
     """何も来ていない head への ACK は「見て受け入れた」ことにならない。未到着のまま。"""
     st, _ = classify(HEAD, [_human("GATE-ACK: %s" % HEAD)], 0, 0, ACK)
     assert st == "pending"
+
+
+def test_unreadable_head_summary_blocks_even_after_a_parsed_one():
+    """**同じ head に読めた要約と読めない要約が並んだら、読めないほうで止める(#167 Codex P1)。**
+
+    先に「完了」や「実行中」と読めた要約があり、同じ head を名指す別の要約の書式が
+    読めない場合に、読めた側だけを見て clean / pending を返していた。
+    いまの head の結果が読めないのに、時間切れで緑にしない。
+    """
+    later = _bot("<!-- codex-pull-request-review-summary -->\n\n"
+                 "Code Review completed for %s (new layout, no table)\n" % HEAD, created_at=T1)
+    assert classify(HEAD, [_summary(HEAD), later], 0, 0, ACK)[0] == "undecidable"
+    assert classify(HEAD, [_summary(HEAD, "⏳ **Running**"), later], 0, 0, ACK)[0] == "undecidable"
+    # 指摘が来ていれば findings が勝つのは変わらない
+    assert classify(HEAD, [_summary(HEAD), later, _finding(HEAD)], 0, 0, ACK)[0] == "findings"
+    # 別コミットの読めない要約は、これまでどおり持ち込まない(#163)
+    stale = _bot("<!-- codex-pull-request-review-summary -->\n\n"
+                 "Code Review completed for %s (old layout, no table)\n" % OLD)
+    assert classify(HEAD, [stale, _summary(HEAD)], 0, 0, ACK)[0] == "clean"
