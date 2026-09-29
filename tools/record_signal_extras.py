@@ -232,6 +232,17 @@ def main() -> int:
             return 0
         raws = [{"check_date": r["check_date"], "signal_id": r["signal_id"], "raw_verdict": r["_raw"],
                  "source": r["source"], "recorded_at": r["recorded_at"]} for r in rows if r.get("_raw")]
+        # 本体に同じ (check_date, signal_id) の確定値が既にあるのに、語彙の外の語を隔離
+        # すると、本体は fired のまま隔離側には別の語が残り、二つの append-only 台帳が
+        # 食い違って再実行でも直せない(#177 Codex P2)。本体が unknown のときだけ隔離を
+        # 足してよい。確定値とぶつかる入力は、どちらにも書かずに全体を弾く。
+        canon = {(r["check_date"], r["signal_id"]): r["invalidation_fired"] for r in _read(INVAL_PATH)}
+        for q in raws:
+            have = canon.get((q["check_date"], q["signal_id"]))
+            if have is not None and have != "unknown":
+                raise SystemExit(
+                    f"{q['signal_id']}: {q['check_date']} は既に '{have}' と記録済み。語彙の外の "
+                    f"'{q['raw_verdict']}' を隔離すると台帳同士が食い違うので記録しない。どちらが正しいか確認すること")
         rows = [{k: v for k, v in r.items() if k != "_raw"} for r in rows]
         n = _append(INVAL_PATH, ["check_date", "signal_id", "invalidation_fired", "source", "recorded_at"],
                     rows, ("check_date", "signal_id"))
