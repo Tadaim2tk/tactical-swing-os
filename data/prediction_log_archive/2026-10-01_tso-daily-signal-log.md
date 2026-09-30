@@ -2,6 +2,8 @@
 <!-- transport: Codex read_thread; message 5597c10b-4443-4a38-b944-b9488f5bcd67; truncated=false -->
 <!-- archived_at: 2026-09-30T23:03:05Z / chars: 17594 / 値は無修正 -->
 
+> **取込監査注記（原文とは別、PR #179）**: 以下はChatGPT原文の保存であり、本文の決着・成績を検証済みとするものではありません。BTC `20260924_BTC_BUY_PULLBACK` の `time_exit` / `-0.19R` は採用しません。リポジトリの翌営業日から5本という規約では5本目は10/1、最終確認は10/2朝です。また本文の06:55 JST時点では9/30 UTCのBTC日足は未確定です。サイドカー本体は `unknown`、`time_exit` は原語隔離のみ。10/2の監視対象を維持し、原文の終値を採点用価格へ転記していません。以下の原文は無改変です。
+
 # TSO Daily Signal Log v2 — 2026-10-01
 
 **使用モデル：GPT-5.6 Sol**  
