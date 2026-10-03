@@ -971,3 +971,13 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-02,20261002_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,157.557999,0.001726,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-03 00:46:07 UTC
 2026-10-02,20261002_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,16.389999,-0.065894,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-03 00:46:07 UTC
 2026-10-02,20261002_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,92.870003,-0.017336,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-03 00:46:07 UTC
+2026-10-03,20261003_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,83553.851562,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-03 00:54:17 UTC
+2026-10-03,20261003_DXY_NONE_NO_TRADE,DXY,NONE,NO_TRADE,False,,,101.924004,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-03 00:54:17 UTC
+2026-10-03,20261003_ETH_NONE_NO_TRADE,ETH,NONE,NO_TRADE,False,,,2683.679443,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-03 00:54:17 UTC
+2026-10-03,20261003_GOLD_NONE_NO_TRADE,GOLD,NONE,NO_TRADE,False,,,4172.100098,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-03 00:54:17 UTC
+2026-10-03,20261003_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,31049.0,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-03 00:54:17 UTC
+2026-10-03,20261003_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7776.5,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-03 00:54:17 UTC
+2026-10-03,20261003_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,5.277,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-03 00:54:17 UTC
+2026-10-03,20261003_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,157.830002,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-03 00:54:17 UTC
+2026-10-03,20261003_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,15.31,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-03 00:54:17 UTC
+2026-10-03,20261003_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,91.260002,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-03 00:54:17 UTC
