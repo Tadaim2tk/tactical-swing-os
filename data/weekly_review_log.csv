@@ -4,3 +4,4 @@ week_start,week_end,total_signals,a_signals,b_signals,no_trade_signals,closed_si
 2026-09-13,2026-09-19,30,0,0,30,0,0,0,30,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,データ不足,,,prediction_log_scores,False,True,prediction_log,30,30,30
 2026-09-20,2026-09-26,20,0,0,20,0,0,0,20,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,データ不足,,,prediction_log_scores,False,True,prediction_log,20,20,20
 2026-09-27,2026-10-03,70,0,1,69,0,1,0,69,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,データ不足,,,prediction_log_scores,False,True,prediction_log,70,70,70
+2026-10-04,2026-10-10,59,0,6,53,0,59,0,0,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,評価期間またはentry条件の見直し,データ不足,,latest_evaluations,True,False,signals,0,0,0
