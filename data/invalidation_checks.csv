@@ -120,3 +120,4 @@ check_date,signal_id,invalidation_fired,source,recorded_at
 2026-10-18,20261015_NASDAQ_SELL_PULLBACK,not_fired,chatgpt_app,2026-10-18T23:02:05Z
 2026-10-19,20261015_NASDAQ_SELL_PULLBACK,not_fired,chatgpt_app,2026-10-18T23:02:07Z
 2026-10-20,20261015_NASDAQ_SELL_PULLBACK,not_fired,chatgpt_app,2026-10-19T23:01:55Z
+2026-10-21,20261015_NASDAQ_SELL_PULLBACK,not_fired,chatgpt_app,2026-10-20T23:02:40Z
