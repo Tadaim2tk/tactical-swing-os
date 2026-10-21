@@ -2,6 +2,8 @@
 <!-- transport: ChatGPT read_thread complete message markdown -->
 <!-- archived_at: 2026-10-21T22:58:37Z / chars: 13741 / 値は無修正 -->
 
+> **取込監査注記（原文とは別）**: PR #187レビューで、BTC `20261022_BTC_BUY_PULLBACK` の expected_r=0.32 の説明に「未約定確率」を含むことを確認。これは出力契約のBTC未参加ディスカウント禁止と矛盾する。許容される調整の内訳が不明なため0.542857等への再計算・置換は行わない。原値は未修正で保存し、PRの自動マージを解除して判断待ちとした。以下は原文であり、妥当性を確認済みという意味ではない。
+
 # Tactical Swing OS — Daily Signal Log v2
 ## 2026年10月22日（木）
 
