@@ -501,8 +501,13 @@ def test_new_final_result_replaces_open():
 # --- SL幅を ATR10 以上に広げた場合の併走観測(人間の承認 2026-10-23 案3) ---
 
 def _bars_with_history(rest):
-    """判断日の前に10本の平穏な履歴(値幅1.0)を置き、その後に rest を並べる。"""
-    hist = [(f"2026-06-{d:02d}", 72.5, 73.0, 72.0, 72.5) for d in range(15, 26)]   # 11本 → 真の値幅10本
+    """判断日(7/01)の前に営業日12本の平穏な履歴(値幅1.0)を置き、その後に rest を並べる。
+
+    12本にするのは、rest に週末の日付が入ると暦の推定が週7日になりアンカーが1本手前に
+    ずれる(k-2)ため。どちらの暦でも ATR10 の母数10本が揃う。
+    """
+    days = pd.bdate_range(end="2026-06-30", periods=12).strftime("%Y-%m-%d")
+    hist = [(d, 72.5, 73.0, 72.0, 72.5) for d in days]
     return _ohlcv(hist + rest)
 
 
