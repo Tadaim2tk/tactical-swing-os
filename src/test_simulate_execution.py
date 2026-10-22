@@ -502,7 +502,7 @@ def test_new_final_result_replaces_open():
 
 def _bars_with_history(rest):
     """判断日の前に10本の平穏な履歴(値幅1.0)を置き、その後に rest を並べる。"""
-    hist = [(f"2026-06-{d:02d}", 72.5, 73.0, 72.0, 72.5) for d in range(16, 26)]
+    hist = [(f"2026-06-{d:02d}", 72.5, 73.0, 72.0, 72.5) for d in range(15, 26)]   # 11本 → 真の値幅10本
     return _ohlcv(hist + rest)
 
 
@@ -554,3 +554,28 @@ def test_atr_floor_summary_is_separate_from_realized_r():
     assert out["gross_total_r"] == -1.0, "実現Rに atr_floor を混ぜない"
     assert out["atr_floor"]["total_r"] == 1.5 and out["atr_floor"]["widened"] == 1
     assert out["atr_floor"]["baseline_sl_count"] == 1 and out["atr_floor"]["sl_count"] == 0
+
+
+def test_atr_needs_ten_true_ranges():
+    """10本揃わなければ測らない。ATR3 を ATR10 と名乗らない(#189 Codex P2)。"""
+    short = _ohlcv([(f"2026-06-{d:02d}", 72.5, 73.0, 72.0, 72.5) for d in range(20, 26)] + [("2026-07-01", 74, 74.5, 72.5, 74.0)])
+    k, a = se.decision_time_anchor(short, "2026-07-01")
+    assert pd.isna(se.atr_at_decision(short, a))
+    st, r, w = se.atr_floor_row(_row(sl="72.5"), short)
+    assert st == "" and pd.isna(r), "履歴が足りない判断は測らない"
+
+
+def test_parallel_track_results_are_kept_independently():
+    """本体が SL で確定したまま、併走側だけ open に戻る再実行で確定結果を消さない(#189 Codex P2)。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "filled_sl", "r_result": -1.0,
+                          "atr_floor_status": "atr_tp1", "atr_floor_r": 1.5, "atr_floor_widened": True,
+                          "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0,
+                          "chase_status": "chase_tp1", "chase_r": 0.4}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "filled_sl", "r_result": -1.0,
+                         "atr_floor_status": "open", "atr_floor_r": float("nan"), "atr_floor_widened": True,
+                         "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0,
+                         "chase_status": "open", "chase_r": float("nan")}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS)).set_index("signal_id").loc["S"]
+    assert out["atr_floor_status"] == "atr_tp1" and abs(out["atr_floor_r"] - 1.5) < 1e-9
+    assert out["chase_status"] == "chase_tp1" and abs(out["chase_r"] - 0.4) < 1e-9
+    assert out["status"] == "filled_sl"

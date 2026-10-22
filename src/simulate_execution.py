@@ -433,6 +433,16 @@ def half_exit_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, float]:
 _FINAL_STATUSES = {"filled_sl", "filled_tp1", "filled_time_exit", "no_fill"}
 
 
+# 併走観測は本体と独立に決着する。本体が先に SL で確定し、追った/広げた側が後の足で
+# 決着した行は、古い価格で回すと本体は同じ SL のまま併走側だけ open に戻る(#189 Codex P2)。
+# 本体の status だけを見て守ると、確定済みの併走結果が消えて要約からも落ちる。
+_TRACKS = {
+    "chase_status": ["chase_r"],
+    "half_exit_status": ["half_exit_r", "half_exit_be_r"],
+    "atr_floor_status": ["atr_floor_r", "atr_floor_widened"],
+}
+
+
 def _keep_finalized_rows(sim: pd.DataFrame, previous: pd.DataFrame | None) -> pd.DataFrame:
     if previous is None or previous.empty or "signal_id" not in previous.columns or sim.empty:
         return sim
@@ -444,6 +454,16 @@ def _keep_finalized_rows(sim: pd.DataFrame, previous: pd.DataFrame | None) -> pd
     if len(regress):
         keep_cols = [c for c in COLUMNS if c in prev.columns and c != "signal_id"]
         out.loc[regress, keep_cols] = prev.loc[regress, keep_cols].values
+    for st_col, val_cols in _TRACKS.items():
+        if st_col not in prev.columns or st_col not in out.columns:
+            continue
+        p_st = prev.loc[common, st_col].astype(str)
+        p_final = p_st.notna() & ~p_st.isin(["", "open", "nan", "None"])
+        n_open = out.loc[common, st_col].astype(str).eq("open")
+        back = common[(n_open & p_final).values]
+        if len(back):
+            cols = [st_col] + [c for c in val_cols if c in prev.columns]
+            out.loc[back, cols] = prev.loc[back, cols].values
     return out.reset_index().reindex(columns=COLUMNS)
 
 
@@ -454,7 +474,12 @@ def atr_at_decision(ohlcv: pd.DataFrame, anchor_idx: int, bars: int = ATR_FLOOR_
     h = ohlcv.iloc[max(0, anchor_idx - bars):anchor_idx + 1]
     prev = h["close"].shift()
     tr = np.maximum(h["high"] - h["low"], np.maximum((h["high"] - prev).abs(), (h["low"] - prev).abs())).dropna()
-    return float(tr.mean()) if len(tr) else float("nan")
+    # 10本揃わないときは測らない(#189 Codex P2)。1本でも返すと、系列の先頭付近や
+    # 短い系列で「ATR10」を名乗った ATR3 が入り、240日の窓が進んで先頭が落ちると
+    # 同じ判断の結果が変わる。
+    if len(tr) != bars:
+        return float("nan")
+    return float(tr.mean())
 
 
 def atr_floor_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, bool]:
