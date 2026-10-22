@@ -38,7 +38,11 @@ def build(ledger: pd.DataFrame, sim: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for _, r in ledger.iterrows():
         side = normalize_side(r.get("side"))
-        if side not in ("LONG", "SHORT") or str(r.get("rank") or "").upper() not in ("A", "B"):
+        rp = _num(r.get("risk_pct"))
+        # 母集団は simulate_ledger と同じ「朝に指値を出したもの」(#188 Codex P2)。
+        # 方向あり A/B でも risk_pct が 0 か欠損の行は注文ではなく、6-8月に31件ある。
+        # 混ぜると、比較の土台が最近の注文と別の母集団になる。
+        if side not in ("LONG", "SHORT") or str(r.get("rank") or "").upper() not in ("A", "B") or not (rp == rp and rp > 0):
             continue
         a = str(r.get("asset") or "")
         if a not in cache:
