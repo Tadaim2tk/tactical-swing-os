@@ -496,3 +496,91 @@ def test_new_final_result_replaces_open():
     now = pd.DataFrame([{"signal_id": "S", "status": "filled_tp1", "r_result": 1.0}])
     out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS))
     assert out.set_index("signal_id").loc["S", "status"] == "filled_tp1"
+
+
+# --- SL幅を ATR10 以上に広げた場合の併走観測(人間の承認 2026-10-23 案3) ---
+
+def _bars_with_history(rest):
+    """判断日(7/01)の前に営業日12本の平穏な履歴(値幅1.0)を置き、その後に rest を並べる。
+
+    12本にするのは、rest に週末の日付が入ると暦の推定が週7日になりアンカーが1本手前に
+    ずれる(k-2)ため。どちらの暦でも ATR10 の母数10本が揃う。
+    """
+    days = pd.bdate_range(end="2026-06-30", periods=12).strftime("%Y-%m-%d")
+    hist = [(d, 72.5, 73.0, 72.0, 72.5) for d in days]
+    return _ohlcv(hist + rest)
+
+
+def test_atr_at_decision_uses_only_closed_bars():
+    """ATR は判断時に閉まっていたバーだけ。後のバーを混ぜると先読みになる。"""
+    df = _bars_with_history([("2026-07-01", 74, 90, 60, 74)])   # 判断日に巨大な値幅
+    k, a = se.decision_time_anchor(df, "2026-07-01")
+    assert abs(se.atr_at_decision(df, a) - 1.0) < 1e-9, "判断日の値幅30は入れない"
+
+
+def test_atr_floor_survives_a_shake_that_hits_the_declared_sl():
+    """申告の SL(幅0.5)なら初日に切られる揺れを、ATR 下限(幅1.0)なら耐えて TP1 へ。"""
+    row = _row(entry_low="72.0", entry_high="73.0", sl="72.5", tp1="76.0")   # 申告幅 0.5 < ATR 1.0
+    bars = _bars_with_history([("2026-07-01", 74, 74.5, 72.2, 74.0),            # 約定、安値72.2は申告SL(72.5)を割るが72.0は割らない
+                               ("2026-07-02", 74, 76.5, 73.5, 76.0)])           # TP1 76
+    base = se.simulate_row(row, bars, "t")
+    st, r, widened = se.atr_floor_row(row, bars)
+    assert base["status"] == "filled_sl" and base["r_result"] == -1.0
+    assert widened is True and st == "atr_tp1"
+    assert abs(r - (76.0 - 73.0) / 1.0) < 1e-9, "R は広げた幅(1.0)で測る"
+
+
+def test_atr_floor_leaves_wide_enough_stops_alone():
+    """申告の SL が ATR 以上なら何も変えない。結果も r_result と同じ。"""
+    row = _row(sl="70.0")   # 幅 3.0 > ATR 1.0
+    bars = _bars_with_history([("2026-07-01", 74, 74.5, 72.5, 74.0), ("2026-07-02", 74, 76.5, 73.5, 76.0)])
+    base = se.simulate_row(row, bars, "t")
+    st, r, widened = se.atr_floor_row(row, bars)
+    assert widened is False and st == "atr_tp1" and abs(r - base["r_result"]) < 1e-9
+
+
+def test_atr_floor_does_not_close_on_a_forming_bar(monkeypatch):
+    row = _row(sl="72.5", tp1="90.0")
+    bars = _bars_with_history([("2026-07-01", 74, 74.5, 72.8, 74.0)]              # 帯72-73に触れて約定、SLは割らない
+                              + [(f"2026-07-0{i}", 74, 74.6, 73.6, 74.2) for i in range(2, 7)])
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
+    st, r, _ = se.atr_floor_row(row, bars)
+    assert st == "open" and pd.isna(r), "期限足(7/06)が当日ラベルのままなら確定値を名乗らない"
+
+
+def test_atr_floor_summary_is_separate_from_realized_r():
+    sim = pd.DataFrame([
+        {"asset": "WTI", "status": "filled_sl", "r_result": -1.0, "capital_pct": -0.25,
+         "forgone_r": float("nan"), "chase_status": "", "chase_r": float("nan"),
+         "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0,
+         "atr_floor_status": "atr_tp1", "atr_floor_r": 1.5, "atr_floor_widened": True},
+    ])
+    out = se.summarize(sim)
+    assert out["gross_total_r"] == -1.0, "実現Rに atr_floor を混ぜない"
+    assert out["atr_floor"]["total_r"] == 1.5 and out["atr_floor"]["widened"] == 1
+    assert out["atr_floor"]["baseline_sl_count"] == 1 and out["atr_floor"]["sl_count"] == 0
+
+
+def test_atr_needs_ten_true_ranges():
+    """10本揃わなければ測らない。ATR3 を ATR10 と名乗らない(#189 Codex P2)。"""
+    short = _ohlcv([(f"2026-06-{d:02d}", 72.5, 73.0, 72.0, 72.5) for d in range(20, 26)] + [("2026-07-01", 74, 74.5, 72.5, 74.0)])
+    k, a = se.decision_time_anchor(short, "2026-07-01")
+    assert pd.isna(se.atr_at_decision(short, a))
+    st, r, w = se.atr_floor_row(_row(sl="72.5"), short)
+    assert st == "" and pd.isna(r), "履歴が足りない判断は測らない"
+
+
+def test_parallel_track_results_are_kept_independently():
+    """本体が SL で確定したまま、併走側だけ open に戻る再実行で確定結果を消さない(#189 Codex P2)。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "filled_sl", "r_result": -1.0,
+                          "atr_floor_status": "atr_tp1", "atr_floor_r": 1.5, "atr_floor_widened": True,
+                          "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0,
+                          "chase_status": "chase_tp1", "chase_r": 0.4}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "filled_sl", "r_result": -1.0,
+                         "atr_floor_status": "open", "atr_floor_r": float("nan"), "atr_floor_widened": True,
+                         "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0,
+                         "chase_status": "open", "chase_r": float("nan")}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS)).set_index("signal_id").loc["S"]
+    assert out["atr_floor_status"] == "atr_tp1" and abs(out["atr_floor_r"] - 1.5) < 1e-9
+    assert out["chase_status"] == "chase_tp1" and abs(out["chase_r"] - 0.4) < 1e-9
+    assert out["status"] == "filled_sl"
