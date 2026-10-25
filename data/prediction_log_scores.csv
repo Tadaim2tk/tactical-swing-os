@@ -1048,7 +1048,7 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-10,20261010_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,31108.75,-0.006767,-0.029767,-0.055202,-0.064001,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-24 23:48:20 UTC
 2026-10-10,20261010_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7859.75,-0.000223,-0.011387,-0.019784,-0.025446,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 23:48:20 UTC
 2026-10-10,20261010_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,5.244,-0.000763,-0.010297,-0.027841,-0.048818,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 00:05:08 UTC
-2026-10-10,20261010_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.063004,0.000886,0.001639,0.000506,-0.007902,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-24 00:05:08 UTC
+2026-10-10,20261010_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.063004,0.000886,0.001639,0.000506,-0.009926,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-10,20261010_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,14.84,0.024933,0.136792,0.347035,0.310647,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 00:05:08 UTC
 2026-10-10,20261010_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,91.849998,0.020577,0.035275,0.104083,0.124333,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 23:48:20 UTC
 2026-10-11,20261011_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,82546.320312,0.013727,0.006648,-0.004905,0.004781,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-22 00:16:18 UTC
@@ -1058,7 +1058,7 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-11,20261011_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,31108.75,-0.006767,-0.029767,-0.055202,-0.064001,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 23:48:20 UTC
 2026-10-11,20261011_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7859.75,-0.000223,-0.011387,-0.019784,-0.025446,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 23:48:20 UTC
 2026-10-11,20261011_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,5.244,-0.000763,-0.010297,-0.027841,-0.048818,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 00:05:08 UTC
-2026-10-11,20261011_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.063004,0.000886,0.001639,0.000506,-0.007902,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-24 00:05:08 UTC
+2026-10-11,20261011_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.063004,0.000886,0.001639,0.000506,-0.009926,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-11,20261011_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,14.84,0.024933,0.136792,0.347035,0.310647,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 00:05:08 UTC
 2026-10-11,20261011_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,91.849998,0.020577,0.035275,0.104083,0.124333,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 23:48:20 UTC
 2026-10-12,20261012_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,82912.226562,-0.013866,-0.016279,-0.017023,0.013264,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-22 22:56:18 UTC
@@ -1068,7 +1068,7 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-12,20261012_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,31108.75,-0.006767,-0.029767,-0.055202,-0.064001,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 23:48:20 UTC
 2026-10-12,20261012_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7859.75,-0.000223,-0.011387,-0.019784,-0.025446,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 23:48:20 UTC
 2026-10-12,20261012_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,5.244,-0.000763,-0.010297,-0.027841,-0.048818,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 00:05:08 UTC
-2026-10-12,20261012_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.063004,0.000886,0.001639,0.000506,-0.007902,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-24 00:05:08 UTC
+2026-10-12,20261012_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.063004,0.000886,0.001639,0.000506,-0.009926,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-12,20261012_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,14.84,0.024933,0.136792,0.347035,0.310647,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 00:05:08 UTC
 2026-10-12,20261012_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,91.849998,0.020577,0.035275,0.104083,0.124333,,,,,False,ok,not_applicable,not_applicable,scored,verified,2026-10-24 23:48:20 UTC
 2026-10-13,20261013_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,83679.46875,-0.006983,-0.01838,-0.027454,-0.028293,,,,,False,ok,not_applicable,not_applicable,scored,partially_verified,2026-10-23 23:04:25 UTC
@@ -1118,7 +1118,7 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-17,20261017_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,29391.5,0.011262,0.020941,-0.009314,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
 2026-10-17,20261017_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7704.25,0.003926,0.012461,-0.005776,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
 2026-10-17,20261017_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,5.098,0.007454,0.009415,-0.021577,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 00:05:08 UTC
-2026-10-17,20261017_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.143005,-0.002131,0.00079,-0.008404,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 00:05:08 UTC
+2026-10-17,20261017_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.143005,-0.002131,0.00079,-0.010427,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-17,20261017_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,19.99,-0.077539,-0.165583,-0.027013,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 00:05:08 UTC
 2026-10-17,20261017_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,101.410004,0.022187,-0.042008,0.018341,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-18,20261018_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,81500.804688,0.006341,0.017671,-0.002318,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-23 23:04:25 UTC
@@ -1128,7 +1128,7 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-18,20261018_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,29391.5,0.011262,0.020941,-0.009314,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-18,20261018_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7704.25,0.003926,0.012461,-0.005776,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-18,20261018_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,5.098,0.007454,0.009415,-0.021577,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 00:05:08 UTC
-2026-10-18,20261018_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.143005,-0.002131,0.00079,-0.008404,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 00:05:08 UTC
+2026-10-18,20261018_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.143005,-0.002131,0.00079,-0.010427,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-18,20261018_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,19.99,-0.077539,-0.165583,-0.027013,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 00:05:08 UTC
 2026-10-18,20261018_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,101.410004,0.022187,-0.042008,0.018341,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-19,20261019_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,81382.148438,0.005792,0.032314,-0.003784,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
@@ -1138,7 +1138,7 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-19,20261019_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,29391.5,0.011262,0.020941,-0.009314,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-19,20261019_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7704.25,0.003926,0.012461,-0.005776,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-19,20261019_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,5.098,0.007454,0.009415,-0.021577,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 00:05:08 UTC
-2026-10-19,20261019_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.143005,-0.002131,0.00079,-0.008404,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 00:05:08 UTC
+2026-10-19,20261019_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.143005,-0.002131,0.00079,-0.010427,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-19,20261019_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,19.99,-0.077539,-0.165583,-0.027013,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 00:05:08 UTC
 2026-10-19,20261019_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,101.410004,0.022187,-0.042008,0.018341,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-20,20261020_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,82017.601562,0.011259,-0.008604,-0.014957,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 10:53:47 UTC
@@ -1158,7 +1158,7 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-21,20261021_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,29675.25,0.011179,-0.018787,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
 2026-10-21,20261021_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7755.25,0.005803,-0.012314,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
 2026-10-21,20261021_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,5.117,0.005667,-0.02521,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 00:05:08 UTC
-2026-10-21,20261021_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.522995,-0.001609,-0.010781,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 00:05:08 UTC
+2026-10-21,20261021_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.522995,-0.001609,-0.012799,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-21,20261021_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,17.309999,-0.036395,0.123628,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 00:05:08 UTC
 2026-10-21,20261021_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,101.790001,-0.045584,0.01454,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-23,20261023_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,84011.96875,-0.034969,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
@@ -1168,7 +1168,7 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-23,20261023_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,29142.0,-0.000832,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
 2026-10-23,20261023_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7704.5,-0.005808,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
 2026-10-23,20261023_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,4.953,0.007066,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 00:05:08 UTC
-2026-10-23,20261023_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.132004,-0.008335,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 00:05:08 UTC
+2026-10-23,20261023_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,158.132004,-0.010358,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-23,20261023_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,19.030001,0.02207,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 00:05:08 UTC
 2026-10-23,20261023_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,99.470001,0.038202,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
 2026-10-24,20261024_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,81311.890625,-0.006408,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 10:53:47 UTC
@@ -1178,7 +1178,7 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-24,20261024_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,29117.75,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-24 23:48:20 UTC
 2026-10-24,20261024_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7659.75,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-24,20261024_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,4.988,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-23 23:04:25 UTC
-2026-10-24,20261024_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,156.813995,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-23 23:04:25 UTC
+2026-10-24,20261024_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,156.494003,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-24,20261024_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,19.450001,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-23 23:04:25 UTC
 2026-10-24,20261024_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,103.269997,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-24 23:48:20 UTC
 2026-10-25,20261025_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,81074.1875,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 10:53:47 UTC
@@ -1188,6 +1188,6 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-10-25,20261025_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,29117.75,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 10:53:47 UTC
 2026-10-25,20261025_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7659.75,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-25 10:53:47 UTC
 2026-10-25,20261025_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,4.988,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-25 10:53:47 UTC
-2026-10-25,20261025_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,156.813995,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 10:53:47 UTC
+2026-10-25,20261025_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,156.494003,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-10-25 23:36:50 UTC
 2026-10-25,20261025_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,19.450001,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-25 10:53:47 UTC
 2026-10-25,20261025_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,103.269997,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-10-25 10:53:47 UTC
