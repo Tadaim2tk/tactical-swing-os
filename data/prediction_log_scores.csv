@@ -1251,3 +1251,13 @@ date,signal_id,asset,side,rank,actionable,reference_price,risk_unit,anchor_close
 2026-11-01,20261101_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,157.804001,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-11-01 10:22:37 UTC
 2026-11-01,20261101_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,19.42,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-11-01 10:22:37 UTC
 2026-11-01,20261101_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,104.120003,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-11-01 10:22:37 UTC
+2026-11-02,20261102_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,False,,,77434.75,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-11-01 22:57:17 UTC
+2026-11-02,20261102_DXY_NONE_NO_TRADE,DXY,NONE,NO_TRADE,False,,,101.879997,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-11-01 22:57:17 UTC
+2026-11-02,20261102_ETH_NONE_NO_TRADE,ETH,NONE,NO_TRADE,False,,,2252.747803,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-11-01 22:57:17 UTC
+2026-11-02,20261102_GOLD_NONE_NO_TRADE,GOLD,NONE,NO_TRADE,False,,,3898.899902,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-11-01 22:57:17 UTC
+2026-11-02,20261102_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,False,,,28534.0,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-11-01 22:57:17 UTC
+2026-11-02,20261102_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,False,,,7614.0,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-11-01 22:57:17 UTC
+2026-11-02,20261102_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,False,,,4.929,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-11-01 22:57:17 UTC
+2026-11-02,20261102_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,False,,,157.804001,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-11-01 22:57:17 UTC
+2026-11-02,20261102_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,False,,,19.42,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,verified,2026-11-01 22:57:17 UTC
+2026-11-02,20261102_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,False,,,104.120003,,,,,,,,,False,ok,not_applicable,not_applicable,awaiting_horizon,partially_verified,2026-11-01 22:57:17 UTC
