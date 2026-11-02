@@ -279,6 +279,9 @@ SL になっていた（`docs/sl_width_2026-10-23.md`）。主因は GPT が SL 
 
 ### まだ手を付けていない
 
+- 売買頻度を Dashboard に出す（今は日次ジョブの色と artifact だけ。§1f）。
+- 2026-10 の月次較正（未実施。(13)〜(17) と頻度の崖の評価）。
+
 `invalidation_check` が `fired` になった判断を、その時点で降りた場合と
 5営業日持った場合で比べること。9/9から日次で発動日が入り始めたので、
 **10月には「シナリオ崩壊で降りる」が正しかったかを初めて測れる**。
@@ -287,11 +290,29 @@ SL になっていた（`docs/sl_width_2026-10-23.md`）。主因は GPT が SL 
 
 ---
 
+## 1f. 売買頻度の監視（2026-11-02 導入）
+
+注文(rank A/B 行)が 8月78 → 9月25 → 10月5 と落ちたのに、11/2 に人間が指摘するまで誰も数えていなかった。
+`tools/throughput_watch.py` が daily_cycle(06:55 JST)で毎日、直近14日を前56日と比べる。
+
+- **ALERT**: 見立て(資産×方向の並びの始まり)が14日で3本未満＝週1本以下、または注文も見立ても基準の
+  半分以下、または WARN が14日続いた。**daily_cycle のジョブが赤になる**。
+- **WARN**: 注文か見立てのどちらかが半分以下、または見立てが4本未満。`::warning::` だけ。
+- 読む場所: `reports/throughput_watch.md`（Actions の artifact）、`data/throughput_watch.csv`（1日1行）。
+- 遡ると WARN は 9/16、ALERT は 9/29 に出ていた。8/17〜26 にも ALERT 区間がある（注文は37〜41行あったが
+  見立ては0〜2本。同じ見立ての書き直し）。
+- 介入日（`config/interventions.json`）の前後14日の表が同じ報告に出る。**プロンプトを変えたら14日後に
+  この表を見る**。月次較正を待たない（2026-10 の月次は行われず、(13)〜(17) の評価が宙に浮いた）。
+- 診断と提案: docs/signal_drought_2026-11-02.md。
+
+---
+
 ## 2. 毎朝の確認順序（上から順に5分）
 
 Dashboard を開いて、**この順番**で見る。上ほど「土台の健全性」、下ほど「中身」。
 
 1. **Data Health / Freshness** — まず計器自体が健全か。
+   - daily_cycle が赤なら、snapshot 欠落か **売買頻度の ALERT**（§1f）。`reports/throughput_watch.md` を読む。
    - `health_status` を見る → §3.1 の解釈表へ。
    - `critical/degraded` なら attention_layers を確認し、§4 の一次対応へ。
 2. **System Health** — datetime監査（タイムゾーン整合）。

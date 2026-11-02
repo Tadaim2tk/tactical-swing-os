@@ -38,6 +38,9 @@ jobs:
 
       - name: Build weekly review
         run: python src/build_weekly_review.py
+
+      - name: Throughput watch report for the weekly review (observation only)
+        run: python tools/throughput_watch.py --report-only --report reports/throughput_watch.md || echo "warning - throughput watch failed; continuing"
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
