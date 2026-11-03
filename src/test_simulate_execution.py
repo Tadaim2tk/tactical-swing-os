@@ -274,11 +274,35 @@ def test_forming_last_bar_does_not_claim_forgone_r(monkeypatch):
     bars = _ohlcv([(f"2026-07-0{i}", 74 + i, 75 + i, 73.5 + i, 74.5 + i) for i in range(1, 6)])
     monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-05"))
     r = se.simulate_row(_row(), bars, "t")
-    assert r["status"] == "no_fill"
+    # 形成途中の5本目はまだ帯に触れるかもしれないので no_fill も名乗らない(2026-11-03 改定)
+    assert r["status"] == "open"
     assert pd.isna(r["forgone_r"]), "5本目(7/5)が当日なので確定値を名乗らない"
+    # 系列の最終行はラベル日が過ぎても2日間は形成途中とみなす(10/21 NQ の実例。bar_is_final)
     monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
     r2 = se.simulate_row(_row(), bars, "t")
-    assert not pd.isna(r2["forgone_r"]), "閉じたら記録する"
+    assert r2["status"] == "open" and pd.isna(r2["forgone_r"]), "最終行は翌日でもまだ確定しない"
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-07"))
+    r3 = se.simulate_row(_row(), bars, "t")
+    assert r3["status"] == "no_fill" and not pd.isna(r3["forgone_r"]), "2日経てば最終行でも確定"
+    # 次のバーが現れれば(最終行でなくなれば)翌日に確定する
+    bars6 = _ohlcv([(f"2026-07-0{i}", 74 + i, 75 + i, 73.5 + i, 74.5 + i) for i in range(1, 7)])
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
+    r4 = se.simulate_row(_row(), bars6, "t")
+    assert r4["status"] == "no_fill" and abs(r4["forgone_r"] - r3["forgone_r"]) < 1e-9, "6本目があれば5本目は確定"
+
+
+def test_last_bar_still_forming_after_label_date_is_not_final(monkeypatch):
+    """2026-10-22 00:16 UTC の実例: NQ の 10/21 ラベルのバーは Chicago ではまだ 10/21 の夜で、
+    翌営業日のセッションの値を抱えて更新中だった。ラベル日 < 今日(UTC) でも最終行は確定にしない。
+    時間決済・成行の建値・ATR床の時間決済も同じ規約で止まる。"""
+    import score_prediction_log as spl
+    bars = _ohlcv([("2026-10-20", 100, 101, 99, 100), ("2026-10-21", 100, 102, 99, 101)])
+    today = pd.Timestamp("2026-10-22")
+    assert spl.bar_is_final(bars, 0, today) is True      # 最終行でない → ラベル日の経過だけで確定
+    assert spl.bar_is_final(bars, 1, today) is False     # 最終行で、ラベル日から2日経っていない
+    assert spl.bar_is_final(bars, 1, pd.Timestamp("2026-10-23")) is True
+    assert spl.bar_is_final(bars, 1, pd.Timestamp("2026-10-21")) is False  # 当日ラベルは従来どおり未確定
+    assert spl.bar_is_final(bars, 5, today) is False     # 範囲外
 
 
 # --- 押し目を待たずに追る規則の併走観測(人間の承認 2026-09-09) ---

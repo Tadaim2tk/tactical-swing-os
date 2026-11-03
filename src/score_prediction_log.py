@@ -140,6 +140,26 @@ def _current_utc_date() -> pd.Timestamp:
     return pd.Timestamp(now_utc()).tz_localize(None).normalize()
 
 
+# 系列の最終行は、ラベル日が過ぎていてもまだ形成途中のことがある(2026-10-22 00:16 UTC の実例:
+# NQ の 10/21 ラベルのバーは Chicago ではまだ 10/21 の夜で、22:00 UTC に始まった翌営業日の
+# セッションの値を抱えたまま更新されていた。forgone_r が 1.80 と記録され、翌日 1.23 に変わった)。
+# 「ラベル日 < 今日(UTC)」だけでは拾えないので、最終行はラベル日から2日経つまで確定扱いしない。
+# 次のバーが系列に現れれば(=最終行でなくなれば)従来どおりラベル日の経過だけで確定。
+PROVISIONAL_LAST_BAR_DAYS = 2
+
+
+def bar_is_final(ohlcv: pd.DataFrame, i: int, today: pd.Timestamp) -> bool:
+    """i 番目のバーの終値を確定値として使ってよいか。"""
+    if i < 0 or i >= len(ohlcv):
+        return False
+    d = pd.Timestamp(ohlcv.iloc[i]["date"]).normalize()
+    if d >= today:
+        return False
+    if i == len(ohlcv) - 1 and d > today - pd.Timedelta(days=PROVISIONAL_LAST_BAR_DAYS):
+        return False
+    return True
+
+
 def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
     """台帳1行を採点する（純関数）。反後知恵: reference/risk は記録値のみ。"""
     side = normalize_side(row.get("side"))
@@ -212,7 +232,7 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
         # 形成途中のバーで確定リターンを名乗らない(#137 Codex P2: 暗号資産のUTC日足は
         # 当日ラベルのキャンドルが翌00:00 UTCまで閉じないため、朝の採点では日中値が
         # +1日リターンとして記録されていた)。ラベル日がUTCで過ぎるまでは awaiting。
-        if pd.Timestamp(ohlcv.iloc[j]["date"]).normalize() >= today_utc:
+        if not bar_is_final(ohlcv, j, today_utc):
             incomplete = True
             continue
         close_h = float(ohlcv.iloc[j]["close"])

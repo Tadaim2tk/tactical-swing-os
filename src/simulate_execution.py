@@ -36,6 +36,7 @@ from score_prediction_log import (
     MAX_REFERENCE_ANCHOR_DEVIATION,
     decision_time_anchor,
     _current_utc_date,
+    bar_is_final,
     load_ohlcv_frame,
     normalize_side,
 )
@@ -126,6 +127,11 @@ def _num(v) -> float:
     return float(n) if pd.notna(n) else float("nan")
 
 
+def _final(ohlcv: pd.DataFrame, i: int) -> bool:
+    """このバーの終値を確定値として使ってよいか(score_prediction_log.bar_is_final と同じ規約)。"""
+    return bar_is_final(ohlcv, i, _current_utc_date())
+
+
 def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict:
     """台帳1行を擬似執行する(純関数)。曖昧さは不利側へ。"""
     side = normalize_side(row.get("side"))
@@ -201,14 +207,12 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
             fill_i = i
             break
     if fill_i is None:
-        window_complete = (idx0 + FILL_WINDOW_BARS) <= len(ohlcv)
-        out["status"] = "no_fill" if window_complete else "open"
-        # 最終バーが形成途中なら逃した分を名乗らない(#165 Codex P2 / #137と同型)。
-        # window_complete は行数だけで決まるので、24時間動く資産では
-        # 当日ラベルのバーがまだ閉じていないまま5本目に数えられ、
-        # 日中値を「終値で測った方向R」として記録してしまう。
+        # 最終バーが形成途中なら no_fill も逃した分も名乗らない(#165 Codex P2 / #137 と同型。
+        # 形成途中のバーはまだ帯に触れるかもしれない)。
         last_i = idx0 + FILL_WINDOW_BARS - 1
-        if window_complete and pd.Timestamp(ohlcv.iloc[last_i]["date"]).normalize() < _current_utc_date():
+        window_complete = (idx0 + FILL_WINDOW_BARS) <= len(ohlcv) and _final(ohlcv, last_i)
+        out["status"] = "no_fill" if window_complete else "open"
+        if window_complete:
             last = float(ohlcv.iloc[last_i]["close"])
             gain = (last - fill_price) if is_long else (fill_price - last)
             out["forgone_r"] = round(gain / risk, 4)
@@ -246,7 +250,7 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
     if deadline < len(ohlcv):
         # 期限バーが形成途中(ラベル日がUTCでまだ過ぎていない)なら時間決済を確定しない
         # (#137 Codex P2と同型: 日中値を終値決済として記録しない)。
-        if pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+        if _final(ohlcv, deadline):
             out["exit_bar_offset"] = EXIT_DEADLINE_BARS
             return finish("filled_time_exit", deadline, float(ohlcv.iloc[deadline]["close"]))
     out["status"] = "open"  # 期限バー未到来/未確定 — 正直に進行中
@@ -288,7 +292,7 @@ def chase_row(row, ohlcv: pd.DataFrame, wait_bars: int = CHASE_WAIT_BARS) -> tup
     if chased:
         k = idx0 + wait_bars - 1
         # 形成途中のバーの終値で建値を作らない(#137/#165 と同型)
-        if k >= len(ohlcv) or pd.Timestamp(ohlcv.iloc[k]["date"]).normalize() >= _current_utc_date():
+        if k >= len(ohlcv) or not _final(ohlcv, k):
             return "open", np.nan
         fill_i, fill_price = k, float(ohlcv.iloc[k]["close"])
         if (fill_price <= sl) if is_long else (fill_price >= sl):
@@ -315,7 +319,7 @@ def chase_row(row, ohlcv: pd.DataFrame, wait_bars: int = CHASE_WAIT_BARS) -> tup
             return pre + "sl", r_of(sl)
         if tp1 == tp1 and ((float(bar["high"]) >= tp1) if is_long else (float(bar["low"]) <= tp1)):
             return pre + "tp1", r_of(tp1)
-    if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+    if _final(ohlcv, deadline):
         return pre + "time_exit", r_of(float(ohlcv.iloc[deadline]["close"]))
     return "open", np.nan
 
@@ -392,7 +396,7 @@ def half_exit_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, float]:
 
     if tp_i is None:
         # TP1に届かないまま期限。分けても全部でも同じ
-        if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+        if _final(ohlcv, deadline):
             r = round(r_of(float(ohlcv.iloc[deadline]["close"])), 4)
             return "half_no_tp1_time_exit", r, r
         return "open", nan, nan
@@ -412,7 +416,7 @@ def half_exit_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, float]:
         for j in range(tp_i, min(deadline + 1, len(ohlcv))):
             if hit_sl(ohlcv.iloc[j], stop):
                 return r_of(stop), "stopped"
-        if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+        if _final(ohlcv, deadline):
             return r_of(float(ohlcv.iloc[deadline]["close"])), "time"
         return None, "open"
 
@@ -531,7 +535,7 @@ def atr_floor_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, bool]:
             fill_i = i
             break
     if fill_i is None:
-        window_complete = (idx0 + FILL_WINDOW_BARS) <= len(ohlcv)
+        window_complete = (idx0 + FILL_WINDOW_BARS) <= len(ohlcv) and _final(ohlcv, idx0 + FILL_WINDOW_BARS - 1)
         return ("no_fill" if window_complete else "open"), nan, widened
     if hit_sl(ohlcv.iloc[fill_i]):
         return "atr_sl", r_of(sl_eff), widened
@@ -542,7 +546,7 @@ def atr_floor_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, bool]:
             return "atr_sl", r_of(sl_eff), widened
         if tp1 == tp1 and ((float(bar["high"]) >= tp1) if is_long else (float(bar["low"]) <= tp1)):
             return "atr_tp1", r_of(tp1), widened
-    if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+    if _final(ohlcv, deadline):
         return "atr_time_exit", r_of(float(ohlcv.iloc[deadline]["close"])), widened
     return "open", nan, widened
 
