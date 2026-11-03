@@ -42,6 +42,10 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
+      - name: Throughput watch report for the weekly review (observation only)
+        # #200 Codex P2: この step を env ブロックの前に差し込んで Sheets の秘密を奪っていた。秘密は上の step に残す。
+        run: python tools/throughput_watch.py --report-only --report reports/throughput_watch.md || echo "warning - throughput watch failed; continuing"
+
       - name: Append weekly review to the durable ledger
         run: python src/append_weekly_review_log.py --apply
 
@@ -78,6 +82,7 @@ jobs:
           path: |
             reports/weekly/*.md
             reports/audit/*.md
+            reports/throughput_watch.md
             results/weekly_review.csv
             results/weekly_review.json
             results/latest_audit_status.txt
