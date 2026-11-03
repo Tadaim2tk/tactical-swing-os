@@ -38,7 +38,7 @@ LAYER_HEALTH_REGISTRY = [
     {"label": "datetime_audit", "ts": ("json", "datetime_audit_summary_json", "generated_at_utc"), "rows": "datetime_audit", "threshold_hours": 36, "cadence": "daily"},
     {"label": "model_state_proposals", "ts": ("json", "model_state_update_summary_json", "generated_at_jst"), "rows": "model_state_update_proposals", "threshold_hours": 36, "cadence": "daily"},
     # 売買頻度の監視(2026-11-03)。daily_cycle が毎日1行書く。止まっていたら「数えていない」状態なので stale にする。
-    {"label": "throughput_watch", "ts": ("date", "latest_throughput_watch_date"), "rows": "throughput_watch", "threshold_hours": 36, "cadence": "daily"},
+    {"label": "throughput_watch", "ts": ("date", "latest_throughput_watch_recorded_at"), "rows": "throughput_watch", "threshold_hours": 36, "cadence": "daily"},
 ]
 
 # 健全性の重大度(高いほど悪い)

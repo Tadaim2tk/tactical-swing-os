@@ -206,6 +206,20 @@ def latest_date(df: pd.DataFrame, columns: list[str]) -> str:
     return max(dates).strftime("%Y-%m-%d")
 
 
+def latest_timestamp(df: pd.DataFrame, column: str) -> str:
+    """列の最新時刻を 'YYYY-MM-DD HH:MM:SS UTC' で返す(時刻を落とさない。parse_generated_at が読める形)。
+
+    監視の鮮度は「いつ走ったか」(recorded_at)で測る。latest_date は日付に丸めるので、
+    毎日走っている監視が台帳の遅れで stale に見える(#202 Codex P2)。
+    """
+    if df is None or df.empty or column not in df.columns:
+        return ""
+    parsed = pd.to_datetime(df[column], errors="coerce", utc=True).dropna()
+    if parsed.empty:
+        return ""
+    return parsed.max().tz_convert("UTC").strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
 def latest_file_date(pattern: str) -> str:
     files = sorted(Path().glob(pattern))
     if not files:

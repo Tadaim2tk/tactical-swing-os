@@ -189,7 +189,9 @@ def build_dashboard() -> tuple[dict, str]:
         "latest_rule_update_proposals_date": latest_file_date("reports/rule_updates/*_rule_update_proposals.md"),
         "latest_model_state_update_proposals_date": latest_file_date("reports/model_state/*_model_state_update_proposals.md"),
         "latest_ai_feedback_date": latest_file_date("reports/ai_feedback/*_ai_feedback.md") or ai_summary["latest_date"],
-        "latest_throughput_watch_date": latest_date(extras["throughput_watch"], ["as_of"]),
+        # 監視の鮮度は走った時刻(recorded_at)で測る。as_of は台帳の最終日なので、台帳が遅れると
+        # 監視が毎日走っていても stale に見える(#202 Codex P2)。台帳の遅れは gpt_signal_ledger 層が見る。
+        "latest_throughput_watch_recorded_at": latest_timestamp(extras["throughput_watch"], "recorded_at"),
     }
     apply_false = True
     if not rule_updates.empty and "apply_automatically" in rule_updates.columns:

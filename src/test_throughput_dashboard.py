@@ -60,3 +60,23 @@ def test_metrics_module_is_the_single_definition():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert mod.evaluate is tm.evaluate and mod.weekly_table is tm.weekly_table and mod.mark_runs is tm.mark_runs
+
+
+def test_health_layer_uses_recording_time_not_ledger_date():
+    """監視が毎日走っていれば、台帳が遅れていても throughput_watch 層は fresh(#202 Codex P2)。"""
+    import dashboard_io as dio
+    watch = pd.DataFrame([
+        {"as_of": "2026-10-28", "status": "ALERT", "recorded_at": "2026-11-02T13:01:58Z"},
+        {"as_of": "2026-10-29", "status": "ALERT", "recorded_at": "2026-11-03T21:56:10Z"},
+    ])
+    ts = dio.latest_timestamp(watch, "recorded_at")
+    assert ts == "2026-11-03 21:56:10 UTC"
+    assert dio.latest_timestamp(pd.DataFrame(), "recorded_at") == ""
+    spec = next(s for s in ds.LAYER_HEALTH_REGISTRY if s["label"] == "throughput_watch")
+    assert spec["ts"] == ("date", "latest_throughput_watch_recorded_at")
+    layer = ds.assess_layer("throughput_watch", ts, 2, pd.Timestamp("2026-11-04T06:00:00"), 36, cadence="daily")
+    assert layer["status"] == "fresh"
+    # as_of(10/29)で測っていたら 6日以上前で stale になっていたはず
+    stale = ds.assess_layer("throughput_watch", "2026-10-29", 2, pd.Timestamp("2026-11-04T06:00:00"), 36, cadence="daily")
+    assert stale["status"] == "stale"
+
