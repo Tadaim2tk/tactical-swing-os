@@ -188,6 +188,7 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "prediction_log_scores": read_csv(Path("data/prediction_log_scores.csv")),
         "signal_ledger": read_csv(Path("data/signal_log.csv")),
         "execution_simulation": read_csv(Path("data/execution_simulation.csv")),
+        "throughput_watch": read_csv(Path("data/throughput_watch.csv")),
         "prediction_log_summary_json": read_json(RESULTS_DIR / "prediction_log_score_summary.json"),
         "similar_narrative_summary_json": read_json(RESULTS_DIR / "similar_narrative_summary.json"),
     }
@@ -203,6 +204,20 @@ def latest_date(df: pd.DataFrame, columns: list[str]) -> str:
     if not dates:
         return ""
     return max(dates).strftime("%Y-%m-%d")
+
+
+def latest_timestamp(df: pd.DataFrame, column: str) -> str:
+    """列の最新時刻を 'YYYY-MM-DD HH:MM:SS UTC' で返す(時刻を落とさない。parse_generated_at が読める形)。
+
+    監視の鮮度は「いつ走ったか」(recorded_at)で測る。latest_date は日付に丸めるので、
+    毎日走っている監視が台帳の遅れで stale に見える(#202 Codex P2)。
+    """
+    if df is None or df.empty or column not in df.columns:
+        return ""
+    parsed = pd.to_datetime(df[column], errors="coerce", utc=True).dropna()
+    if parsed.empty:
+        return ""
+    return parsed.max().tz_convert("UTC").strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def latest_file_date(pattern: str) -> str:

@@ -279,8 +279,10 @@ SL になっていた（`docs/sl_width_2026-10-23.md`）。主因は GPT が SL 
 
 ### まだ手を付けていない
 
-- 売買頻度を Dashboard に出す（今は日次ジョブの色と artifact だけ。§1f）。
-- 2026-10 の月次較正（未実施。(13)〜(17) と頻度の崖の評価）。
+- 2026-10 の月次較正は 11/3 に実施（docs/monthly_calibration_2026-10.md）。§8 の決定は人間待ち
+  （SL幅の下限 1×ATR10、3,000円上限、B級記帳の6項目、観測欄2行の削減、週次 crypto の記録を Codex へ）。
+- 月初の手順を固定する: `tools/retro_build_market.py --extend` → 当月の `tools/analysis/monthly_calib_YYYY_MM.py`
+  → `docs/monthly_calibration_YYYY-MM.md`。10月はこの3つが全部抜けた。
 
 `invalidation_check` が `fired` になった判断を、その時点で降りた場合と
 5営業日持った場合で比べること。9/9から日次で発動日が入り始めたので、
@@ -298,7 +300,7 @@ SL になっていた（`docs/sl_width_2026-10-23.md`）。主因は GPT が SL 
 - **ALERT**: 見立て(資産×方向の並びの始まり)が14日で3本未満＝週1本以下、または注文も見立ても基準の
   半分以下、または WARN が14日続いた。**daily_cycle のジョブが赤になる**。
 - **WARN**: 注文か見立てのどちらかが半分以下、または見立てが4本未満。`::warning::` だけ。
-- 読む場所: `reports/throughput_watch.md`（Actions の artifact）、`data/throughput_watch.csv`（1日1行）。
+- 読む場所: **Dashboard の先頭ピル「売買頻度」とカード「売買頻度(試行回数)」**（2026-11-03 追加）、`reports/throughput_watch.md`（Actions の artifact）、`data/throughput_watch.csv`（1日1行）。
 - 遡ると WARN は 9/16、ALERT は 9/29 に出ていた。8/17〜26 にも ALERT 区間がある（注文は37〜41行あったが
   見立ては0〜2本。同じ見立ての書き直し）。
 - 介入日（`config/interventions.json`）の前後14日の表が同じ報告に出る。**プロンプトを変えたら14日後に
