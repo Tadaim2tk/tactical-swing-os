@@ -188,6 +188,7 @@ def load_data() -> tuple[dict[str, pd.DataFrame], dict[str, object], str]:
         "prediction_log_scores": read_csv(Path("data/prediction_log_scores.csv")),
         "signal_ledger": read_csv(Path("data/signal_log.csv")),
         "execution_simulation": read_csv(Path("data/execution_simulation.csv")),
+        "throughput_watch": read_csv(Path("data/throughput_watch.csv")),
         "prediction_log_summary_json": read_json(RESULTS_DIR / "prediction_log_score_summary.json"),
         "similar_narrative_summary_json": read_json(RESULTS_DIR / "similar_narrative_summary.json"),
     }
