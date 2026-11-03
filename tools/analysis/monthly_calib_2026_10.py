@@ -98,10 +98,12 @@ def main() -> int:
 
     # ------------------------------------------------------------------ 1. SL幅
     say("1. (13) SL幅を通常へ戻した後の SL率・実損 — 執行シミュレーション（確定行のみ）")
-    bins = [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-07-16"), pd.Timestamp("2026-08-31"),
-            pd.Timestamp("2026-09-15"), pd.Timestamp("2026-12-31")]
+    # 左閉右開 [a, b) にする(#201 Codex P2: 既定の右閉だと 7/16 当日の3件が「~7/15」に入り、
+    # 1b の日付条件(date < 2026-07-16 等)と食い違っていた)。境界は介入日そのもの。
+    bins = [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-07-16"), pd.Timestamp("2026-09-01"),
+            pd.Timestamp("2026-09-16"), pd.Timestamp("2027-01-01")]
     labels = ["~7/15", "7/16-8/31(SL2倍)", "9/1-9/15", "9/16-"]
-    sim["period"] = pd.cut(sim["date"], bins, labels=labels)
+    sim["period"] = pd.cut(sim["date"], bins, labels=labels, right=False)
     f = sim[sim["status"].isin(FINAL)]
     t1 = f.groupby("period").agg(n=("r_result", "size"), sl=("status", lambda s: (s == "filled_sl").sum()),
                                  tp1=("status", lambda s: (s == "filled_tp1").sum()),
@@ -175,7 +177,7 @@ def main() -> int:
     print(m.groupby(["asset", "etf_grounds", "cme_grounds"]).agg(n=("rank", "size"), no_trade=("rank", lambda s: (s == "NO_TRADE").mean())).round(2).to_string())
     print("etf_grounds:", cg["etf_grounds"].value_counts().to_dict(), "cme_grounds:", cg["cme_grounds"].value_counts().to_dict())
 
-    say("4b. (14) 週次 crypto 予測の検算（CRYPTO_PRED: 期日の終値で判定。GPT の自己採点 prev_result と並べる）")
+    say("4b. (14) 週次 crypto 予測の検算（CRYPTO_PRED: 期日の終値で判定。予測時の価格は実行前に閉じた最後の日足=土曜終値。GPT の自己採点 prev_result と並べる）")
     cp_path = ROOT / "data/crypto_predictions_weekly.csv"
     cc_path = ROOT / "data/crypto_context_weekly.csv"
     if cp_path.exists() and cp_path.stat().st_size > 60:
@@ -185,10 +187,12 @@ def main() -> int:
         rows = []
         for _, p in cp.iterrows():
             ws = pd.Timestamp(p["week_start"])
-            pred_day = ws + pd.Timedelta(days=6)  # 日曜の実行日
+            pred_day = ws + pd.Timedelta(days=6)  # 日曜の実行日(20:30 JST = 11:30 UTC)
             deadline = pd.Timestamp(p["deadline"])
             level = float(p["level"])
-            at_pred = btc[btc.index <= pred_day]["close"]
+            # 予測時に見えていた価格 = 日曜の実行時点で閉じている最後の日足 = 土曜の終値
+            # (#201 Codex P2: 日曜のUTC日足は月曜09:00 JSTまで閉じない。日曜の終値を使うと未来情報)。
+            at_pred = btc[btc.index < pred_day]["close"]
             at_pred = float(at_pred.iloc[-1]) if len(at_pred) else np.nan
             upto = btc[(btc.index > pred_day) & (btc.index <= deadline)]["close"]
             dl_close = float(upto.iloc[-1]) if len(upto) and deadline <= btc.index.max() else np.nan
