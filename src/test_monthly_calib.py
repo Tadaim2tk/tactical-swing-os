@@ -53,7 +53,7 @@ def test_draft_is_written_even_with_sparse_inputs(tmp_path):
     assert "# 月次較正 2026-10" in md and "## 決定待ち" in md
     for h in ["## 0.", "## 1.", "## 2.", "## 3.", "## 4.", "## 5.", "## 6.", "## 7.", "## 8."]:
         assert h in md, h
-    assert "計算できず" not in md or R.get("errors") == []  # 入力が空でも節は例外にならない
+    assert not R.get("errors"), R.get("errors")  # 入力が空でも節は例外にならない(「価格系列が無い」の注記は例外ではない)
     assert R["throughput"] and any(r["month"] == "2026-10" for r in R["throughput"])
     assert "価格系列(data/raw)が無い" in md or "SL幅÷ATR10" in md
 
