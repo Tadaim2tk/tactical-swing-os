@@ -394,7 +394,9 @@ def build(root: Path, month: str) -> tuple[str, dict]:
         t = tm.intervention_table(lg, path)
         if len(t):
             t["date"] = pd.to_datetime(t["date"])
-            t = t[(t["date"].dt.to_period("M") == target) | (t["date"] >= target.start_time - pd.Timedelta(days=14))]
+            # 対象月の14日前から対象月の末まで。上限を切らないと過去月の草稿に後の月の介入が混ざる(#206 Codex P2)
+            lo, hi = target.start_time - pd.Timedelta(days=14), target.end_time.normalize()
+            t = t[(t["date"] >= lo) & (t["date"] <= hi)]
             t["date"] = t["date"].dt.date
         out.append(_md(t, "_対象月に介入なし（config/interventions.json）_"))
     section("8. 対象月とその直前の介入の前後14日（注文・見立ての実数）", s8)

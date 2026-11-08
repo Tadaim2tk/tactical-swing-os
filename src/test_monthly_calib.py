@@ -40,7 +40,9 @@ def _root(tmp_path: Path, with_raw: bool = False) -> Path:
     (tmp_path / "data" / "invalidation_checks.csv").write_text("check_date,signal_id,invalidation_fired,source,recorded_at\n", encoding="utf-8")
     (tmp_path / "data" / "crypto_predictions_weekly.csv").write_text("week_start,asset,direction,level,deadline,source,recorded_at\n", encoding="utf-8")
     (tmp_path / "data" / "crypto_context_weekly.csv").write_text("week_start,driver,etf_flow_dir,cme_basis,regulation_event,confidence,prev_result,source,recorded_at\n", encoding="utf-8")
-    (tmp_path / "config" / "interventions.json").write_text(json.dumps({"interventions": [{"date": "2026-10-08", "label": "test"}]}), encoding="utf-8")
+    (tmp_path / "config" / "interventions.json").write_text(json.dumps({"interventions": [
+        {"date": "2026-10-08", "label": "in_month"}, {"date": "2026-09-20", "label": "14d_before"},
+        {"date": "2026-09-10", "label": "too_early"}, {"date": "2026-11-04", "label": "later_month"}]}), encoding="utf-8")
     if with_raw:
         days = pd.bdate_range("2026-08-01", "2026-10-31")
         pd.DataFrame({"date": days.strftime("%Y-%m-%d"), "open": 90.0, "high": 92.0, "low": 89.0, "close": 90.5, "adj_close": 90.5, "volume": 1}).to_csv(tmp_path / "data" / "raw" / "WTI.csv", index=False)
@@ -89,3 +91,13 @@ def test_default_month_is_previous_month(monkeypatch):
             return cls(2026, 11, 9)
     monkeypatch.setattr(mc, "date", D)
     assert mc.default_month() == "2026-10"
+
+
+def test_intervention_table_is_bounded_by_the_target_month(tmp_path):
+    """過去月の草稿に、後の月の介入を混ぜない(#206 Codex P2)。対象月の14日前〜月末だけ。"""
+    root = _root(tmp_path)
+    md, _ = mc.build(root, "2026-10")
+    sec = md.split("## 8.")[1].split("## 決定待ち")[0]
+    assert "in_month" in sec and "14d_before" in sec
+    assert "too_early" not in sec and "later_month" not in sec
+
