@@ -39,6 +39,11 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
 
+      - name: Monthly calibration draft (previous month; observation only, no decisions)
+        # 2026-11-09: 10月は月次が3つとも抜けた(遡及コーパスの延長・数値・文書)。草稿を毎月必ず作る。
+        # 決定は書かない。Codex の月次自動化 tso がこの草稿を docs/ へ PR する(契約は docs/monthly_calibration.md)。
+        run: python tools/monthly_calibration_run.py || echo "warning - monthly calibration draft failed; continuing"
+
       - name: Upload monthly calibration artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -46,6 +51,7 @@ jobs:
           if-no-files-found: warn
           path: |
             reports/monthly/*.md
+            data/retro/market_daily.csv
             results/monthly_calibration.csv
             results/monthly_calibration.json
             models/weights.json

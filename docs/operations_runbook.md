@@ -35,7 +35,7 @@ GitHub Actions が毎日この順で走る（UTC cron を JST 換算）。
 | 07:20 | narrative_lookahead_audit | ナラティブの未来情報混入監査 |
 | 07:30 | adversarial_review | 提案レイヤーの横断敵対監査 |
 | 土 12:10 | weekly_review | 週次レビュー |
-| 1日 12:30 | monthly_calibration | 月次較正 |
+| 1日 12:30 | monthly_calibration | 月次較正（機械側レポート + **先月の GPT 判断の草稿** `tools/monthly_calibration_run.py`。2026-11-09〜） |
 
 > dashboard workflow は内部で各監査も再生成してから公開するため、07:10 時点の
 > Dashboard は自己完結している。07:20/07:30 の単独監査workflowは追加のartifact生成。
@@ -285,8 +285,8 @@ SL になっていた（`docs/sl_width_2026-10-23.md`）。主因は GPT が SL 
 
 - 2026-10 の月次較正は 11/3 に実施（docs/monthly_calibration_2026-10.md）。§8 の決定は人間待ち
   （SL幅の下限 1×ATR10、3,000円上限、B級記帳の6項目、観測欄2行の削減、週次 crypto の記録を Codex へ）。
-- 月初の手順を固定する: `tools/retro_build_market.py --extend` → 当月の `tools/analysis/monthly_calib_YYYY_MM.py`
-  → `docs/monthly_calibration_YYYY-MM.md`。10月はこの3つが全部抜けた。
+- 月初の手順は `tools/monthly_calibration_run.py --docs` に固定した（2026-11-09。docs/monthly_calibration.md）。
+  Codex の月次自動化 `tso` の本文は人間が設定する必要がある（10/1・11/1 は仮置きのまま空回り）。
 
 `invalidation_check` が `fired` になった判断を、その時点で降りた場合と
 5営業日持った場合で比べること。9/9から日次で発動日が入り始めたので、
