@@ -174,3 +174,14 @@ def test_rr_inconsistency_warned_at_ingest(tmp_path):
     assert r["rejected"] == 0 and r["would_append"] == 2
     assert any("再計算" in w and "乖離" in w for w in by_id["RRX-001"]["warnings"])
     assert not any("再計算" in w for w in by_id["RRX-002"]["warnings"])
+
+
+def test_codeblock_csv_is_read_like_a_fence(tmp_path):
+    """2026-11-06 から GPT-6 は <CodeBlock language="csv"> で出す。フェンスと同じに読む(#205)。"""
+    import ingest_daily_log as idl
+    header = "date,signal_id,asset,side,rank,type,entry_low,entry_high,sl,tp1,tp2,rr,win_prob,expected_r,tq_score,opp_score,no_trade_score,risk_pct,regime,ems,ffs,cds,ias,cbs,mes,invalidation,verification_target,verified_status"
+    row = "2026-11-07,20261107_GOLD_BUY_PULLBACK,GOLD,BUY,B,PULLBACK,3950,3960,3880,4040,4100,1.07,0.53,0.28,60,60,40,0.25,MIXED,70,70,70,70,75,60,x,y,verified"
+    text = f"### CSV全文\n<CodeBlock language=\"csv\">{header}\n{row}</CodeBlock>\n"
+    df, fmt = idl.extract_rows(text)
+    assert fmt == "markdown_csv_block" and len(df) == 1 and df.iloc[0]["signal_id"] == "20261107_GOLD_BUY_PULLBACK"
+

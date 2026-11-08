@@ -22,3 +22,24 @@
 - `重み変更案`: あくまで提案です。`models/weights.json` は自動更新されません。
 
 この処理は分析と仮想評価の集計だけを行います。実売買、発注、XM操作、Google Sheetsへの書き込み、GitHub Actionsからのgit pushは行いません。
+
+## 月初の手順（2026-11-09 固定。10月はこの3つが全部抜けた）
+
+GPT 判断の月次較正（`docs/monthly_calibration_YYYY-MM.md`）は、上の機械側レポートとは別物。手順を一つの入口にまとめた。
+
+```bash
+python tools/monthly_calibration_run.py --docs     # 先月。遡及コーパス延長 → 数値 → 草稿
+```
+
+1. `tools/retro_build_market.py --extend` で遡及コーパス（主役の機械判定）を先月末まで延ばす。
+2. `tools/analysis/monthly_calib.py --month YYYY-MM` が、毎月同じ物差しで数値を出す
+   （売買頻度 / SL率・SL幅÷ATR10・併走 atr_floor / regime / 主役 / 週次 crypto / invalidation の時系列 /
+   併走観測 / win_prob 較正 / 介入の前後14日）。
+3. 草稿を `reports/monthly/YYYY-MM_calibration_draft.md` と `docs/monthly_calibration_YYYY-MM.md`（無いときだけ）に書く。
+   **数値の採否・ルール変更は書かない。** 「決定待ち」は人間が埋める。
+
+誰が回すか: GitHub Actions `monthly_calibration.yml`（毎月1日 12:30 JST）が草稿を artifact に出す。
+docs への PR は Codex の月次自動化 `tso`（毎月1日 12:30）が同じコマンドを回して作る（本文は人間が設定。
+2026-10-01・11-01 は本文が仮置きのまま走って何もしていなかった）。ChatGPT 側の月次タスク
+「較正する短期スイングモデル」は 2026-11-09 時点で有効一覧に無い（一時停止または削除）。
+

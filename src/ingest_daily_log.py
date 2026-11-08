@@ -28,6 +28,7 @@ import argparse
 import io
 import json
 import re
+from html import unescape as html_unescape
 import sys
 from pathlib import Path
 
@@ -42,6 +43,9 @@ KNOWN_RANKS = {"A", "B", "C", "NO_TRADE"}
 ORIGINS = {"chatgpt_app", "gpt_terminal", "manual"}
 
 CSV_BLOCK_RE = re.compile(r"```csv\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+# 2026-11-06 から GPT-6 は CSV を ```csv フェンスではなく <CodeBlock language="csv">…</CodeBlock> で出す。
+# どちらも同じ「CSVブロック」として読む（取込が止まった原因の一つ。#205）。
+CODEBLOCK_RE = re.compile(r"<CodeBlock\s+language=\"csv\"[^>]*>\s*(.*?)</CodeBlock>", re.DOTALL | re.IGNORECASE)
 
 
 def extract_rows(text: str) -> tuple[pd.DataFrame, str]:
@@ -56,7 +60,7 @@ def extract_rows(text: str) -> tuple[pd.DataFrame, str]:
         except json.JSONDecodeError:
             pass
     # 2) Markdown 中の ```csv ブロック（複数あれば結合）
-    blocks = CSV_BLOCK_RE.findall(text)
+    blocks = CSV_BLOCK_RE.findall(text) + [html_unescape(b) for b in CODEBLOCK_RE.findall(text)]
     if blocks:
         frames = []
         for b in blocks:
