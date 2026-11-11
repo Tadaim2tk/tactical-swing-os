@@ -65,6 +65,8 @@ python tools/ingest_from_export.py ~/Downloads/tso_export_YYYYMMDD.json --apply 
 定期実行: Claude デスクトップアプリの定期タスク「TSO 日次取込」が毎朝これを回し、データ専用 PR を作って
 auto-merge を予約する（タスクの定義は `~/.claude/scheduled-tasks/tso-daily-ingest/SKILL.md`。
 アプリが開いていて Chrome が ChatGPT にログイン済みであることが条件）。
+権限モードはタスクごとの設定で、既定（毎回確認する）のままでは最初のコマンドで承認待ちになる。人間がタスクの
+編集画面で選ぶ（docs/operations_runbook.md §1b）。取込が2日続けて入らなければ daily_cycle が赤になる（同 §1g）。
 
 ## 取込時の検証（ingest_daily_log.py）
 

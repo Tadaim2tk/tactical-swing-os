@@ -65,9 +65,19 @@ GitHub Actions とは別に、ChatGPT のスケジュール実行が判断その
 日次の出力（毎日 07:00 のタスク）を台帳へ入れるのは、**Claude の定期タスク「TSO 日次取込」**（毎日 07:40 と 12:40。
 `tools/ingest_from_export.py`、docs/daily_log_ingestion.md 経路3）。Codex の自動化 tso-2 は 2026-10-28 の
 レポートから本文を読めず（changelog (22)）、main に当日の行があれば何もしない側に回った。
-台帳が2日以上止まったら、Dashboard の鮮度レイヤー `gpt_signal_ledger` が stale になる。そのときは
-(1) Claude アプリが開いているか (2) Chrome が ChatGPT にログイン済みか (3) 定期タスクの実行履歴、の順で見る。
+台帳が2日続けて増えなければ **daily_cycle が赤になる**（§1g。2026-11-11 追加）。Dashboard の鮮度レイヤー
+`gpt_signal_ledger` も stale になる。そのときは (1) 定期タスクの実行履歴（承認待ちで止まっていないか）
+(2) Claude アプリが開いているか (3) Chrome が ChatGPT にログイン済みか、の順で見る。
 月次は Codex の自動化 `tso`（毎月1日 12:30、ローカルのスクリプトだけで動く）。
+
+定期タスクの権限モード（2026-11-11 の試運転で確認）:
+
+- 権限モードは**タスクごと**に持つ。人間がタスクの編集画面（Scheduled → タスク → 鉛筆 → 指示文の欄のメニュー）で選ぶ。
+  Claude からは変えられない。作成時のセッションのモードは引き継がれない。
+- 既定（毎回確認する）のままだと、最初のコマンド（`git fetch`）で承認待ちになって進まない。
+- 承認待ちで止まった回が残っていると、次の回は「前の回が実行中」で飛ばされる。止まった回は、そのセッションを
+  開いて承認するか停止する。
+- 走るのは Claude アプリが開いていて Mac が起きている間だけ。寝ていた回は、起きたときに直近の1回だけやり直される。
 
 ### 一時停止中（16本）— 放置されているもの
 
@@ -320,6 +330,27 @@ SL になっていた（`docs/sl_width_2026-10-23.md`）。主因は GPT が SL 
   この表を見る**。月次較正を待たない（2026-10 の月次は行われず、(13)〜(17) の評価が宙に浮いた）。
 - 診断と提案: docs/signal_drought_2026-11-02.md。
 
+## 1g. 台帳の鮮度（取込が止まっていないか。2026-11-11 導入）
+
+取込の経路（ChatGPT → 台帳）は外の道具に依存していて、黙って止まる。2026-10-28 のレポートから Codex が
+ChatGPT の本文を読めなくなり、11/3〜11/9 は取込が止まったが、daily_cycle は緑のままだった。§1f の監視は
+台帳の最終日を基準に数えるので、台帳が止まると一緒に止まって何も言わない。
+
+`tools/ledger_freshness.py` が daily_cycle(06:55 JST)で毎日、**今日（JST）から**台帳の最終日までの日数を数える。
+
+| 遅れ（今日 − 台帳の最終日） | 判定 | 意味 |
+|---|---|---|
+| 1日以下 | OK | 06:55 の時点では当日の出力（07:00）はまだ無い。前日分まで入っていれば正常 |
+| 2日 | WARN（`::warning::` だけ） | 1日ぶん取り込めていない。取込は欠けた日をまとめて入れるので、次の回が拾えば戻る |
+| 3日以上、または台帳が読めない | **ALERT（ジョブが赤）** | 2日続けて取り込めていない = 経路が壊れている |
+
+赤になったら見る順: (1) Claude の定期タスク「TSO 日次取込」の実行履歴（承認待ちで止まっていないか。§1b）
+(2) Claude アプリが開いているか・Mac が寝ていなかったか (3) Chrome が ChatGPT にログイン済みか
+(4) ChatGPT の定時タスクがその日の出力を出しているか。直すまで毎日赤のまま（偽の緑にしない）。
+手で埋めるときは docs/daily_log_ingestion.md 経路3（`tools/ingest_from_export.py`）。
+
+10/27 で止まった台帳に当てると、10/29 朝に WARN、10/30 朝に ALERT が出る（実際に気付いたのは 11/9）。
+
 ---
 
 ## 2. 毎朝の確認順序（上から順に5分）
@@ -327,7 +358,8 @@ SL になっていた（`docs/sl_width_2026-10-23.md`）。主因は GPT が SL 
 Dashboard を開いて、**この順番**で見る。上ほど「土台の健全性」、下ほど「中身」。
 
 1. **Data Health / Freshness** — まず計器自体が健全か。
-   - daily_cycle が赤なら、snapshot 欠落か **売買頻度の ALERT**（§1f）。`reports/throughput_watch.md` を読む。
+   - daily_cycle が赤なら、snapshot 欠落か、**売買頻度の ALERT**（§1f。`reports/throughput_watch.md` を読む）か、
+     **台帳の停止**（§1g。取込が2日続けて入っていない）。どれかはジョブの最後のステップのログに出る。
    - `health_status` を見る → §3.1 の解釈表へ。
    - `critical/degraded` なら attention_layers を確認し、§4 の一次対応へ。
 2. **System Health** — datetime監査（タイムゾーン整合）。
@@ -400,6 +432,7 @@ Dashboard を開いて、**この順番**で見る。上ほど「土台の健全
 | Audit Report `WARNING` | datetime不整合や評価欠損 | reports/audit の最新mdを読む |
 | Dashboard workflow が `Upload Pages artifact` で失敗 | 生成物が出ていない（過去の `__main__`脱落のような） | Build dashboard ステップが実ファイルを出したかログ確認 |
 | validation suite が赤 | いずれかのスクリプトが例外 | Step Summary の missing 項目を特定し、該当スクリプトをローカル実行 |
+| daily_cycle が赤、ログに `ledger freshness ALERT` | 取込の経路が止まった（定期タスクが承認待ち／アプリが閉じていた／ChatGPT のログイン切れ／ChatGPT 側が出力していない） | §1g の順で確認。欠けた日は `tools/ingest_from_export.py` でまとめて入る |
 
 > 共通原則: **「赤い＝壊れた」ではなく「赤い＝正直に異常を表示できている」**。
 > 偽の緑（false healthy / false passed / false fresh）の方が危険。

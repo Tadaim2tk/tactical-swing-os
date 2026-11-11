@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "analysis"))
@@ -80,6 +81,50 @@ def test_runner_writes_report_and_docs_without_overwriting(tmp_path):
     assert (root / "docs" / "monthly_calibration_2026-10.draft.md").exists()
     rc2 = run.main(["--root", str(root), "--month", "2026-09", "--no-extend", "--docs"])
     assert rc2 == 0 and (root / "docs" / "monthly_calibration_2026-09.md").exists()
+
+
+def _capture_extend_calls(monkeypatch):
+    """延長の subprocess を差し替え、呼ばれた回数だけ数える（ネットワークに出ない）。"""
+    calls = []
+
+    class _Done:
+        returncode = 0
+        stdout = "extended\n"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append([str(c) for c in cmd])
+        return _Done()
+
+    monkeypatch.setattr(run.subprocess, "run", fake_run)
+    return calls
+
+
+def test_runner_accepts_explicit_extend_flag(tmp_path, monkeypatch):
+    """月次の自動化（Codex）の手順書は --extend --docs で呼ぶ。未定義の旗で exit 2 にならないこと。"""
+    root = _root(tmp_path)
+    calls = _capture_extend_calls(monkeypatch)
+    rc = run.main(["--root", str(root), "--month", "2026-10", "--extend", "--docs"])
+    assert rc == 0
+    assert len(calls) == 1 and calls[0][-1] == "--extend" and calls[0][-2].endswith("retro_build_market.py")
+    assert (root / "reports" / "monthly" / "2026-10_calibration_draft.md").exists()
+
+
+def test_runner_extends_by_default_and_skips_with_no_extend(tmp_path, monkeypatch):
+    root = _root(tmp_path)
+    calls = _capture_extend_calls(monkeypatch)
+    assert run.main(["--root", str(root), "--month", "2026-10"]) == 0
+    assert len(calls) == 1
+    assert run.main(["--root", str(root), "--month", "2026-10", "--no-extend"]) == 0
+    assert len(calls) == 1          # --no-extend では呼ばれない
+
+
+def test_runner_rejects_extend_with_no_extend(tmp_path, monkeypatch):
+    root = _root(tmp_path)
+    _capture_extend_calls(monkeypatch)
+    with pytest.raises(SystemExit) as e:
+        run.main(["--root", str(root), "--month", "2026-10", "--extend", "--no-extend"])
+    assert e.value.code == 2
 
 
 def test_default_month_is_previous_month(monkeypatch):
