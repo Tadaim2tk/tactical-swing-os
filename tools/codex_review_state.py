@@ -97,7 +97,11 @@ def _bot(c):
 
 
 def _summary_rows(body):
-    """要約コメントの表から (状態の文字列, コミット) を拾う。"""
+    """要約コメントの表から (状態の文字列, コミット, その行の文字列) を拾う。
+
+    行の文字列を返すのは、時刻（datetime 属性）を **その行からだけ** 取るため。
+    表全体から取ると、別コミットの行の時刻がいまの head の事象として数えられる。
+    """
     out = []
     for line in body.splitlines():
         line = line.strip()
@@ -107,7 +111,7 @@ def _summary_rows(body):
         for i, cell in enumerate(cells):
             m = ROW_SHA.search(cell)
             if m and i > 0:
-                out.append((cells[i - 1].lower(), m.group(1)))
+                out.append((cells[i - 1].lower(), m.group(1), line))
                 break
     return out
 
@@ -166,15 +170,16 @@ def classify(head_sha, comments, reviews_for_head=0, unresolved_threads=0,
         rows = _summary_rows(body)
         if rows:
             matched = False
-            for status, sha in rows:
+            for status, sha, line in rows:
                 if head_sha.startswith(sha):
                     summary_kind = _status_kind(status)
                     matched = True
-            if matched:
-                for m in DT_ATTR.findall(body):
-                    t = _ts(m)
-                    if t and (latest_event is None or t > latest_event):
-                        latest_event = t
+                    # **時刻は head の行からだけ取る(#167 Codex P2)。** 表全体から取ると、
+                    # 別コミットの新しい行が、いまの head への承認を「事象より前」にして無効にする。
+                    for m in DT_ATTR.findall(line):
+                        t = _ts(m)
+                        if t and (latest_event is None or t > latest_event):
+                            latest_event = t
             # 表は読めたが head の行が無い。本文が head を名指しているなら読めていない
             if not matched and names_head:
                 unreadable_for_head = True

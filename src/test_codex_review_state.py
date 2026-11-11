@@ -306,3 +306,26 @@ def test_unreadable_head_summary_blocks_even_after_a_parsed_one():
     stale = _bot("<!-- codex-pull-request-review-summary -->\n\n"
                  "Code Review completed for %s (old layout, no table)\n" % OLD)
     assert classify(HEAD, [stale, _summary(HEAD)], 0, 0, ACK)[0] == "clean"
+
+
+def test_another_commits_row_timestamp_does_not_revoke_the_ack():
+    """**別コミットの行の時刻で、いまの head の承認を無効にしない(#167 Codex P2)。**
+
+    要約の表に複数コミットの行があるとき、head の行が見つかっただけで表全体の datetime を
+    拾っていた。head の失敗行（1/1）の後に ACK（1/2）があれば acked のはずだが、別コミットの
+    完了行（1/3）が同じ表にあると「ACK が最新のレビュー事象より前」になって undecidable に落ちた。
+    """
+    def table(*rows):
+        return _bot("<!-- codex-pull-request-review-summary -->\n\n"
+                    "| Review | Status | Commit | Review trigger |\n| --- | --- | --- | --- |\n"
+                    + "".join("| 📝 **Code Review** | %s <relative-time datetime=\"%s\">%s</relative-time> "
+                              "| `%s` | PR opened |\n" % (status, at, at, sha[:7])
+                              for sha, status, at in rows))
+    ack = _human("GATE-ACK: %s" % HEAD, created_at="2026-01-02T00:00:00Z")
+    head_failed = (HEAD, "❌ **Failed**", "2026-01-01T00:00:00Z")
+    other_done = (OLD, "✅ **Completed**", "2026-01-03T00:00:00Z")
+    assert classify(HEAD, [table(head_failed), ack], 0, 0, ACK)[0] == "acked"
+    assert classify(HEAD, [table(head_failed, other_done), ack], 0, 0, ACK)[0] == "acked"
+    # head 自身の行の時刻が ACK より後なら、これまでどおり認めない
+    head_later = (HEAD, "❌ **Failed**", "2026-01-05T00:00:00Z")
+    assert classify(HEAD, [table(other_done, head_later), ack], 0, 0, ACK)[0] == "undecidable"
