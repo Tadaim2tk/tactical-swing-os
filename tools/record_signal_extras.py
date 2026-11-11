@@ -126,8 +126,8 @@ def _window_open(day: str, check_date: str) -> bool:
 
 
 def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
-    """台帳上まだ窓の内側にある方向あり判断のうち、過去に fired と記録されておらず、
-    今回の申告にも含まれていない signal_id を返す。
+    """台帳上まだ窓の内側にある方向あり判断(資産ごとに最新の1件)のうち、過去に fired と
+    記録されておらず、今回の申告にも含まれていない signal_id を返す。
 
     これが空でないと、その判断は「発動しなかった」のか「聞かれなかった」のかが
     区別できない。invalidation_check は発動率を測るための列なので、分母が黙って
@@ -147,14 +147,32 @@ def _undeclared_open(check_date: str, declared: set[str]) -> list[str]:
     # declared に1回目の分が入らない。ここを見ないと、追記のたびに前回申告済みの
     # 側が「漏れ」として出て、警告が逆さまになる。
     declared = declared | {r["signal_id"] for r in history if r.get("check_date") == check_date}
-    out = []
+    directional = []
     for r in _read(LEDGER_PATH):
-        sid = (r.get("signal_id") or "").strip()
         day = (r.get("date") or "").strip()
         if (r.get("side") or "").strip().upper() not in {"BUY", "SELL", "LONG", "SHORT"}:
             continue
         if not day or day >= check_date:
             continue          # 当日ぶんはまだ確認しようがない
+        directional.append(r)
+    # 同じ資産に、より新しい方向あり判断が(確認日の前日までに)出ていれば、古い方は
+    # 「最新の判断に引き継がれた」とみなして申告を求めない(2026-11-12〜、changelog(22))。
+    # 見立てが続く日は毎日B行を出す契約(2026-11-03)にしたら、未決着が1日40件前後になり、
+    # GPT は 11/3〜11/9 に 68% を unknown と書き、11/11 には
+    # `historical_pending_signals=unknown` の1語にまとめた。聞く単位を資産ごとの最新1件
+    # (最大10件)に絞る。資産名が台帳に無い古い形式の行は、従来どおり1件ずつ扱う。
+    latest_day: dict[str, str] = {}
+    for r in directional:
+        asset = (r.get("asset") or "").strip().upper()
+        if asset:
+            latest_day[asset] = max(latest_day.get(asset, ""), r["date"].strip())
+    out = []
+    for r in directional:
+        sid = (r.get("signal_id") or "").strip()
+        day = r["date"].strip()
+        asset = (r.get("asset") or "").strip().upper()
+        if asset and day < latest_day[asset]:
+            continue          # 同じ資産の新しい判断に引き継がれた
         if not _window_open(day, check_date):
             continue          # 窓が閉じた
         if sid in fired or sid in declared:

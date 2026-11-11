@@ -34,11 +34,34 @@ codex CLI（ChatGPT アカウント認証済み・web検索有効）で日次ロ
 ChatGPT アプリ側の会話メモリは引き継がれないため、**品質は経路別比較で検証してから**
 主経路を決める（下記）。
 
-### 経路3: Claude によるブラウザ読み取り（スポット確認用）
+### 経路3: Claude がログイン済みブラウザから会話 API の JSON を取る（2026-11-11 から主経路・定期実行）
 
-Claude Code セッションで「ChatGPT のタブを読んで取り込んで」と依頼すれば、
-Chrome 拡張経由で開いているチャットからレポートを読み取り、経路1と同じ検証付き取込を行う。
-（常用ではなく、貼り忘れ時の回収・照合用）
+**なぜ主経路になったか**: Codex の自動化（tso-2）は 2026-10-28 のレポートから本文を読めない
+（GPT-6 の出力が新しい描画方式 `model_dil_v2` になり、`read_thread` が content reference しか返さない。
+ブラウザ経由の添付ダウンロードも 11/9 から chatgpt.com では Computer Use 不可）。経緯は changelog (21)(22)。
+
+手順は2つだけ:
+
+1. Chrome（Claude in Chrome 拡張、ChatGPT にログイン済み）で `https://chatgpt.com/` を開き、ページ内 JS で
+   `/api/auth/session` の accessToken を使って `/backend-api/conversations?order=updated` から題名が
+   「TSO Daily Signal Log」で始まる最新の会話と「Crypto market update」で始まる最新の会話を選び、
+   `/backend-api/conversation/<id>` の JSON を**配列にして1ファイル**で保存する（Blob ダウンロード。
+   1タブにつき1回しか保存できないので、2つの会話を1ファイルにまとめる）。読むだけで、ChatGPT には何も書かない。
+2. 最新の `origin/main` から作った作業ツリーで:
+
+```bash
+python tools/ingest_from_export.py ~/Downloads/tso_export_YYYYMMDD.json           # dry-run
+python tools/ingest_from_export.py ~/Downloads/tso_export_YYYYMMDD.json --apply   # 取込・記録・採点まで
+```
+
+スクリプトがやること: 本文アーカイブ（無い日だけ）→ 未取込の日ごとに「10資産10行・日付一致・列数」を検証 →
+取込（そろわない日は理由を出して飛ばす。部分取込はしない）→ 主役・invalidation_check（本文に明示された値だけ）→
+週次 crypto の2行（未記録の週だけ）→ 価格取得・採点・執行シミュレーション → `results/ingest_from_export_summary.json`。
+終了コード 2 は「取り込めなかった日がある」。
+
+定期実行: Claude デスクトップアプリの定期タスク「TSO 日次取込」が毎朝これを回し、データ専用 PR を作って
+auto-merge を予約する（タスクの定義は `~/.claude/scheduled-tasks/tso-daily-ingest/SKILL.md`。
+アプリが開いていて Chrome が ChatGPT にログイン済みであることが条件）。
 
 ## 取込時の検証（ingest_daily_log.py）
 

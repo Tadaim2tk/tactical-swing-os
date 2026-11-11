@@ -185,3 +185,72 @@ def test_codeblock_csv_is_read_like_a_fence(tmp_path):
     df, fmt = idl.extract_rows(text)
     assert fmt == "markdown_csv_block" and len(df) == 1 and df.iloc[0]["signal_id"] == "20261107_GOLD_BUY_PULLBACK"
 
+
+# --- 2026-11-10/11: 素の Markdown に変えた直後、見送り行の書き方が変わった ---
+
+NT_SWAPPED = "2026-11-10,20261110_VIX_NO_TRADE_NONE,VIX,NO_TRADE,NONE,NONE,,,,,,,,,38,29,82,0,EVENT,42,40,35,30,39,32,VIX_close_missing,VIX_index,partially_verified"
+NT_SHORT = "2026-11-11,20261111_BTC_NO_TRADE_NONE,BTC,NO_TRADE,NONE,NONE,,,,,,,,42,35,78,0,MIXED,42,48,39,35,43,38,ETF_CME_missing,BTCUSD_ETF,partially_verified"
+B_ROW = "2026-11-11,20261111_GOLD_SELL_PULLBACK,GOLD,SELL,B,PULLBACK,4020,4060,4180,3780,3680,1.86,0.55,0.37,68,72,25,0.25,MIXED,63,66,61,58,72,59,inv,vt,partially_verified"
+
+
+def test_no_trade_vocabulary_is_normalized_and_logged(tmp_path):
+    """side=NO_TRADE/rank=NONE/type=NONE を台帳の約束(NONE/NO_TRADE/NO_TRADE)へ。signal_id も揃える。"""
+    ledger, raw = _ledger(tmp_path), _raw(tmp_path, asset="VIX", close=19.0)
+    text = f"```csv\n{HEADER}\n{NT_SWAPPED}\n```"
+    r = idl.ingest(text, origin="chatgpt_app", apply=True, run_score=False, ledger_path=ledger, raw_dir=raw)
+    assert r["appended"] == 1 and r["rejected"] == 0
+    d = r["details"][0]
+    assert d["signal_id"] == "20261110_VIX_NONE_NO_TRADE"
+    assert any("見送り行の語彙を正規化" in w for w in d["warnings"])
+    assert not any("既知enum外" in w for w in d["warnings"])
+    led = pd.read_csv(ledger, dtype=str, keep_default_na=False)
+    row = led[led["signal_id"] == "20261110_VIX_NONE_NO_TRADE"].iloc[0]
+    assert (row["side"], row["rank"], row["type"]) == ("NONE", "NO_TRADE", "NO_TRADE")
+    assert row["tq_score"] == "38" and row["no_trade_score"] == "82" and row["regime"] == "EVENT"
+    assert "_ingest_note" not in led.columns and "_raw_signal_id" not in led.columns
+    log = pd.read_csv(tmp_path / "ingest_normalizations.csv", dtype=str, keep_default_na=False)
+    assert log.iloc[0]["raw_signal_id"] == "20261110_VIX_NO_TRADE_NONE" and log.iloc[0]["signal_id"] == "20261110_VIX_NONE_NO_TRADE"
+    # 2回目は重複として弾かれ、ログも増えない
+    r2 = idl.ingest(text, origin="chatgpt_app", apply=True, run_score=False, ledger_path=ledger, raw_dir=raw)
+    assert r2["skipped_duplicate"] == 1 and len(pd.read_csv(tmp_path / "ingest_normalizations.csv")) == 1
+
+
+def test_short_no_trade_row_is_realigned_not_silently_shifted(tmp_path):
+    """27列の見送り行(空欄が1つ不足)。補正前は tq_score が expected_r に入り regime が risk_pct に入っていた。"""
+    ledger = _ledger(tmp_path)
+    raw = _raw(tmp_path, asset="BTC", close=77000)
+    _raw(tmp_path, asset="GOLD", close=4040)
+    text = f"```csv\n{HEADER}\n{B_ROW}\n{NT_SHORT}\n```"
+    r = idl.ingest(text, origin="chatgpt_app", apply=True, run_score=False, ledger_path=ledger, raw_dir=raw)
+    assert r["parsed"] == 2 and r["appended"] == 2 and r["rejected"] == 0
+    led = pd.read_csv(ledger, dtype=str, keep_default_na=False)
+    nt = led[led["signal_id"] == "20261111_BTC_NONE_NO_TRADE"].iloc[0]
+    assert nt["expected_r"] == "" and nt["tq_score"] == "42" and nt["opp_score"] == "35" and nt["no_trade_score"] == "78"
+    assert nt["risk_pct"] == "0" and nt["regime"] == "MIXED" and nt["verified_status"] == "partially_verified"
+    b = led[led["signal_id"] == "20261111_GOLD_SELL_PULLBACK"].iloc[0]
+    assert b["sl"] == "4180" and b["regime"] == "MIXED"       # 揃っている行は触らない
+    notes = [w for d in r["details"] for w in d["warnings"]]
+    assert any("空欄が1つ不足" in w for w in notes)
+
+
+def test_wrong_field_count_that_is_not_the_typical_form_is_rejected(tmp_path):
+    """方向あり行が1列足りない等、補正の典型形でない列数違いは取り込まない(黙ってずらさない)。"""
+    ledger, raw = _ledger(tmp_path), _raw(tmp_path, asset="GOLD", close=4040)
+    short_b = B_ROW.replace(",0.25,MIXED,", ",MIXED,")       # risk_pct を落として27列
+    text = f"```csv\n{HEADER}\n{short_b}\n{NT_SWAPPED}\n```"
+    r = idl.ingest(text, origin="chatgpt_app", apply=True, run_score=False, ledger_path=ledger, raw_dir=raw)
+    by = {d["signal_id"]: d for d in r["details"]}
+    assert by["20261111_GOLD_SELL_PULLBACK"]["verdict"] == "reject"
+    assert "列数が27" in by["20261111_GOLD_SELL_PULLBACK"]["warnings"][0]
+    assert by["20261110_VIX_NONE_NO_TRADE"]["verdict"] == "append"
+    led = pd.read_csv(ledger, dtype=str, keep_default_na=False)
+    assert "20261111_GOLD_SELL_PULLBACK" not in set(led["signal_id"])
+
+
+def test_canonical_no_trade_rows_are_left_untouched(tmp_path):
+    ledger, raw = _ledger(tmp_path), _raw(tmp_path, asset="VIX", close=19.0)
+    canon = "2026-11-09,20261109_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,38,29,91,,EVENT,42,40,35,30,39,32,x,y,verified"
+    r = idl.ingest(f"{HEADER}\n{canon}", origin="chatgpt_app", apply=True, run_score=False, ledger_path=ledger, raw_dir=raw)
+    assert r["appended"] == 1 and r["details"][0]["warnings"] == []
+    assert not (tmp_path / "ingest_normalizations.csv").exists()
+
