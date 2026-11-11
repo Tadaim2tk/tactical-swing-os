@@ -61,6 +61,26 @@ jobs:
       - name: Build report
         run: python src/build_report.py
 
+      - name: Throughput watch (売買頻度の監視)
+        # 2026-11-02: 9/14 の週から注文も見立ても崖になっていたのに、11/2 に人間が指摘するまで
+        # 誰も数えていなかった。直近14日を前56日と比べ、ALERT ならこのジョブを赤にする
+        # (snapshot 欠落と同じ流儀: サイクルは最後まで走らせ、ジョブの色で知らせる)。
+        # 観測だけ。提案・配分・採用に入る数は変えない。
+        run: |
+          rm -f results/.throughput_alert results/.throughput_alert_new
+          set +e
+          python tools/throughput_watch.py --fail-on-alert --transition-file results/.throughput_alert_new
+          rc=$?
+          set -e
+          if [ "$rc" = "2" ]; then
+            echo "::error::throughput watch ALERT - 売買頻度が床を割っている (reports/throughput_watch.md)"
+            touch results/.throughput_alert
+          elif [ "$rc" != "0" ]; then
+            echo "::warning::throughput watch failed to run (rc=$rc); continuing"
+          elif grep -q "^status=WARN" <(python tools/throughput_watch.py --check-only 2>/dev/null); then
+            echo "::warning::throughput watch WARN - 売買頻度が基準の半分以下 (reports/throughput_watch.md)"
+          fi
+
       - name: Sync to Google Sheets
         run: python src/sync_to_sheets.py
         env:
@@ -78,7 +98,7 @@ jobs:
           # 機械生成分は data/generated_signal_log.csv へ隔離(予測台帳 data/signal_log.csv はGPT判断専用、
           # 2026-08-25 人間決定)。summary json は results/*.json が gitignore のため add しない(#112由来の
           # 3日連続コミット失敗の原因。診断はアーティファクトで配布)。
-          git add data/generated_signal_log.csv data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv data/execution_simulation.csv data/market_context_daily.csv
+          git add data/generated_signal_log.csv data/shadow_weight_comparisons.csv data/shadow_outcome_diffs.csv data/prediction_log_scores.csv data/execution_simulation.csv data/market_context_daily.csv data/throughput_watch.csv
           if git diff --cached --quiet; then
             echo "no ledger changes to commit"
           else
@@ -94,16 +114,23 @@ jobs:
               git push "git@github.com:$GITHUB_REPOSITORY.git" HEAD:main
           fi
 
-      - name: Fail if the point-in-time snapshot was not recorded
+      - name: Fail if the point-in-time snapshot was not recorded, or throughput is in ALERT
         if: always()
         run: |
           # この欠落は後から埋められない(当時の値は再構成すると lookahead 汚染になる)。
           # 日次サイクル自体は最後まで走らせたうえで、ジョブは赤にして通知を出す。
+          fail=0
           if [ -f results/.mctx_failed ]; then
             echo "::error::point-in-time market context snapshot missing for this run - this gap cannot be backfilled later"
-            exit 1
+            fail=1
+          else
+            echo "market context snapshot recorded"
           fi
-          echo "market context snapshot recorded"
+          if [ -f results/.throughput_alert ]; then
+            echo "::error::throughput watch ALERT - 売買頻度が床を割っている。reports/throughput_watch.md を読む"
+            fail=1
+          fi
+          exit $fail
 
       - name: Upload TSO artifacts
         if: always()

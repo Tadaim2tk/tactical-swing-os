@@ -36,6 +36,7 @@ from score_prediction_log import (
     MAX_REFERENCE_ANCHOR_DEVIATION,
     decision_time_anchor,
     _current_utc_date,
+    bar_is_final,
     load_ohlcv_frame,
     normalize_side,
 )
@@ -74,6 +75,28 @@ COST_SENSITIVITY_R = (0.02, 0.05, 0.10)
 CHASE_ASSETS = frozenset({"NASDAQ", "BTC", "USDJPY"})
 CHASE_WAIT_BARS = 1
 
+# TP1で全部降りると、伸びた分を取り逃す(人間の承認 2026-09-09)。
+# 観測: 約定した118件のうち46件が TP1 を中央値 1.14R ぶん超えて伸びていた(合計55R)。
+# 未約定ぶんの17.1Rより大きく、「大相場に乗れない」の主因はこちらの可能性がある。
+# 規則: TP1で半分だけ降り、残りを時間決済(6本目の終値)まで持つ。
+#
+# 残りに置く損切りを2通り測る。どちらにするかを数字で決めるため、両方残す:
+#   half_exit_r     残りも元のSLのまま。伸びなければ利益を返上しうる
+#   half_exit_be_r  残りは建値(fill_price)で降りる。返上はしないが早く出される
+# **これも併走観測であって既定の執行規約ではない。** r_result はTP1全決済のまま。
+HALF_EXIT_FRACTION = 0.5
+
+# SL幅が日中値幅の半分になっていた(docs/sl_width_2026-10-23.md、人間の承認 2026-10-23 案3)。
+# SL幅÷ATR10 の中央値が 6-8月 1.71 → 9/16以降 0.57。初日の値幅が SL幅を上回り、
+# 方向が合っていても普通の揺れで切られる(9/17以降の約定6件中5件が SL、うち2件は
+# 5日目に予測方向へ戻っていた)。
+# 規則: SL幅 = max(申告の SL幅, ATR_FLOOR_MULT × 判断時の ATR10)。Entry帯と TP1 は変えない。
+# Rは広げた SL幅で測る(risk_pct 一定なら玉が小さくなるのと同じ)。TP1 までの R は縮む。
+# **これも併走観測であって既定の執行規約ではない。** r_result は申告の SL のまま。
+# プロンプト側に SL の下限を置くか(案1)は、この列が溜まってから次の較正で決める。
+ATR_FLOOR_BARS = 10
+ATR_FLOOR_MULT = 1.0
+
 COLUMNS = [
     "date", "signal_id", "asset", "side", "rank", "risk_pct",
     "entry_low", "entry_high", "sl", "tp1",
@@ -90,6 +113,11 @@ COLUMNS = [
     "forgone_r",
     # 押し目を待たずに追った場合の併走観測(CHASE_ASSETS のみ)。r_result とは別枠。
     "chase_status", "chase_r",
+    # TP1で半分降りて残りを時間決済まで持った場合の併走観測。r_result とは別枠。
+    # _be_ は残りの損切りを建値に上げた版。どちらにするかは10月の較正で決める。
+    "half_exit_status", "half_exit_r", "half_exit_be_r",
+    # SL幅を ATR10 以上に広げた場合の併走観測。r_result とは別枠。widened は広げたか。
+    "atr_floor_status", "atr_floor_r", "atr_floor_widened",
     "simulated_at_utc",
 ]
 
@@ -97,6 +125,11 @@ COLUMNS = [
 def _num(v) -> float:
     n = pd.to_numeric(v, errors="coerce")
     return float(n) if pd.notna(n) else float("nan")
+
+
+def _final(ohlcv: pd.DataFrame, i: int) -> bool:
+    """このバーの終値を確定値として使ってよいか(score_prediction_log.bar_is_final と同じ規約)。"""
+    return bar_is_final(ohlcv, i, _current_utc_date())
 
 
 def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict:
@@ -117,6 +150,8 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
         "fill_date": "", "fill_price": np.nan, "risk_unit": np.nan,
         "exit_date": "", "exit_price": np.nan,
         "r_result": np.nan, "capital_pct": np.nan, "forgone_r": np.nan, "chase_status": "", "chase_r": np.nan,
+        "half_exit_status": "", "half_exit_r": np.nan, "half_exit_be_r": np.nan,
+        "atr_floor_status": "", "atr_floor_r": np.nan, "atr_floor_widened": "",
         "simulated_at_utc": simulated_at,
     }
     e1, e2, sl, tp1 = out["entry_low"], out["entry_high"], out["sl"], out["tp1"]
@@ -172,14 +207,12 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
             fill_i = i
             break
     if fill_i is None:
-        window_complete = (idx0 + FILL_WINDOW_BARS) <= len(ohlcv)
-        out["status"] = "no_fill" if window_complete else "open"
-        # 最終バーが形成途中なら逃した分を名乗らない(#165 Codex P2 / #137と同型)。
-        # window_complete は行数だけで決まるので、24時間動く資産では
-        # 当日ラベルのバーがまだ閉じていないまま5本目に数えられ、
-        # 日中値を「終値で測った方向R」として記録してしまう。
+        # 最終バーが形成途中なら no_fill も逃した分も名乗らない(#165 Codex P2 / #137 と同型。
+        # 形成途中のバーはまだ帯に触れるかもしれない)。
         last_i = idx0 + FILL_WINDOW_BARS - 1
-        if window_complete and pd.Timestamp(ohlcv.iloc[last_i]["date"]).normalize() < _current_utc_date():
+        window_complete = (idx0 + FILL_WINDOW_BARS) <= len(ohlcv) and _final(ohlcv, last_i)
+        out["status"] = "no_fill" if window_complete else "open"
+        if window_complete:
             last = float(ohlcv.iloc[last_i]["close"])
             gain = (last - fill_price) if is_long else (fill_price - last)
             out["forgone_r"] = round(gain / risk, 4)
@@ -217,7 +250,7 @@ def simulate_row(row: pd.Series, ohlcv: pd.DataFrame, simulated_at: str) -> dict
     if deadline < len(ohlcv):
         # 期限バーが形成途中(ラベル日がUTCでまだ過ぎていない)なら時間決済を確定しない
         # (#137 Codex P2と同型: 日中値を終値決済として記録しない)。
-        if pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+        if _final(ohlcv, deadline):
             out["exit_bar_offset"] = EXIT_DEADLINE_BARS
             return finish("filled_time_exit", deadline, float(ohlcv.iloc[deadline]["close"]))
     out["status"] = "open"  # 期限バー未到来/未確定 — 正直に進行中
@@ -259,7 +292,7 @@ def chase_row(row, ohlcv: pd.DataFrame, wait_bars: int = CHASE_WAIT_BARS) -> tup
     if chased:
         k = idx0 + wait_bars - 1
         # 形成途中のバーの終値で建値を作らない(#137/#165 と同型)
-        if k >= len(ohlcv) or pd.Timestamp(ohlcv.iloc[k]["date"]).normalize() >= _current_utc_date():
+        if k >= len(ohlcv) or not _final(ohlcv, k):
             return "open", np.nan
         fill_i, fill_price = k, float(ohlcv.iloc[k]["close"])
         if (fill_price <= sl) if is_long else (fill_price >= sl):
@@ -286,12 +319,240 @@ def chase_row(row, ohlcv: pd.DataFrame, wait_bars: int = CHASE_WAIT_BARS) -> tup
             return pre + "sl", r_of(sl)
         if tp1 == tp1 and ((float(bar["high"]) >= tp1) if is_long else (float(bar["low"]) <= tp1)):
             return pre + "tp1", r_of(tp1)
-    if deadline < len(ohlcv) and pd.Timestamp(ohlcv.iloc[deadline]["date"]).normalize() < _current_utc_date():
+    if _final(ohlcv, deadline):
         return pre + "time_exit", r_of(float(ohlcv.iloc[deadline]["close"]))
     return "open", np.nan
 
 
-def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None) -> pd.DataFrame:
+def half_exit_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, float]:
+    """TP1で半分降り、残りを時間決済まで持った場合を測る。
+
+    戻り値 (status, r, r_breakeven)。r は残りの損切りを元のSLに置いたまま、
+    r_breakeven は TP1 到達後に残りの損切りを建値へ上げた場合。
+
+    建値・SL優先・TP1は翌足以降・決済期限といった規約は simulate_row と同じ。
+    ズレると r_result と並べて読めない。**TP2は使わない**(人間の指定は
+    「残りを時間決済まで持つ」であって、二段目の利確ではない)。
+
+    TP1に届かなかった場合・SLが先に付いた場合は、半分に分ける意味が無いので
+    r_result と同じ値になる。差が出るのは TP1 を踏んだ行だけ。
+    """
+    nan = float("nan")
+    side = normalize_side(row.get("side"))
+    e1, e2 = _num(row.get("entry_low")), _num(row.get("entry_high"))
+    sl, tp1 = _num(row.get("sl")), _num(row.get("tp1"))
+    if ohlcv.empty or side not in {"LONG", "SHORT"} or not (e1 == e1 and e2 == e2 and sl == sl):
+        return "", nan, nan
+    if tp1 != tp1:
+        return "", nan, nan          # TP1が無ければ分ける対象ではない
+    sig_date = pd.to_datetime(row.get("date"), errors="coerce")
+    if pd.isna(sig_date) or sig_date.normalize() < pd.to_datetime(ohlcv["date"].iloc[0]):
+        return "", nan, nan
+    idx0, anchor_idx = decision_time_anchor(ohlcv, sig_date)
+    if idx0 >= len(ohlcv):
+        return "open", nan, nan
+    is_long = side == "LONG"
+    ref = (e1 + e2) / 2
+    if anchor_idx >= 0:
+        ac = float(ohlcv.iloc[anchor_idx]["close"])
+        if ac > 0 and abs(ref / ac - 1.0) > MAX_REFERENCE_ANCHOR_DEVIATION:
+            return "", nan, nan
+    fill_price = e2 if is_long else e1
+    risk = abs(fill_price - sl)
+    if risk <= 0:
+        return "", nan, nan
+
+    def r_of(price):
+        return ((price - fill_price) if is_long else (fill_price - price)) / risk
+
+    fill_i = None
+    for i in range(idx0, min(idx0 + FILL_WINDOW_BARS, len(ohlcv))):
+        bar = ohlcv.iloc[i]
+        if float(bar["low"]) <= e2 and float(bar["high"]) >= e1:
+            fill_i = i
+            break
+    if fill_i is None:
+        return "", nan, nan          # 建っていない。分ける対象ではない
+
+    deadline = idx0 + EXIT_DEADLINE_BARS
+
+    def hit_sl(bar, level):
+        return (float(bar["low"]) <= level) if is_long else (float(bar["high"]) >= level)
+
+    # 約定足はSLのみ判定(順序不明 → 不利側)。TP1は翌足以降
+    if hit_sl(ohlcv.iloc[fill_i], sl):
+        r = round(r_of(sl), 4)
+        return "half_sl_before_tp1", r, r
+
+    tp_i = None
+    for i in range(fill_i + 1, min(deadline + 1, len(ohlcv))):
+        bar = ohlcv.iloc[i]
+        if hit_sl(bar, sl):          # SLとTP1が同じ足なら SL優先(不利側)
+            r = round(r_of(sl), 4)
+            return "half_sl_before_tp1", r, r
+        if (float(bar["high"]) >= tp1) if is_long else (float(bar["low"]) <= tp1):
+            tp_i = i
+            break
+
+    if tp_i is None:
+        # TP1に届かないまま期限。分けても全部でも同じ
+        if _final(ohlcv, deadline):
+            r = round(r_of(float(ohlcv.iloc[deadline]["close"])), 4)
+            return "half_no_tp1_time_exit", r, r
+        return "open", nan, nan
+
+    # TP1で半分。残りは期限まで。残りの損切りを2通りで測る
+    booked = r_of(tp1) * HALF_EXIT_FRACTION
+    rest = 1.0 - HALF_EXIT_FRACTION
+
+    def runner(stop):
+        # TP1を踏んだ足そのものから見る(#168 Codex P2)。その足で価格が建値まで
+        # 戻っていた場合、TP1が先か戻りが先かは分からない。同じ足の順序不明は
+        # 不利側に倒す規約なので、建値ストップはその足で発動したと扱う。
+        # 元のSLについては、この足でSL未到達なのはTP1判定の前に確認済みなので
+        # 同じ範囲から見ても結果は変わらない。
+        # 特にTP1が期限足に当たり終値が建値割れのとき、翌足から見る実装では
+        # 「返上しない」はずの建値版が残りの損を記録していた。
+        for j in range(tp_i, min(deadline + 1, len(ohlcv))):
+            if hit_sl(ohlcv.iloc[j], stop):
+                return r_of(stop), "stopped"
+        if _final(ohlcv, deadline):
+            return r_of(float(ohlcv.iloc[deadline]["close"])), "time"
+        return None, "open"
+
+    r_sl, how_sl = runner(sl)
+    r_be, how_be = runner(fill_price)
+    if r_sl is None or r_be is None:
+        return "open", nan, nan
+    return (f"half_tp1_then_{how_sl}",
+            round(booked + rest * r_sl, 4),
+            round(booked + rest * r_be, 4))
+
+
+# 確定した行を、価格窓の短い再実行で open に戻さない(#173 Codex P2)。
+# 採点側の _keep_observed_horizons と同じ理由。main の夜間実行が5本の約定窓を閉じて
+# no_fill(+forgone_r, chase_tp1)にした行が、手元の古い価格で回すと open に戻り、
+# 逃した分と追った場合の結果が消えていた(2026-09-26: 20260919_USDJPY_BUY_PULLBACK)。
+# open は「まだ分からない」であって観測ではないので、確定を上書きできない。
+_FINAL_STATUSES = {"filled_sl", "filled_tp1", "filled_time_exit", "no_fill"}
+
+
+# 併走観測は本体と独立に決着する。本体が先に SL で確定し、追った/広げた側が後の足で
+# 決着した行は、古い価格で回すと本体は同じ SL のまま併走側だけ open に戻る(#189 Codex P2)。
+# 本体の status だけを見て守ると、確定済みの併走結果が消えて要約からも落ちる。
+_TRACKS = {
+    "chase_status": ["chase_r"],
+    "half_exit_status": ["half_exit_r", "half_exit_be_r"],
+    "atr_floor_status": ["atr_floor_r", "atr_floor_widened"],
+}
+
+
+def _keep_finalized_rows(sim: pd.DataFrame, previous: pd.DataFrame | None) -> pd.DataFrame:
+    if previous is None or previous.empty or "signal_id" not in previous.columns or sim.empty:
+        return sim
+    prev = previous.drop_duplicates("signal_id", keep="last").set_index("signal_id")
+    out = sim.set_index("signal_id")
+    common = out.index.intersection(prev.index)
+    regress = common[(out.loc[common, "status"] == "open").values
+                     & prev.loc[common, "status"].isin(_FINAL_STATUSES).values]
+    if len(regress):
+        keep_cols = [c for c in COLUMNS if c in prev.columns and c != "signal_id"]
+        out.loc[regress, keep_cols] = prev.loc[regress, keep_cols].values
+    for st_col, val_cols in _TRACKS.items():
+        if st_col not in prev.columns or st_col not in out.columns:
+            continue
+        p_st = prev.loc[common, st_col].astype(str)
+        p_final = p_st.notna() & ~p_st.isin(["", "open", "nan", "None"])
+        n_open = out.loc[common, st_col].astype(str).eq("open")
+        back = common[(n_open & p_final).values]
+        if len(back):
+            cols = [st_col] + [c for c in val_cols if c in prev.columns]
+            out.loc[back, cols] = prev.loc[back, cols].values
+    return out.reset_index().reindex(columns=COLUMNS)
+
+
+def atr_at_decision(ohlcv: pd.DataFrame, anchor_idx: int, bars: int = ATR_FLOOR_BARS) -> float:
+    """判断時に閉まっていたバーだけで ATR(真の値幅の平均)を出す。先読みしない。"""
+    if anchor_idx < 1:
+        return float("nan")
+    h = ohlcv.iloc[max(0, anchor_idx - bars):anchor_idx + 1]
+    prev = h["close"].shift()
+    tr = np.maximum(h["high"] - h["low"], np.maximum((h["high"] - prev).abs(), (h["low"] - prev).abs())).dropna()
+    # 10本揃わないときは測らない(#189 Codex P2)。1本でも返すと、系列の先頭付近や
+    # 短い系列で「ATR10」を名乗った ATR3 が入り、240日の窓が進んで先頭が落ちると
+    # 同じ判断の結果が変わる。
+    if len(tr) != bars:
+        return float("nan")
+    return float(tr.mean())
+
+
+def atr_floor_row(row, ohlcv: pd.DataFrame) -> tuple[str, float, bool]:
+    """SL幅を max(申告, ATR_FLOOR_MULT×ATR10) に広げた場合を測る。(status, r, widened) を返す。
+
+    建値(ゾーン内の最悪価格)・約定足は SL のみ・TP1 は翌足以降・SL 優先・決済期限・
+    形成途中のバーを確定扱いしない、は simulate_row と同じ規約。ズレると並べて読めない。
+    SL だけが違う。Entry帯と TP1 は申告のまま。
+    """
+    nan = float("nan")
+    side = normalize_side(row.get("side"))
+    e1, e2 = _num(row.get("entry_low")), _num(row.get("entry_high"))
+    sl, tp1 = _num(row.get("sl")), _num(row.get("tp1"))
+    if ohlcv.empty or side not in {"LONG", "SHORT"} or not (e1 == e1 and e2 == e2 and sl == sl):
+        return "", nan, False
+    sig_date = pd.to_datetime(row.get("date"), errors="coerce")
+    if pd.isna(sig_date) or sig_date.normalize() < pd.to_datetime(ohlcv["date"].iloc[0]):
+        return "", nan, False
+    idx0, anchor_idx = decision_time_anchor(ohlcv, sig_date)
+    if idx0 >= len(ohlcv):
+        return "open", nan, False
+    is_long = side == "LONG"
+    ref = (e1 + e2) / 2
+    if anchor_idx >= 0:
+        ac = float(ohlcv.iloc[anchor_idx]["close"])
+        if ac > 0 and abs(ref / ac - 1.0) > MAX_REFERENCE_ANCHOR_DEVIATION:
+            return "", nan, False
+    atr = atr_at_decision(ohlcv, anchor_idx)
+    if atr != atr or atr <= 0:
+        return "", nan, False
+    fill_price = e2 if is_long else e1
+    declared = abs(fill_price - sl)
+    if declared <= 0:
+        return "", nan, False
+    risk = max(declared, ATR_FLOOR_MULT * atr)
+    widened = risk > declared
+    sl_eff = fill_price - risk if is_long else fill_price + risk
+
+    def r_of(price: float) -> float:
+        return round(((price - fill_price) if is_long else (fill_price - price)) / risk, 4)
+
+    def hit_sl(bar) -> bool:
+        return (float(bar["low"]) <= sl_eff) if is_long else (float(bar["high"]) >= sl_eff)
+
+    fill_i = None
+    for i in range(idx0, min(idx0 + FILL_WINDOW_BARS, len(ohlcv))):
+        bar = ohlcv.iloc[i]
+        if float(bar["low"]) <= e2 and float(bar["high"]) >= e1:
+            fill_i = i
+            break
+    if fill_i is None:
+        window_complete = (idx0 + FILL_WINDOW_BARS) <= len(ohlcv) and _final(ohlcv, idx0 + FILL_WINDOW_BARS - 1)
+        return ("no_fill" if window_complete else "open"), nan, widened
+    if hit_sl(ohlcv.iloc[fill_i]):
+        return "atr_sl", r_of(sl_eff), widened
+    deadline = idx0 + EXIT_DEADLINE_BARS
+    for i in range(fill_i + 1, min(deadline + 1, len(ohlcv))):
+        bar = ohlcv.iloc[i]
+        if hit_sl(bar):
+            return "atr_sl", r_of(sl_eff), widened
+        if tp1 == tp1 and ((float(bar["high"]) >= tp1) if is_long else (float(bar["low"]) <= tp1)):
+            return "atr_tp1", r_of(tp1), widened
+    if _final(ohlcv, deadline):
+        return "atr_time_exit", r_of(float(ohlcv.iloc[deadline]["close"])), widened
+    return "open", nan, widened
+
+
+def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None,
+                    previous: pd.DataFrame | None = None) -> pd.DataFrame:
     if ledger is None or ledger.empty:
         return pd.DataFrame(columns=COLUMNS)
     simulated_at = format_utc(now_utc())
@@ -311,8 +572,15 @@ def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None) -> pd.Dat
         if asset in CHASE_ASSETS and out["status"] not in {"excluded_scale", "excluded_bad_levels",
                                                            "invalid_data", "data_window_expired"}:
             out["chase_status"], out["chase_r"] = chase_row(row, cache[asset])
+        if out["status"] not in {"excluded_scale", "excluded_bad_levels",
+                                 "invalid_data", "data_window_expired"}:
+            (out["half_exit_status"], out["half_exit_r"],
+             out["half_exit_be_r"]) = half_exit_row(row, cache[asset])
+            (out["atr_floor_status"], out["atr_floor_r"],
+             out["atr_floor_widened"]) = atr_floor_row(row, cache[asset])
         rows.append(out)
-    return pd.DataFrame(rows, columns=COLUMNS)
+    sim = pd.DataFrame(rows, columns=COLUMNS)
+    return _keep_finalized_rows(sim, previous)
 
 
 def summarize(sim: pd.DataFrame) -> dict:
@@ -328,6 +596,15 @@ def summarize(sim: pd.DataFrame) -> dict:
         # Entry規則は「当たった判断ほど落とす」側に働いている。実現Rとは別枠に置く。
         "no_fill_forgone_r": None, "no_fill_forgone_avg_r": None,
         # 追った場合の併走観測(CHASE_ASSETS のみ)。実現Rとは別枠に置く。
+        # TP1で半分降りた場合の併走観測。分岐が起きるのはTP1を踏んだ行だけなので、
+        # 同じ行の r_result と並べないと差が読めない。baseline は同じ母集団の実現R。
+        "half_exit": {"fraction": HALF_EXIT_FRACTION, "orders": 0, "tp1_split": 0,
+                      "total_r": None, "total_r_breakeven": None,
+                      "baseline_total_r": None, "win_rate": None},
+        # SL幅を ATR10 以上に広げた場合の併走観測。両方が決着した行だけで baseline と並べる。
+        "atr_floor": {"mult": ATR_FLOOR_MULT, "bars": ATR_FLOOR_BARS, "orders": 0, "widened": 0,
+                      "total_r": None, "avg_r": None, "win_rate": None, "sl_count": None,
+                      "baseline_total_r": None, "baseline_sl_count": None},
         "chase": {"assets": sorted(CHASE_ASSETS), "wait_bars": CHASE_WAIT_BARS,
                   "orders": 0, "chased": 0, "total_r": None, "avg_r": None, "win_rate": None,
                   "baseline_total_r": None},
@@ -352,6 +629,37 @@ def summarize(sim: pd.DataFrame) -> dict:
     if not nf.empty:
         out["no_fill_forgone_r"] = round(float(nf.sum()), 2)
         out["no_fill_forgone_avg_r"] = round(float(nf.mean()), 3)
+    if "half_exit_r" in sim.columns:
+        hv = pd.to_numeric(sim["half_exit_r"], errors="coerce")
+        done = sim[hv.notna()]
+        if not done.empty:
+            a = pd.to_numeric(done["half_exit_r"], errors="coerce")
+            b = pd.to_numeric(done["half_exit_be_r"], errors="coerce")
+            base = pd.to_numeric(done["r_result"], errors="coerce").dropna()
+            out["half_exit"].update({
+                "orders": int(len(done)),
+                "tp1_split": int(done["half_exit_status"].astype(str)
+                                 .str.startswith("half_tp1_then_").sum()),
+                "total_r": round(float(a.sum()), 2),
+                "total_r_breakeven": round(float(b.sum()), 2),
+                "baseline_total_r": round(float(base.sum()), 2) if not base.empty else None,
+                "win_rate": round(float((a > 0).mean()), 3),
+            })
+    if "atr_floor_r" in sim.columns:
+        av = pd.to_numeric(sim["atr_floor_r"], errors="coerce")
+        done = sim[av.notna() & sim["status"].isin(resolved_status)]
+        if not done.empty:
+            v = pd.to_numeric(done["atr_floor_r"], errors="coerce")
+            bv = pd.to_numeric(done["r_result"], errors="coerce")
+            out["atr_floor"].update({
+                "orders": int(len(done)),
+                "widened": int(done["atr_floor_widened"].astype(str).str.lower().eq("true").sum()),
+                "total_r": round(float(v.sum()), 2), "avg_r": round(float(v.mean()), 3),
+                "win_rate": round(float((v > 0).mean()), 3),
+                "sl_count": int((done["atr_floor_status"] == "atr_sl").sum()),
+                "baseline_total_r": round(float(bv.sum()), 2),
+                "baseline_sl_count": int((done["status"] == "filled_sl").sum()),
+            })
     if "chase_r" in sim.columns:
         cr = pd.to_numeric(sim["chase_r"], errors="coerce")
         done = sim[cr.notna()]
@@ -385,7 +693,8 @@ def summarize(sim: pd.DataFrame) -> dict:
 
 def main() -> int:
     ledger = pd.read_csv(LEDGER_PATH, dtype=str, keep_default_na=False) if LEDGER_PATH.exists() else pd.DataFrame()
-    sim = simulate_ledger(ledger)
+    prev = pd.read_csv(OUT_CSV) if OUT_CSV.exists() else None
+    sim = simulate_ledger(ledger, previous=prev)
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     sim.to_csv(OUT_CSV, index=False)
     summary = summarize(sim)
@@ -398,6 +707,13 @@ def main() -> int:
     c = summary["chase"]
     print(json.dumps({"chase": {k: c[k] for k in ("orders", "chased", "total_r", "avg_r",
                                                   "win_rate", "baseline_total_r")}}, ensure_ascii=False))
+    a = summary["atr_floor"]
+    print(json.dumps({"atr_floor": {k: a[k] for k in ("orders", "widened", "total_r", "avg_r", "win_rate",
+                                                      "sl_count", "baseline_total_r", "baseline_sl_count")}}, ensure_ascii=False))
+    h = summary["half_exit"]
+    print(json.dumps({"half_exit": {k: h[k] for k in ("orders", "tp1_split", "total_r",
+                                                      "total_r_breakeven", "baseline_total_r",
+                                                      "win_rate")}}, ensure_ascii=False))
     return 0
 
 

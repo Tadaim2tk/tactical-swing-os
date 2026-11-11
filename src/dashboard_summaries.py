@@ -37,6 +37,8 @@ LAYER_HEALTH_REGISTRY = [
     {"label": "portfolio_layer", "ts": ("json", "portfolio_layer_summary_json", "generated_at_utc"), "rows": "portfolio_layer", "threshold_hours": 204, "cadence": "weekly"},
     {"label": "datetime_audit", "ts": ("json", "datetime_audit_summary_json", "generated_at_utc"), "rows": "datetime_audit", "threshold_hours": 36, "cadence": "daily"},
     {"label": "model_state_proposals", "ts": ("json", "model_state_update_summary_json", "generated_at_jst"), "rows": "model_state_update_proposals", "threshold_hours": 36, "cadence": "daily"},
+    # 売買頻度の監視(2026-11-03)。daily_cycle が毎日1行書く。止まっていたら「数えていない」状態なので stale にする。
+    {"label": "throughput_watch", "ts": ("date", "latest_throughput_watch_recorded_at"), "rows": "throughput_watch", "threshold_hours": 36, "cadence": "daily"},
 ]
 
 # 健全性の重大度(高いほど悪い)
@@ -1727,3 +1729,68 @@ def execution_sim_summary(sim: pd.DataFrame) -> dict:
     out = _summarize(sim if sim is not None else pd.DataFrame())
     out["available"] = bool(out.get("orders"))
     return out
+
+
+# === 売買頻度(試行回数) — tools/throughput_watch.py と同じ定義 (src/throughput_metrics.py) ===
+_THROUGHPUT_TONE = {"ALERT": "bad", "WARN": "warn", "OK": "good", "INSUFFICIENT_DATA": "warn"}
+
+
+def throughput_summary(watch: pd.DataFrame, ledger: pd.DataFrame) -> dict:
+    """直近の判定(data/throughput_watch.csv の最終行)と、台帳から数えた週ごとの注文・見立て。
+
+    判定は daily_cycle が書いた行をそのまま見せる(ここで判定し直さない。判定器は一つ)。
+    週表だけは台帳から同じ定義で数える(CSV が止まっていても見立ての推移は見える)。
+    """
+    from throughput_metrics import ledger_frame, weekly_table
+
+    out = {"available": False, "status": "", "tone": "neutral", "as_of": "", "note": "", "weekly": [],
+           "orders_window": None, "ideas_window": None, "orders_baseline": None, "ideas_baseline": None,
+           "orders_ratio": None, "ideas_ratio": None, "window_days": None, "baseline_days": None, "stale": False}
+    try:
+        lf = ledger_frame(ledger if ledger is not None else pd.DataFrame())
+        wk = weekly_table(lf, weeks=8)
+        out["weekly"] = wk.to_dict(orient="records") if not wk.empty else []
+        ledger_last = str(lf["date"].max().date()) if not lf.empty else ""
+    except Exception:
+        ledger_last = ""
+    if watch is None or watch.empty or "status" not in watch.columns or "as_of" not in watch.columns:
+        out["note"] = "data/throughput_watch.csv が無い(daily_cycle が一度も書いていない)"
+        return out
+    w = watch.copy()
+    w["as_of"] = w["as_of"].astype(str)
+    last = w.sort_values("as_of").iloc[-1]
+    status = str(last.get("status", "")).strip()
+    out.update({
+        "available": True, "status": status, "tone": _THROUGHPUT_TONE.get(status, "neutral"),
+        "as_of": str(last.get("as_of", "")), "note": str(last.get("note", "") or ""),
+        "window_days": _int_or_none(last.get("window_days")), "baseline_days": _int_or_none(last.get("baseline_days")),
+        "orders_window": _int_or_none(last.get("orders_window")), "ideas_window": _int_or_none(last.get("ideas_window")),
+        "orders_baseline": _int_or_none(last.get("orders_baseline")), "ideas_baseline": _int_or_none(last.get("ideas_baseline")),
+        "orders_ratio": _float_or_none(last.get("orders_ratio")), "ideas_ratio": _float_or_none(last.get("ideas_ratio")),
+    })
+    # 判定が台帳より2日以上古いなら、監視が止まっている(読む側に知らせる)
+    try:
+        if ledger_last and (pd.Timestamp(ledger_last) - pd.Timestamp(out["as_of"])).days >= 2:
+            out["stale"] = True
+            out["tone"] = "warn" if out["tone"] != "bad" else "bad"
+    except Exception:
+        pass
+    return out
+
+
+def _int_or_none(v):
+    try:
+        if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() == "":
+            return None
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(v):
+    try:
+        if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() == "":
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None

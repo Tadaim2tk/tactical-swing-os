@@ -100,6 +100,10 @@ def _num(value) -> float:
     return float(v) if pd.notna(v) else float("nan")
 
 
+# 週7日で日足が立つ資産。それ以外(米先物・指数・FX・金利)は週5日。
+SEVEN_DAY_ASSETS = frozenset({"BTC", "ETH"})
+
+
 def load_ohlcv_frame(asset: str, raw_dir: Path = RAW_DIR) -> pd.DataFrame:
     path = raw_dir / f"{asset}.csv"
     if not path.exists():
@@ -116,12 +120,44 @@ def load_ohlcv_frame(asset: str, raw_dir: Path = RAW_DIR) -> pd.DataFrame:
         if c not in df.columns:
             df[c] = np.nan
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
+    df = df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
+    # 週5日資産の週末ラベルの行は捨てる(2026-09-30、#174/#175 で Codex が指摘)。
+    # yfinance は週末に取得すると「当日」の行を末尾に付ける(JPY=X に 9/26(土)・9/27(日))。
+    # decision_time_anchor は週末の行が1本でもあると週7日資産と判定するので、
+    # その1本で USDJPY の全アンカーが k-1 → k-2 にずれていた。平日に取得すると
+    # その行は無いため、**採点がどの曜日に取得したかで変わる**状態だった
+    # (夜間ワークフローは週末も毎日採点する)。暦は資産の性質であってデータの偶然ではない。
+    # 金曜へ畳み込まず捨てるのは、日曜夜のアジア寄り付きの値が混ざると先読みになるから。
+    if asset not in SEVEN_DAY_ASSETS:
+        weekend = df["date"].dt.dayofweek >= 5
+        df = df[~weekend].reset_index(drop=True)
+        df.attrs["dropped_weekend_bars"] = int(weekend.sum())
+    return df
 
 
 def _current_utc_date() -> pd.Timestamp:
     """現在のUTC日付(正規化)。ラベル日がこれ以上のバーはまだ閉じていない。"""
     return pd.Timestamp(now_utc()).tz_localize(None).normalize()
+
+
+# 系列の最終行は、ラベル日が過ぎていてもまだ形成途中のことがある(2026-10-22 00:16 UTC の実例:
+# NQ の 10/21 ラベルのバーは Chicago ではまだ 10/21 の夜で、22:00 UTC に始まった翌営業日の
+# セッションの値を抱えたまま更新されていた。forgone_r が 1.80 と記録され、翌日 1.23 に変わった)。
+# 「ラベル日 < 今日(UTC)」だけでは拾えないので、最終行はラベル日から2日経つまで確定扱いしない。
+# 次のバーが系列に現れれば(=最終行でなくなれば)従来どおりラベル日の経過だけで確定。
+PROVISIONAL_LAST_BAR_DAYS = 2
+
+
+def bar_is_final(ohlcv: pd.DataFrame, i: int, today: pd.Timestamp) -> bool:
+    """i 番目のバーの終値を確定値として使ってよいか。"""
+    if i < 0 or i >= len(ohlcv):
+        return False
+    d = pd.Timestamp(ohlcv.iloc[i]["date"]).normalize()
+    if d >= today:
+        return False
+    if i == len(ohlcv) - 1 and d > today - pd.Timedelta(days=PROVISIONAL_LAST_BAR_DAYS):
+        return False
+    return True
 
 
 def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
@@ -196,7 +232,7 @@ def score_row(row: pd.Series, ohlcv: pd.DataFrame, scored_at: str) -> dict:
         # 形成途中のバーで確定リターンを名乗らない(#137 Codex P2: 暗号資産のUTC日足は
         # 当日ラベルのキャンドルが翌00:00 UTCまで閉じないため、朝の採点では日中値が
         # +1日リターンとして記録されていた)。ラベル日がUTCで過ぎるまでは awaiting。
-        if pd.Timestamp(ohlcv.iloc[j]["date"]).normalize() >= today_utc:
+        if not bar_is_final(ohlcv, j, today_utc):
             incomplete = True
             continue
         close_h = float(ohlcv.iloc[j]["close"])
@@ -242,6 +278,36 @@ def score_ledger(ledger: pd.DataFrame, *, raw_dir: Path = RAW_DIR, scored_at: st
 _STATUS_RANK = {"scored": 2, "awaiting_horizon": 1, "invalid_data": 0}
 
 
+# 既に観測済みの horizon を、価格窓の短い再採点で空白に戻さない(#173 Codex P1)。
+# main は夜間ワークフローが毎日自分で価格を取って採点するため、手元の価格系列より
+# 先まで埋まっていることがある。手元で再採点すると、status は同格(awaiting_horizon)
+# のまま fwd_return_5d などのセルだけが空白になり、確定していた result_5d が
+# awaiting に戻る(2026-09-26: 5d が54行、3d が36行消えた)。
+# 「観測できた値は、より新しい観測でしか置き換えない」。空白は観測ではない。
+_HORIZON_CELLS = [c for c in SCORE_COLUMNS if c.startswith(("fwd_return_", "r_close_"))] + \
+                 ["entry_touched_5d", "result_5d", "result_10d"]
+
+
+def _keep_observed_horizons(merged: pd.DataFrame, existing: pd.DataFrame) -> pd.DataFrame:
+    if existing is None or existing.empty or "signal_id" not in existing.columns:
+        return merged
+    old = existing.drop_duplicates("signal_id", keep="last").set_index("signal_id")
+    out = merged.set_index("signal_id")
+    common = out.index.intersection(old.index)
+    for col in _HORIZON_CELLS:
+        if col not in out.columns or col not in old.columns:
+            continue
+        new_v = out.loc[common, col]
+        old_v = old.loc[common, col]
+        blank_new = new_v.isna() | (new_v.astype(str).str.strip() == "")
+        unresolved_new = new_v.astype(str).isin(["awaiting", ""])
+        has_old = old_v.notna() & (old_v.astype(str).str.strip() != "") & ~old_v.astype(str).isin(["awaiting"])
+        take = (blank_new | unresolved_new) & has_old
+        if take.any():
+            out.loc[common[take.values], col] = old_v[take].values
+    return out.reset_index().reindex(columns=SCORE_COLUMNS)
+
+
 def append_scores(new_scores: pd.DataFrame, path: Path = SCORES_PATH) -> pd.DataFrame:
     """signal_id で重複排除(awaiting→確定の更新は許可・確定→取得不能の降格は禁止)して保存。"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -262,6 +328,7 @@ def append_scores(new_scores: pd.DataFrame, path: Path = SCORES_PATH) -> pd.Data
               .drop_duplicates(subset=["signal_id"], keep="last")
               .drop(columns=["_rank", "_ord"]))
     merged = merged.reindex(columns=SCORE_COLUMNS).sort_values(["date", "signal_id"]).reset_index(drop=True)
+    merged = _keep_observed_horizons(merged, existing)
     merged = _preserve_unchanged_score_timestamps(merged, existing)
     _warn_if_finalized_anchors_changed(merged, existing)
     merged.to_csv(path, index=False)

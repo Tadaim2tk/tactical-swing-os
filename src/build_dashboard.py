@@ -119,6 +119,7 @@ def build_dashboard() -> tuple[dict, str]:
         extras["signal_ledger"],
     )
     execution_sim = execution_sim_summary(extras["execution_simulation"])
+    throughput = throughput_summary(extras["throughput_watch"], extras["signal_ledger"])
     generated_dt_utc = now_utc()
     dashboard_as_of = generated_dt_utc.date().isoformat()
     transaction_cost = transaction_cost_summary(evaluations, extras["cost_model_json"], as_of=dashboard_as_of)
@@ -170,6 +171,7 @@ def build_dashboard() -> tuple[dict, str]:
         "ai_feedback": len(ai_feedback),
         "news_narrative_scores": 1 if news_summary.get("available") else 0,
         "pending_reevaluations": len(extras["pending_reevaluations"]),
+        "throughput_watch": len(extras["throughput_watch"]),
     }
     latest_signal_date = latest_date(signals, ["signal_date", "date"])
     # GPT判断台帳の鮮度は機械生成とは別に測る(片方だけ動いていても緑にしない)
@@ -187,6 +189,9 @@ def build_dashboard() -> tuple[dict, str]:
         "latest_rule_update_proposals_date": latest_file_date("reports/rule_updates/*_rule_update_proposals.md"),
         "latest_model_state_update_proposals_date": latest_file_date("reports/model_state/*_model_state_update_proposals.md"),
         "latest_ai_feedback_date": latest_file_date("reports/ai_feedback/*_ai_feedback.md") or ai_summary["latest_date"],
+        # 監視の鮮度は走った時刻(recorded_at)で測る。as_of は台帳の最終日なので、台帳が遅れると
+        # 監視が毎日走っていても stale に見える(#202 Codex P2)。台帳の遅れは gpt_signal_ledger 層が見る。
+        "latest_throughput_watch_recorded_at": latest_timestamp(extras["throughput_watch"], "recorded_at"),
     }
     apply_false = True
     if not rule_updates.empty and "apply_automatically" in rule_updates.columns:
@@ -238,6 +243,7 @@ def build_dashboard() -> tuple[dict, str]:
         "news_narrative_summary": news_summary,
         "pending_reevaluation_summary": pending_summary,
         "latest_evaluation_view_summary": latest_eval_summary,
+        "throughput_summary": throughput,
         "safety_notes": SAFETY_NOTES,
     })
 
@@ -295,6 +301,7 @@ def build_dashboard() -> tuple[dict, str]:
         performance_series=performance_series,
         execution_view=execution_view,
         execution_sim=execution_sim,
+        throughput=throughput,
         summary=summary,
     )
     html_path = REPORTS_DIR / "index.html"

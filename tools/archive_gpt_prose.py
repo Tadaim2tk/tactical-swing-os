@@ -39,6 +39,12 @@ ARCHIVE = Path("data/prediction_log_archive")
 HEADER = re.compile(r"^===== TSO_DAILY (\d{4}-\d{2}-\d{2}|unknown) \((\d+) chars\) =====$", re.M)
 JP_DATE = re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日")
 ISO_DATE = re.compile(r"— (\d{4}-\d{2}-\d{2})")
+# レポート自身が名乗る実行日。前置きの後に来ることがある(7/27)
+RUN_DATE = re.compile(r"実行日[：:]\s*\**\s*(\d{4})年(\d{1,2})月(\d{1,2})日")
+# 見出し行「# TSO Daily Signal Log v2 — <日付>」が先頭以外にある場合
+TITLE_LINE = re.compile(
+    r"^#*\s*\**\s*TSO Daily Signal Log v2[^\n]{0,20}?"
+    r"(?:(?P<iso>\d{4}-\d{2}-\d{2})|(?P<y>\d{4})年(?P<mo>\d{1,2})月(?P<d>\d{1,2})日)", re.M)
 
 
 def detect_day(text: str):
@@ -53,6 +59,18 @@ def detect_day(text: str):
     m = JP_DATE.search(text[:300])
     if m:
         return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    # 先頭300字に無い場合(#171 Codex P2): 7/27 は「タスクのプロンプトを修正しました…」
+    # という前置きの後に「**実行日：2026年7月27日**」が来ていて、台帳には10行入って
+    # いるのにアーカイブから落ちた。窓を広げるだけだと本文中の「7月28日の終値」の
+    # ような日付を拾うので、**レポート自身の見出し語彙に限って**全文を探す。
+    m = RUN_DATE.search(text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    m = TITLE_LINE.search(text)
+    if m:
+        if m.group("iso"):
+            return m.group("iso")
+        return f"{m.group('y')}-{int(m.group('mo')):02d}-{int(m.group('d')):02d}"
     return None
 
 
@@ -109,7 +127,20 @@ def main() -> int:
     ap.add_argument("--from-chatgpt-export", action="store_true",
                     help="ChatGPT公式エクスポートの conversations.json を読む")
     ap.add_argument("--title", default="TSO", help="会話タイトルの部分一致（既定: TSO）")
+    ap.add_argument("--transport", default=None,
+                    help="ヘッダに残す取得経路。省略時はモードから決める。"
+                         "本文の出所が既定と違うとき(例: 会話APIの raw markdown を Blob 形式に"
+                         "整えて渡した)は必ず明示する。出所の記録が嘘になると後から検算できない")
     args = ap.parse_args()
+    # 経路をモードで決め打ちしていたため、会話APIから取った本文にも
+    # 「DOM innerText -> Blob download」と書いていた(#170 Codex P2)。
+    # DOMの innerText と raw markdown では ```csv フェンスや ** の有無が違い、
+    # 同じ「本文」でも抽出の意味が変わる。ヘッダは実際の経路を言う。
+    if args.transport is None:
+        args.transport = ("ChatGPT conversation JSON (公式エクスポート conversations.json または "
+                          "/backend-api/conversation) -> tools/archive_gpt_prose.py --from-chatgpt-export"
+                          if args.from_chatgpt_export else
+                          "DOM innerText -> Blob download -> tools/archive_gpt_prose.py")
 
     src = Path(args.export_file).expanduser()
     if not src.exists():
@@ -150,7 +181,7 @@ def main() -> int:
             ARCHIVE.mkdir(parents=True, exist_ok=True)
             dest.write_text(
                 f"<!-- source: ChatGPT会話「TSO Daily Signal Log v2」定時実行 {day} 07:00 JST -->\n"
-                f"<!-- transport: DOM innerText -> Blob download -> tools/archive_gpt_prose.py -->\n"
+                f"<!-- transport: {args.transport} -->\n"
                 f"<!-- archived_at: {now} / chars: {len(body)} / 値は無修正 -->\n\n" + body + "\n",
                 encoding="utf-8")
         written += 1

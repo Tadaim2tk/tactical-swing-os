@@ -41,6 +41,7 @@ def test_contradictory_duplicate_in_one_batch_is_rejected(repo):
 
 
 def test_identical_duplicate_in_one_batch_writes_once(repo):
+    _ledger(repo, [("2026-08-03", "S1", "WTI", "BUY")])   # 台帳に無い id は拒否される(#173)
     r = run(["invalidation", "2026-09-09", "S1=fired,S1=fired"], repo)
     assert r.returncode == 0
     assert len(_rows(repo, "invalidation_checks.csv")) == 1
@@ -65,6 +66,7 @@ def test_bad_invalidation_syntax_is_rejected(repo, bad):
 
 
 def test_append_only_across_runs(repo):
+    _ledger(repo, [("2026-08-03", "S1", "WTI", "BUY")])   # 台帳に無い id は拒否される(#173)
     run(["invalidation", "2026-09-09", "S1=not_fired"], repo)
     run(["invalidation", "2026-09-09", "S1=fired"], repo)   # 2回目は無視される
     rows = _rows(repo, "invalidation_checks.csv")
@@ -102,13 +104,13 @@ def test_no_trade_rows_are_not_warned(repo):
 
 
 def test_signal_past_the_window_is_not_warned(repo):
-    """5営業日を過ぎたものは聞き直す対象ではない(契約側の窓に合わせる)。
+    """5本目の翌朝の確認を過ぎたものは聞き直す対象ではない。
 
-    2026-09-01(火)から 09-09(水)までの平日は6日なので窓の外。
+    2026-09-01(火)の5本目は 9/8。9/9 の朝が 9/8 を観測する最後の確認で、9/10 には閉じる。
     """
-    _ledger(repo, [("2026-09-01", "OLD", "WTI", "BUY")])
-    r = run(["invalidation", "2026-09-09", "X=not_fired"], repo)
-    assert "OLD" not in r.stderr
+    _ledger(repo, [("2026-08-03", "X", "WTI", "BUY"), ("2026-09-01", "OLD", "WTI", "BUY")])
+    assert "OLD" in run(["invalidation", "2026-09-09", "X=not_fired"], repo).stderr
+    assert "OLD" not in run(["invalidation", "2026-09-10", "X=not_fired"], repo).stderr
 
 
 def test_same_day_signal_is_not_warned(repo):
@@ -142,7 +144,128 @@ def test_previously_recorded_same_day_counts_as_declared(repo):
 
 def test_other_day_record_does_not_count_as_declared(repo):
     """別の日の記録では今日の申告漏れは埋まらない。毎日聞き直すのが契約。"""
-    _ledger(repo, [("2026-09-07", "A_WTI", "WTI", "BUY")])
+    _ledger(repo, [("2026-08-03", "OTHER", "WTI", "BUY"), ("2026-09-07", "A_WTI", "WTI", "BUY")])
     assert run(["invalidation", "2026-09-08", "A_WTI=not_fired"], repo).returncode == 0
     r = run(["invalidation", "2026-09-09", "OTHER=not_fired"], repo)
     assert "A_WTI" in r.stderr
+
+
+def test_final_day_is_observed_on_the_morning_after_even_on_a_weekend(repo):
+    """5本目が金曜なら、土曜の朝の確認がその値動きを観測する最初で最後の機会(#172 Codex P1)。
+
+    2026-09-12(土)の判断の5本目は 9/18(金)。9/19(土)の朝にまだ聞く。ここで閉じると
+    最終日の発動が永久に落ち、発動率が系統的に低く出る(実例: 20260912_BTC_SELL)。
+    日曜(9/20)には閉じる。平日カウントは週末に進まないので、日曜を開けたままにしない。
+    """
+    _ledger(repo, [("2026-08-03", "X", "WTI", "BUY"), ("2026-08-03", "Y", "WTI", "BUY"), ("2026-09-12", "BTC_SAT", "BTC", "SELL")])
+    assert "BTC_SAT" in run(["invalidation", "2026-09-19", "X=not_fired"], repo).stderr
+    for c in ("2026-09-20", "2026-09-21"):
+        assert "BTC_SAT" not in run(["invalidation", c, "Y=not_fired"], repo).stderr, c
+
+
+def test_last_business_day_of_the_window_is_still_open(repo):
+    """5本目の当日朝(9/18 金)はまだ窓の内側。ここで外すと最後の1日を聞き漏らす。"""
+    _ledger(repo, [("2026-08-03", "X", "WTI", "BUY"), ("2026-09-12", "BTC_SAT", "BTC", "SELL")])
+    r = run(["invalidation", "2026-09-18", "X=not_fired"], repo)
+    assert "BTC_SAT" in r.stderr
+
+
+# --- 台帳に無い / 判断日より前の確認は記録しない、--check-only は書かない（#173 Codex P2） ---
+
+def test_check_before_signal_date_is_refused(repo):
+    """9/22 に 9/24 の判断を確認した行は時系列上あり得ない。入口で止める。"""
+    _ledger(repo, [("2026-09-24", "BTC_24", "BTC", "BUY")])
+    r = run(["invalidation", "2026-09-22", "BTC_24=not_fired"], repo)
+    assert r.returncode != 0 and "前の確認日" in r.stdout + r.stderr
+    assert _rows(repo, "invalidation_checks.csv") == []
+
+
+def test_unknown_signal_id_is_refused(repo):
+    """台帳に無い signal_id は転記ミスか未取込。黙って記録しない。"""
+    _ledger(repo, [("2026-09-24", "BTC_24", "BTC", "BUY")])
+    r = run(["invalidation", "2026-09-25", "BTC_42=not_fired"], repo)
+    assert r.returncode != 0 and "台帳" in r.stdout + r.stderr
+    assert _rows(repo, "invalidation_checks.csv") == []
+
+
+def test_check_only_reports_gaps_without_writing(repo):
+    """突合だけ見る用。記録コマンドを読み取りに使って偽の行を作った事故の再発防止。"""
+    _ledger(repo, [("2026-09-24", "BTC_24", "BTC", "BUY"), ("2026-09-24", "GOLD_24", "GOLD", "BUY")])
+    r = run(["invalidation", "2026-09-25", "BTC_24=not_fired", "--check-only"], repo)
+    assert r.returncode == 0 and "GOLD_24" in r.stderr
+    assert _rows(repo, "invalidation_checks.csv") == [], "何も書かない"
+
+
+# --- 語彙の外の決着語は、捨てずに隔離する(2026-09-30) ---
+
+def test_unknown_word_is_quarantined_not_dropped(repo):
+    """target_before_entry のような語: 本体は unknown、原文は隔離ファイルへ。止めない。"""
+    _ledger(repo, [("2026-09-19", "USDJPY_19", "USDJPY", "BUY")])
+    r = run(["invalidation", "2026-09-24", "USDJPY_19=target_before_entry"], repo)
+    assert r.returncode == 0 and "語彙の外" in r.stderr
+    assert _rows(repo, "invalidation_checks.csv")[0]["invalidation_fired"] == "unknown"
+    q = _rows(repo, "invalidation_raw_verdicts.csv")
+    assert q[0]["raw_verdict"] == "target_before_entry" and q[0]["signal_id"] == "USDJPY_19"
+
+
+def test_in_vocab_words_leave_no_quarantine_file(repo):
+    _ledger(repo, [("2026-09-19", "USDJPY_19", "USDJPY", "BUY")])
+    assert run(["invalidation", "2026-09-22", "USDJPY_19=not_fired"], repo).returncode == 0
+    assert not (repo / "data" / "invalidation_raw_verdicts.csv").exists()
+
+
+def test_unreadable_word_is_still_refused(repo):
+    """空や記号混じりは語として読めない。隔離ではなく差し戻す。"""
+    _ledger(repo, [("2026-09-19", "USDJPY_19", "USDJPY", "BUY")])
+    r = run(["invalidation", "2026-09-24", "USDJPY_19=fired?!"], repo)
+    assert r.returncode != 0
+
+
+def test_raw_word_conflicting_with_a_concrete_verdict_is_refused(repo):
+    """本体に fired があるのに target_before_entry を隔離すると台帳同士が食い違う(#177 Codex P2)。"""
+    _ledger(repo, [("2026-09-19", "S", "USDJPY", "BUY")])
+    assert run(["invalidation", "2026-09-24", "S=fired"], repo).returncode == 0
+    r = run(["invalidation", "2026-09-24", "S=target_before_entry"], repo)
+    assert r.returncode != 0 and "食い違う" in r.stdout + r.stderr
+    assert _rows(repo, "invalidation_checks.csv")[0]["invalidation_fired"] == "fired"
+    assert not (repo / "data" / "invalidation_raw_verdicts.csv").exists(), "隔離側にも書かない"
+
+
+def test_raw_word_may_annotate_an_existing_unknown(repo):
+    """本体が unknown なら、後から原文を隔離に足してよい(情報が増えるだけで矛盾しない)。"""
+    _ledger(repo, [("2026-09-19", "S", "USDJPY", "BUY")])
+    assert run(["invalidation", "2026-09-24", "S=unknown"], repo).returncode == 0
+    r = run(["invalidation", "2026-09-24", "S=target_before_entry"], repo)
+    assert r.returncode == 0
+    assert _rows(repo, "invalidation_raw_verdicts.csv")[0]["raw_verdict"] == "target_before_entry"
+
+
+def test_older_signal_of_the_same_asset_is_superseded_not_missing(repo):
+    """見立てを毎日書き直す契約(2026-11-03)では未決着が1日40件前後になり、GPT は 11/11 に
+    `historical_pending_signals=unknown` の1語へまとめた。聞く単位は資産ごとの最新1件(changelog(22))。"""
+    _ledger(repo, [("2026-11-04", "D4_GOLD", "GOLD", "SELL"),
+                   ("2026-11-05", "D5_GOLD", "GOLD", "BUY"),       # 同じ資産の新しい判断(方向が変わっても同じ)
+                   ("2026-11-05", "D5_WTI", "WTI", "SELL"),
+                   ("2026-11-06", "D6_GOLD", "GOLD", "BUY")])
+    r = run(["invalidation", "2026-11-09", "D6_GOLD=not_fired"], repo)
+    assert r.returncode == 0
+    assert "D5_WTI" in r.stderr and "申告漏れ" in r.stderr           # WTI の最新は 11/5 のまま → 聞く
+    assert "D4_GOLD" not in r.stderr and "D5_GOLD" not in r.stderr   # GOLD の古い2件は引き継がれた
+
+
+def test_same_day_signal_does_not_supersede_yesterdays(repo):
+    """確認日の当日に出した判断は、まだ確認しようがない。前日までの最新が対象のまま。"""
+    _ledger(repo, [("2026-11-06", "D6_GOLD", "GOLD", "BUY"),
+                   ("2026-11-09", "D9_GOLD", "GOLD", "BUY")])
+    r = run(["invalidation", "2026-11-09", "D6_GOLD=not_fired"], repo)
+    assert r.returncode == 0 and "申告漏れ" not in r.stderr
+    r2 = run(["invalidation", "2026-11-10", "D9_GOLD=not_fired"], repo)
+    assert r2.returncode == 0 and "申告漏れ" not in r2.stderr          # 11/10 の朝は 11/9 が最新。11/6 は求めない
+
+
+def test_superseded_signal_may_still_be_declared(repo):
+    """古い判断を書いてきても弾かない(台帳にある id なら記録する)。求めないだけ。"""
+    _ledger(repo, [("2026-11-05", "D5_GOLD", "GOLD", "BUY"), ("2026-11-06", "D6_GOLD", "GOLD", "BUY")])
+    r = run(["invalidation", "2026-11-09", "D5_GOLD=fired,D6_GOLD=not_fired"], repo)
+    assert r.returncode == 0 and len(_rows(repo, "invalidation_checks.csv")) == 2
+

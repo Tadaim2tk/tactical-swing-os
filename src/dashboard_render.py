@@ -769,6 +769,39 @@ def horizon_chart(bars: list) -> str:
     return "".join(parts)
 
 
+def throughput_block(tp: dict) -> str:
+    """売買頻度カードの中身。判定行(1行)と、台帳から数えた週表。"""
+    if not tp:
+        return '<div class="empty">売買頻度 未取得</div>'
+    weekly = pd.DataFrame(tp.get("weekly") or [])
+    table = table_html(weekly, ["week", "ledger_days", "orders", "ideas"], "台帳から週表を作れませんでした")
+    if not tp.get("available"):
+        return f'<div class="empty">{html.escape(str(tp.get("note") or "判定が無い"))}</div><h3>週ごと(台帳から)</h3>{table}'
+    tone = tp.get("tone", "neutral")
+
+    def _r(v):
+        return "—" if v is None else f"{v:.2f}"
+
+    def _n(v):
+        return "—" if v is None else str(v)
+
+    window_txt = "見立て " + _n(tp.get("ideas_window")) + " 本 / 注文 " + _n(tp.get("orders_window")) + " 行"
+    base_txt = "見立て " + _n(tp.get("ideas_baseline")) + " 本 / 注文 " + _n(tp.get("orders_baseline")) + " 行"
+    ratio_txt = "見立て " + _r(tp.get("ideas_ratio")) + " / 注文 " + _r(tp.get("orders_ratio"))
+    line = (
+        '<div class="pills">'
+        + summary_pill("判定", str(tp.get("status", "")), tone)
+        + summary_pill("基準日", str(tp.get("as_of", "")), "warn" if tp.get("stale") else "neutral")
+        + summary_pill("直近14日", window_txt, tone)
+        + summary_pill("前56日", base_txt, "neutral")
+        + summary_pill("比(直近/基準, 台帳日あたり)", ratio_txt, "neutral")
+        + "</div>"
+    )
+    note = f'<p class="notice">{html.escape(str(tp.get("note")))}</p>' if tp.get("note") else ""
+    stale = '<p class="notice">判定が台帳より2日以上古い。daily_cycle の throughput watch が止まっていないか確認。</p>' if tp.get("stale") else ""
+    return f"{line}{note}{stale}<h3>週ごと(台帳から、直近8週)</h3>{table}"
+
+
 def summary_pill(label: str, value: str, tone: str) -> str:
     return (
         f'<span class="summary-pill pill-{tone}">'
@@ -1017,6 +1050,7 @@ def render_html(
     execution_view: dict,
     execution_sim: dict,
     summary: dict,
+    throughput: dict | None = None,
 ) -> str:
     top_positive = reason_table[reason_table["reliability_label"].isin(["strong_positive", "positive"])].head(10) if not reason_table.empty and "reliability_label" in reason_table.columns else pd.DataFrame()
     top_negative = (
@@ -1425,8 +1459,16 @@ def render_html(
     _mode_raw = str(mode.get("next_week_mode", "")).strip()
     _mode_txt = display_value(_mode_raw) if _mode_raw and _mode_raw.lower() != "not available" else "未取得"
     _mode_tone = {"attack": "good", "aggressive": "good", "defense": "warn", "defensive": "warn", "normal": "neutral"}.get(_mode_raw.lower(), "neutral")
+    tp = throughput or {}
+    if tp.get("available"):
+        _tp_txt = f"{tp.get('status', '')} 見立て{tp.get('ideas_window', '—')}本/注文{tp.get('orders_window', '—')}行(14日)"
+        if tp.get("stale"):
+            _tp_txt += f" ※判定が {tp.get('as_of', '')} で止まっている"
+    else:
+        _tp_txt = "未取得"
     header_pills = (
         ledger_pill
+        + summary_pill("売買頻度", _tp_txt, tp.get("tone", "neutral") if tp.get("available") else "neutral")
         + summary_pill("計器の健全性", _health_txt, _health_tone)
         + summary_pill("今週のモード", _mode_txt, _mode_tone)
         + summary_pill("B級 5日勝率(終値)", str(prediction_log.get("b_rank_win_rate_5d", "—")), "good" if prediction_log.get("available") else "neutral")
@@ -1580,6 +1622,7 @@ def render_html(
     {today_block}
     <section class="card"><h2>見送り(NO_TRADE)</h2>{no_trade_strip(tj.get("no_trade") or [])}</section>
     <section class="card"><h2>前営業日の答え合わせ</h2>{prev_results_html(tj)}</section>
+    <section class="card"><h2>売買頻度(試行回数)</h2><p class="notice">期待値が高くても試行回数が無ければ収束しない。注文=rank A/B の行、見立て=同じ資産・方向の並びの始まり(3日以内の再発行は1本)。直近14日を前56日と比べ、見立てが14日で3本未満(週1本以下)か両方半分以下で ALERT。daily_cycle が毎日判定し、ALERT の朝はジョブが赤になる。</p>{throughput_block(tp)}</section>
 
     <h2 class="sec" id="perf"><span class="n">02</span>成績と較正</h2>
     <p class="sec-sub">終値基準の方向採点です(SL/TP執行の再現ではありません)。判断数が{min_n}件未満の集計は「データ不足」として断定しません。</p>

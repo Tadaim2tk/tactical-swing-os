@@ -274,11 +274,35 @@ def test_forming_last_bar_does_not_claim_forgone_r(monkeypatch):
     bars = _ohlcv([(f"2026-07-0{i}", 74 + i, 75 + i, 73.5 + i, 74.5 + i) for i in range(1, 6)])
     monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-05"))
     r = se.simulate_row(_row(), bars, "t")
-    assert r["status"] == "no_fill"
+    # 形成途中の5本目はまだ帯に触れるかもしれないので no_fill も名乗らない(2026-11-03 改定)
+    assert r["status"] == "open"
     assert pd.isna(r["forgone_r"]), "5本目(7/5)が当日なので確定値を名乗らない"
+    # 系列の最終行はラベル日が過ぎても2日間は形成途中とみなす(10/21 NQ の実例。bar_is_final)
     monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
     r2 = se.simulate_row(_row(), bars, "t")
-    assert not pd.isna(r2["forgone_r"]), "閉じたら記録する"
+    assert r2["status"] == "open" and pd.isna(r2["forgone_r"]), "最終行は翌日でもまだ確定しない"
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-07"))
+    r3 = se.simulate_row(_row(), bars, "t")
+    assert r3["status"] == "no_fill" and not pd.isna(r3["forgone_r"]), "2日経てば最終行でも確定"
+    # 次のバーが現れれば(最終行でなくなれば)翌日に確定する
+    bars6 = _ohlcv([(f"2026-07-0{i}", 74 + i, 75 + i, 73.5 + i, 74.5 + i) for i in range(1, 7)])
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
+    r4 = se.simulate_row(_row(), bars6, "t")
+    assert r4["status"] == "no_fill" and abs(r4["forgone_r"] - r3["forgone_r"]) < 1e-9, "6本目があれば5本目は確定"
+
+
+def test_last_bar_still_forming_after_label_date_is_not_final(monkeypatch):
+    """2026-10-22 00:16 UTC の実例: NQ の 10/21 ラベルのバーは Chicago ではまだ 10/21 の夜で、
+    翌営業日のセッションの値を抱えて更新中だった。ラベル日 < 今日(UTC) でも最終行は確定にしない。
+    時間決済・成行の建値・ATR床の時間決済も同じ規約で止まる。"""
+    import score_prediction_log as spl
+    bars = _ohlcv([("2026-10-20", 100, 101, 99, 100), ("2026-10-21", 100, 102, 99, 101)])
+    today = pd.Timestamp("2026-10-22")
+    assert spl.bar_is_final(bars, 0, today) is True      # 最終行でない → ラベル日の経過だけで確定
+    assert spl.bar_is_final(bars, 1, today) is False     # 最終行で、ラベル日から2日経っていない
+    assert spl.bar_is_final(bars, 1, pd.Timestamp("2026-10-23")) is True
+    assert spl.bar_is_final(bars, 1, pd.Timestamp("2026-10-21")) is False  # 当日ラベルは従来どおり未確定
+    assert spl.bar_is_final(bars, 5, today) is False     # 範囲外
 
 
 # --- 押し目を待たずに追る規則の併走観測(人間の承認 2026-09-09) ---
@@ -358,3 +382,229 @@ def test_chase_summary_is_separate_from_realized_r():
     assert out["chase"]["total_r"] == 0.0
     assert out["chase"]["chased"] == 1
     assert out["chase"]["baseline_total_r"] == -1.0
+
+
+# --- TP1で半分降りて残りを時間決済まで持つ規則(人間の承認 2026-09-09) ---
+
+def _six(rest):
+    """判断日から決済期限まで6本。rest は1本目以降の (h, l, c)。"""
+    bars = [("2026-07-01", 74, 74.5, 72.5, 74.0)]        # 帯72-73に触れて約定・SLなし
+    for i, (h, l, c) in enumerate(rest, start=2):
+        bars.append((f"2026-07-0{i}", c, h, l, c))
+    return _ohlcv(bars)
+
+
+def test_half_exit_books_tp1_and_rides_the_rest_to_the_deadline():
+    """TP1で半分、残りは6本目の終値。建値73/risk3/TP1=76 -> 0.5*1.0 + 0.5*(79-73)/3。"""
+    bars = _six([(76.5, 74.0, 76.2), (77, 75, 76.8), (78, 76, 77.5),
+                 (78.5, 76.5, 78.0), (79.5, 77, 79.0)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_time"
+    assert abs(r - (0.5 * 1.0 + 0.5 * 2.0)) < 1e-3
+    assert abs(r_be - r) < 1e-9, "一度も建値へ戻っていないので同じ"
+
+
+def test_half_exit_gives_back_the_rest_when_price_reverses():
+    """TP1後に反転したら残りは返上する。**これがTP1全決済より悪くなる日**。
+
+    元のSLのままなら残り -1.0R、建値へ上げていれば 0R。両方測って比べられるようにする。
+    """
+    bars = _six([(76.5, 74.0, 76.2),     # TP1到達
+                 (76.5, 73.5, 74.0),     # 建値73は割らない
+                 (74.0, 69.0, 70.5),     # SL70も建値73も割る
+                 (72, 70.5, 71), (72, 70.5, 71)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_stopped"
+    assert abs(r - (0.5 * 1.0 + 0.5 * -1.0)) < 1e-3, "元のSLなら残りは-1R"
+    assert abs(r_be - (0.5 * 1.0 + 0.5 * 0.0)) < 1e-3, "建値なら残りは0R"
+    assert r_be > r
+
+
+def test_half_exit_is_identical_when_the_stop_comes_first():
+    """SLが先なら分ける対象が無い。r_result と同じ値でなければ比較が壊れる。"""
+    bars = _six([(74, 69.0, 70.0), (72, 70, 71), (72, 70, 71), (72, 70, 71), (72, 70, 71)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_sl_before_tp1"
+    assert r == r_be == -1.0
+    assert abs(se.simulate_row(_row(), bars, "t")["r_result"] - r) < 1e-9
+
+
+def test_half_exit_is_identical_when_tp1_is_never_reached():
+    """TP1に届かなければ全部を時間決済。分けても同じ。"""
+    bars = _six([(75, 73.5, 74.5), (75, 73.5, 74.5), (75, 73.5, 74.5),
+                 (75, 73.5, 74.5), (75, 73.5, 74.8)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_no_tp1_time_exit"
+    assert r == r_be
+    assert abs(se.simulate_row(_row(), bars, "t")["r_result"] - r) < 1e-9
+
+
+def test_half_exit_needs_a_fill_first():
+    """建っていない判断は分ける対象ではない。空欄で返す。"""
+    bars = _ohlcv([(f"2026-07-0{i}", 76, 78, 75, 77) for i in range(1, 7)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "" and pd.isna(r) and pd.isna(r_be)
+
+
+def test_half_exit_does_not_close_on_a_forming_bar(monkeypatch):
+    """期限バーが形成途中なら確定値を名乗らない(#137/#165/#166 と同型)。"""
+    bars = _six([(76.5, 74.0, 76.2), (77, 75, 76.8), (78, 76, 77.5),
+                 (78.5, 76.5, 78.0), (79.5, 77, 79.0)])
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "open" and pd.isna(r) and pd.isna(r_be)
+
+
+def test_half_exit_summary_keeps_the_baseline_beside_it():
+    """同じ母集団の実現Rを並べないと、差が読めない。"""
+    sim = pd.DataFrame([
+        {"asset": "WTI", "status": "filled_tp1", "r_result": 1.0, "capital_pct": 0.25,
+         "forgone_r": float("nan"), "chase_status": "", "chase_r": float("nan"),
+         "half_exit_status": "half_tp1_then_time", "half_exit_r": 1.5, "half_exit_be_r": 1.5},
+        {"asset": "WTI", "status": "filled_sl", "r_result": -1.0, "capital_pct": -0.25,
+         "forgone_r": float("nan"), "chase_status": "", "chase_r": float("nan"),
+         "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0},
+    ])
+    out = se.summarize(sim)
+    assert out["half_exit"]["total_r"] == 0.5
+    assert out["half_exit"]["baseline_total_r"] == 0.0
+    assert out["half_exit"]["tp1_split"] == 1
+    assert out["gross_total_r"] == 0.0, "実現Rに half_exit を混ぜない"
+
+
+def test_half_exit_breakeven_stop_is_judged_on_the_tp1_bar_itself():
+    """TP1を踏んだ足が建値まで戻っていたら、建値版はその足で止まる(#168 Codex P2)。
+
+    TP1が先か戻りが先かは分からない。同じ足の順序不明は不利側に倒す規約。
+    元のSL版はその足でSL未到達が確認済みなので、翌足以降を見るのと同じ結果になる。
+    """
+    bars = _six([(76.5, 72.8, 75.0),     # TP1=76到達、かつ安値72.8で建値73を割る
+                 (77, 75, 76.8), (78, 76, 77.5), (78.5, 76.5, 78.0), (79.5, 77, 79.0)])
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_time"
+    assert abs(r - (0.5 * 1.0 + 0.5 * 2.0)) < 1e-3, "元のSLは割っていないので伸ばせる"
+    assert abs(r_be - (0.5 * 1.0 + 0.5 * 0.0)) < 1e-3, "建値版はその足で止まったと扱う"
+
+
+def test_half_exit_breakeven_cannot_record_a_loss_when_tp1_lands_on_the_deadline_bar():
+    """TP1が期限足に当たり終値が建値割れでも、建値版は残りを負にしない(#168 Codex P2)。
+
+    翌足から見る実装だと runner の走査が空になり、時間決済の終値で残りの損を
+    記録していた。「返上しない」という建値版の定義に反する。
+    """
+    bars = _six([(75, 73.5, 74.5), (75, 73.5, 74.5), (75, 73.5, 74.5), (75, 73.5, 74.5),
+                 (76.5, 72.0, 72.5)])  # 期限足でTP1到達、安値72で建値割れ、終値72.5
+    st, r, r_be = se.half_exit_row(_row(), bars)
+    assert st == "half_tp1_then_time"
+    assert abs(r - (0.5 * 1.0 + 0.5 * (72.5 - 73.0) / 3.0)) < 1e-3, "元のSL版は終値で返上"
+    assert abs(r_be - 0.5) < 1e-3, "建値版は建値で止まる。残りは0"
+    assert r_be > r
+
+
+# --- 確定した行を、価格窓の短い再実行で open に戻さない(#173 Codex P2) ---
+
+def test_finalized_row_survives_a_rerun_that_only_knows_less():
+    """main の夜間実行が no_fill で閉じた行を、古い価格で回した手元の open で上書きしない。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "no_fill", "forgone_r": 0.5269,
+                          "chase_status": "chase_tp1", "chase_r": 0.23, "r_result": float("nan")}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "open", "forgone_r": float("nan"),
+                         "chase_status": "open", "chase_r": float("nan"), "r_result": float("nan")}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS))
+    r = out.set_index("signal_id").loc["S"]
+    assert r["status"] == "no_fill" and abs(r["forgone_r"] - 0.5269) < 1e-9 and r["chase_status"] == "chase_tp1"
+
+
+def test_new_final_result_replaces_open():
+    """open → 確定は普通の前進。止めない。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "open"}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "filled_tp1", "r_result": 1.0}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS))
+    assert out.set_index("signal_id").loc["S", "status"] == "filled_tp1"
+
+
+# --- SL幅を ATR10 以上に広げた場合の併走観測(人間の承認 2026-10-23 案3) ---
+
+def _bars_with_history(rest):
+    """判断日(7/01)の前に営業日12本の平穏な履歴(値幅1.0)を置き、その後に rest を並べる。
+
+    12本にするのは、rest に週末の日付が入ると暦の推定が週7日になりアンカーが1本手前に
+    ずれる(k-2)ため。どちらの暦でも ATR10 の母数10本が揃う。
+    """
+    days = pd.bdate_range(end="2026-06-30", periods=12).strftime("%Y-%m-%d")
+    hist = [(d, 72.5, 73.0, 72.0, 72.5) for d in days]
+    return _ohlcv(hist + rest)
+
+
+def test_atr_at_decision_uses_only_closed_bars():
+    """ATR は判断時に閉まっていたバーだけ。後のバーを混ぜると先読みになる。"""
+    df = _bars_with_history([("2026-07-01", 74, 90, 60, 74)])   # 判断日に巨大な値幅
+    k, a = se.decision_time_anchor(df, "2026-07-01")
+    assert abs(se.atr_at_decision(df, a) - 1.0) < 1e-9, "判断日の値幅30は入れない"
+
+
+def test_atr_floor_survives_a_shake_that_hits_the_declared_sl():
+    """申告の SL(幅0.5)なら初日に切られる揺れを、ATR 下限(幅1.0)なら耐えて TP1 へ。"""
+    row = _row(entry_low="72.0", entry_high="73.0", sl="72.5", tp1="76.0")   # 申告幅 0.5 < ATR 1.0
+    bars = _bars_with_history([("2026-07-01", 74, 74.5, 72.2, 74.0),            # 約定、安値72.2は申告SL(72.5)を割るが72.0は割らない
+                               ("2026-07-02", 74, 76.5, 73.5, 76.0)])           # TP1 76
+    base = se.simulate_row(row, bars, "t")
+    st, r, widened = se.atr_floor_row(row, bars)
+    assert base["status"] == "filled_sl" and base["r_result"] == -1.0
+    assert widened is True and st == "atr_tp1"
+    assert abs(r - (76.0 - 73.0) / 1.0) < 1e-9, "R は広げた幅(1.0)で測る"
+
+
+def test_atr_floor_leaves_wide_enough_stops_alone():
+    """申告の SL が ATR 以上なら何も変えない。結果も r_result と同じ。"""
+    row = _row(sl="70.0")   # 幅 3.0 > ATR 1.0
+    bars = _bars_with_history([("2026-07-01", 74, 74.5, 72.5, 74.0), ("2026-07-02", 74, 76.5, 73.5, 76.0)])
+    base = se.simulate_row(row, bars, "t")
+    st, r, widened = se.atr_floor_row(row, bars)
+    assert widened is False and st == "atr_tp1" and abs(r - base["r_result"]) < 1e-9
+
+
+def test_atr_floor_does_not_close_on_a_forming_bar(monkeypatch):
+    row = _row(sl="72.5", tp1="90.0")
+    bars = _bars_with_history([("2026-07-01", 74, 74.5, 72.8, 74.0)]              # 帯72-73に触れて約定、SLは割らない
+                              + [(f"2026-07-0{i}", 74, 74.6, 73.6, 74.2) for i in range(2, 7)])
+    monkeypatch.setattr(se, "_current_utc_date", lambda: pd.Timestamp("2026-07-06"))
+    st, r, _ = se.atr_floor_row(row, bars)
+    assert st == "open" and pd.isna(r), "期限足(7/06)が当日ラベルのままなら確定値を名乗らない"
+
+
+def test_atr_floor_summary_is_separate_from_realized_r():
+    sim = pd.DataFrame([
+        {"asset": "WTI", "status": "filled_sl", "r_result": -1.0, "capital_pct": -0.25,
+         "forgone_r": float("nan"), "chase_status": "", "chase_r": float("nan"),
+         "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0,
+         "atr_floor_status": "atr_tp1", "atr_floor_r": 1.5, "atr_floor_widened": True},
+    ])
+    out = se.summarize(sim)
+    assert out["gross_total_r"] == -1.0, "実現Rに atr_floor を混ぜない"
+    assert out["atr_floor"]["total_r"] == 1.5 and out["atr_floor"]["widened"] == 1
+    assert out["atr_floor"]["baseline_sl_count"] == 1 and out["atr_floor"]["sl_count"] == 0
+
+
+def test_atr_needs_ten_true_ranges():
+    """10本揃わなければ測らない。ATR3 を ATR10 と名乗らない(#189 Codex P2)。"""
+    short = _ohlcv([(f"2026-06-{d:02d}", 72.5, 73.0, 72.0, 72.5) for d in range(20, 26)] + [("2026-07-01", 74, 74.5, 72.5, 74.0)])
+    k, a = se.decision_time_anchor(short, "2026-07-01")
+    assert pd.isna(se.atr_at_decision(short, a))
+    st, r, w = se.atr_floor_row(_row(sl="72.5"), short)
+    assert st == "" and pd.isna(r), "履歴が足りない判断は測らない"
+
+
+def test_parallel_track_results_are_kept_independently():
+    """本体が SL で確定したまま、併走側だけ open に戻る再実行で確定結果を消さない(#189 Codex P2)。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "filled_sl", "r_result": -1.0,
+                          "atr_floor_status": "atr_tp1", "atr_floor_r": 1.5, "atr_floor_widened": True,
+                          "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0,
+                          "chase_status": "chase_tp1", "chase_r": 0.4}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "filled_sl", "r_result": -1.0,
+                         "atr_floor_status": "open", "atr_floor_r": float("nan"), "atr_floor_widened": True,
+                         "half_exit_status": "half_sl_before_tp1", "half_exit_r": -1.0, "half_exit_be_r": -1.0,
+                         "chase_status": "open", "chase_r": float("nan")}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS)).set_index("signal_id").loc["S"]
+    assert out["atr_floor_status"] == "atr_tp1" and abs(out["atr_floor_r"] - 1.5) < 1e-9
+    assert out["chase_status"] == "chase_tp1" and abs(out["chase_r"] - 0.4) < 1e-9
+    assert out["status"] == "filled_sl"
