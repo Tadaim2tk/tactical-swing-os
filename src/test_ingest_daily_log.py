@@ -254,3 +254,23 @@ def test_canonical_no_trade_rows_are_left_untouched(tmp_path):
     assert r["appended"] == 1 and r["details"][0]["warnings"] == []
     assert not (tmp_path / "ingest_normalizations.csv").exists()
 
+
+def test_json_nulls_keep_their_missing_semantics(tmp_path):
+    """JSON の null を "None"/"nan" という文字列にしない(#210 Codex P2)。
+    signal_id: null は従来どおり拒否、価格が null の見送り行は語彙を正規化できる。"""
+    import json as _json
+    ledger, raw = _ledger(tmp_path), _raw(tmp_path, asset="VIX", close=19.0)
+    cols = HEADER.split(",")
+    base = dict.fromkeys(cols, None)
+    no_id = {**base, "date": "2026-11-10", "signal_id": None, "asset": "VIX", "side": "NONE", "rank": "NO_TRADE", "type": "NO_TRADE"}
+    swapped = {**base, "date": "2026-11-10", "signal_id": "20261110_VIX_NO_TRADE_NONE", "asset": "VIX",
+               "side": "NO_TRADE", "rank": "NONE", "type": "NONE", "tq_score": 38, "regime": "EVENT"}
+    r = idl.ingest(_json.dumps([no_id, swapped]), origin="chatgpt_app", apply=True, run_score=False, ledger_path=ledger, raw_dir=raw)
+    assert r["format"] == "json" and r["rejected"] == 1 and r["appended"] == 1
+    assert r["details"][0]["verdict"] == "reject" and "signal_id が空" in r["details"][0]["warnings"][0]
+    assert r["details"][1]["signal_id"] == "20261110_VIX_NONE_NO_TRADE"
+    led = pd.read_csv(ledger, dtype=str, keep_default_na=False)
+    assert "None" not in set(led["signal_id"]) and "nan" not in set(led["signal_id"])
+    row = led[led["signal_id"] == "20261110_VIX_NONE_NO_TRADE"].iloc[0]
+    assert (row["side"], row["rank"], row["type"]) == ("NONE", "NO_TRADE", "NO_TRADE")
+

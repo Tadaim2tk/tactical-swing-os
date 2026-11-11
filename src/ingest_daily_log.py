@@ -56,6 +56,19 @@ NO_TRADE_ID_RE = re.compile(r"^(\d{8}_[A-Z0-9]+)_NO_TRADE_NONE$")
 NOTE_COL, REJECT_COL, RAW_ID_COL = "_ingest_note", "_ingest_reject", "_raw_signal_id"
 
 
+def _s(v) -> str:
+    """欠損(None / NaN)を空文字として読む。JSON 入力の null を "None" や "nan" という文字列にしない
+    (#210 Codex P2: 文字列化すると signal_id: null が空でない ID として通ってしまう)。"""
+    if v is None:
+        return ""
+    try:
+        if pd.isna(v):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(v).strip()
+
+
 def _is_num_or_blank(v: str) -> bool:
     v = str(v).strip()
     if v == "":
@@ -134,28 +147,30 @@ def _normalize_no_trade_vocab(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = ""
     for idx, row in df.iterrows():
-        side = str(row["side"]).strip().upper()
-        rank = str(row["rank"]).strip().upper()
-        typ = str(row["type"]).strip().upper()
-        prices_blank = all(str(row[c]).strip() == "" for c in ("entry_low", "entry_high", "sl"))
+        side = _s(row["side"]).upper()
+        rank = _s(row["rank"]).upper()
+        typ = _s(row["type"]).upper()
+        prices_blank = all(_s(row[c]) == "" for c in ("entry_low", "entry_high", "sl"))
         if not prices_blank or side in {"BUY", "SELL", "LONG", "SHORT"}:
             continue
         if not (side == "NO_TRADE" or rank == "NONE"):
             continue                      # 既に約束どおり（side=NONE, rank=NO_TRADE）か、別の語彙
         if side not in {"NO_TRADE", "NONE", ""} or rank not in {"NONE", "NO_TRADE", ""}:
             continue
-        raw_sid = str(row["signal_id"]).strip()
-        new_type = "NO_TRADE" if typ in {"NONE", "", "NO_TRADE"} else str(row["type"]).strip()
+        raw_sid = _s(row["signal_id"])
+        if not raw_sid:
+            continue                      # ID が無い行は validate_row が拒否する。ここでは触らない
+        new_type = "NO_TRADE" if typ in {"NONE", "", "NO_TRADE"} else _s(row["type"])
         m = NO_TRADE_ID_RE.match(raw_sid)
         new_sid = f"{m.group(1)}_NONE_NO_TRADE" if m else raw_sid
-        note = (f"見送り行の語彙を正規化: side/rank/type={row['side']}/{row['rank']}/{row['type']}"
+        note = (f"見送り行の語彙を正規化: side/rank/type={_s(row['side'])}/{_s(row['rank'])}/{_s(row['type'])}"
                 f" → NONE/NO_TRADE/{new_type}")
         if new_sid != raw_sid:
             note += f"、signal_id {raw_sid} → {new_sid}"
         df.at[idx, "side"], df.at[idx, "rank"], df.at[idx, "type"] = "NONE", "NO_TRADE", new_type
         df.at[idx, "signal_id"] = new_sid
         df.at[idx, RAW_ID_COL] = raw_sid
-        prev = str(df.at[idx, NOTE_COL]).strip()
+        prev = _s(df.at[idx, NOTE_COL])
         df.at[idx, NOTE_COL] = (prev + "；" if prev else "") + note
     return df
 
@@ -164,9 +179,9 @@ def _attach_notes(df: pd.DataFrame, notes: dict[str, str], rejects: dict[str, st
     if df.empty or "signal_id" not in df.columns:
         return df
     df = df.copy()
-    sid = df["signal_id"].astype(str).str.strip()
-    df[NOTE_COL] = sid.map(notes).fillna("")
-    df[REJECT_COL] = sid.map(rejects).fillna("")
+    sid = df["signal_id"].map(_s)
+    df[NOTE_COL] = sid.map(lambda x: notes.get(x, ""))
+    df[REJECT_COL] = sid.map(lambda x: rejects.get(x, ""))
     df[RAW_ID_COL] = ""
     return df
 
@@ -179,7 +194,7 @@ def extract_rows(text: str) -> tuple[pd.DataFrame, str]:
         try:
             data = json.loads(text)
             if isinstance(data, list) and data and isinstance(data[0], dict):
-                return _normalize_no_trade_vocab(_attach_notes(pd.DataFrame(data).astype(str), {}, {})), "json"
+                return _normalize_no_trade_vocab(_attach_notes(pd.DataFrame(data), {}, {})), "json"
         except json.JSONDecodeError:
             pass
     # 2) Markdown 中の ```csv ブロック（複数あれば結合）
@@ -306,13 +321,13 @@ def _raw_last_date(asset: str, raw_dir: Path = RAW_DIR):
 def validate_row(row: pd.Series, existing_ids: set[str], raw_dir: Path = RAW_DIR) -> tuple[str, list[str]]:
     """(verdict, warnings) を返す。verdict: append / skip_duplicate / reject。"""
     warnings: list[str] = []
-    sid = str(row.get("signal_id") or "").strip()
+    sid = _s(row.get("signal_id"))
     if not sid:
         return "reject", ["signal_id が空"]
-    reject_reason = str(row.get(REJECT_COL) or "").strip()
+    reject_reason = _s(row.get(REJECT_COL))
     if reject_reason:
         return "reject", [reject_reason]
-    note = str(row.get(NOTE_COL) or "").strip()
+    note = _s(row.get(NOTE_COL))
     if note:
         warnings.append("補正: " + note)
     if sid in existing_ids:

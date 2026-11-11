@@ -23,7 +23,10 @@ chatgpt.com では Computer Use が使えない。残っている確実な経路
 * 値は直さない。見送り行の語彙と空欄の数だけ ingest_daily_log が補正し、data/ingest_normalizations.csv に残す。
 * 主役・invalidation は本文に明示された値だけを既存の記録ツールへ渡す。台帳に無い signal_id や
   集約した書き方（historical_pending_signals=unknown など）は記録しない。
-* 終了コード: 0=正常（追加0でも）、2=取り込めなかった日がある、1=致命的（日次会話が見つからない等）。
+* 終了コード: 0=正常（追加0でも）、2=取り込めなかった日がある、3=取込の後段（アーカイブ・主役・invalidation・
+  週次 crypto・価格取得・採点・執行シミュレーション）のどれかが失敗した、1=致命的（日次会話が見つからない等）。
+* 後段だけをやり直す: `--sidecars-for 2026-11-10,2026-11-11`（その日の主役・invalidation を本文から記録し直す。
+  記録ツールは追記型なので、既にある値は上書きされない）、`--force-score`（追加0でも価格取得・採点・執行simを回す）。
 """
 from __future__ import annotations
 
@@ -106,6 +109,7 @@ def parse_invalidation(text: str, ledger_dates: dict[str, str], day: str) -> tup
     """本文の invalidation_check 行から (記録できる項目, 記録しない項目と理由) を返す。"""
     keep: dict[str, str] = {}
     skipped: list[str] = []
+    conflicted: set[str] = set()   # 一度矛盾した ID は、後から何度出ても記録しない(#210 Codex P2)
     for m in INVAL_LINE_RE.finditer(text):
         line = re.sub(r"[*`]", "", m.group(1))
         line = re.split(r"[<}]", line)[0]
@@ -125,9 +129,12 @@ def parse_invalidation(text: str, ledger_dates: dict[str, str], day: str) -> tup
             if ledger_dates[sid] > day:
                 skipped.append(f"{sid}（判断日 {ledger_dates[sid]} が確認日 {day} より後）")
                 continue
+            if sid in conflicted:
+                continue
             if sid in keep and keep[sid] != verdict:
                 skipped.append(f"{sid}（同じ本文に矛盾する値 {keep[sid]} / {verdict}）")
                 keep.pop(sid)
+                conflicted.add(sid)
                 continue
             keep.setdefault(sid, verdict)
     return [f"{k}={v}" for k, v in keep.items()], skipped
@@ -175,7 +182,10 @@ def main(argv=None) -> int:
     ap.add_argument("--since", help="この日付以降の未取込日だけ扱う（既定: 台帳の最終日の14日前）")
     ap.add_argument("--no-score", action="store_true", help="価格取得・採点・執行シミュレーションを飛ばす")
     ap.add_argument("--no-fetch", action="store_true", help="価格取得(src/fetch_market.py)だけ飛ばす")
+    ap.add_argument("--force-score", action="store_true", help="追加0でも価格取得・採点・執行シミュレーションを回す（後段の再試行）")
+    ap.add_argument("--sidecars-for", default="", help="取込済みの日の主役・invalidation を本文から記録し直す（カンマ区切りの日付）")
     args = ap.parse_args(argv)
+    failures: list[str] = []      # 後段の失敗。1つでもあれば終了コード 3 (#210 Codex P2)
 
     src = args.export_file.expanduser()
     if not src.exists():
@@ -202,6 +212,8 @@ def main(argv=None) -> int:
                     "--title", args.title] + (["--apply"] if args.apply else []))
     summary["archive"] = out.splitlines()[-1] if out else ""
     print("[archive]", summary["archive"])
+    if rc != 0:
+        failures.append(f"archive rc={rc}: {summary['archive'][:120]}")
 
     # 2) 未取込の日を古い順に
     targets = [(d, t) for d, _n, t in entries if d not in counts and d >= since]
@@ -228,13 +240,25 @@ def main(argv=None) -> int:
         print(f"[ingest] {day}: 10行（A/B {ab}）" + ("" if args.apply else " [dry-run]") + (f" 警告 {len(warns)}" if warns else ""))
         ingested.append((day, text))
 
-    # 3) 主役・invalidation（取り込んだ日だけ。dry-run では読むだけ）
+    # 3) 主役・invalidation（取り込んだ日と、--sidecars-for で指定した取込済みの日。dry-run では読むだけ）
     ledger_dates = {r["signal_id"]: r["date"] for r in (_ledger_rows() if args.apply else ledger)}
+    redo = [d.strip() for d in args.sidecars_for.split(",") if d.strip()]
+    by_day = {d: t for d, _n, t in entries}
+    for d in redo:
+        if d not in by_day:
+            failures.append(f"--sidecars-for {d}: エクスポートにその日の本文が無い")
+        elif d not in counts:
+            failures.append(f"--sidecars-for {d}: 台帳にその日の行が無い（先に取込が必要）")
+        elif d not in [x for x, _ in ingested]:
+            ingested.append((d, by_day[d]))
     for day, text in ingested:
         leader = find_leader(text)
         if leader and args.apply:
             rc, out = _run([str(ROOT / "tools" / "record_leader.py"), day, leader, args.origin])
-            summary["leaders"].append({"day": day, "leader": leader, "result": out.splitlines()[-1] if out else ""})
+            last_line = out.splitlines()[-1] if out else ""
+            summary["leaders"].append({"day": day, "leader": leader, "result": last_line})
+            if rc != 0 and "already recorded" not in out:      # 記録済み(rc=1)は失敗ではない
+                failures.append(f"record_leader {day} rc={rc}: {last_line[:120]}")
         else:
             summary["leaders"].append({"day": day, "leader": leader, "result": "dry-run" if leader else "本文に主役の1語が無い"})
         items, skipped = parse_invalidation(text, ledger_dates, day)
@@ -244,6 +268,8 @@ def main(argv=None) -> int:
             recorded = sum(1 for ln in out.splitlines() if ln.startswith("recorded invalidation"))
             notes = [ln.strip() for ln in out.splitlines() if ln.startswith(("!!", "~~")) or (rc != 0 and ln.strip())]
             entry["result"] = f"rc={rc} recorded={recorded}" + (" | " + " / ".join(notes)[:400] if notes else "")
+            if rc != 0:
+                failures.append(f"record_signal_extras invalidation {day} rc={rc}: {(out.splitlines() or [''])[-1][:160]}")
         elif not items:
             entry["result"] = "記録できる項目なし（1行欄が無いか、集約した書き方）"
         else:
@@ -262,6 +288,8 @@ def main(argv=None) -> int:
         if args.apply:
             rc, out = _run([str(ROOT / "tools" / "record_crypto_context.py"), line])
             result = out.splitlines()[-1] if out else f"rc={rc}"
+            if rc != 0:
+                failures.append(f"record_crypto_context rc={rc}: {result[:160]}")
         else:
             result = "dry-run"
         summary["crypto"].append({"line": line, "result": result})
@@ -269,15 +297,19 @@ def main(argv=None) -> int:
 
     # 5) 価格取得・採点・執行シミュレーション
     appended_any = args.apply and any(d["appended"] for d in summary["days"])
-    if appended_any and not args.no_score:
+    if args.apply and (appended_any or args.force_score) and not args.no_score:
         if not args.no_fetch:
             rc, out = _run([str(ROOT / "src" / "fetch_market.py")])
             summary["fetch_market"] = out.splitlines()[-1] if out else f"rc={rc}"
             print("[fetch]", summary["fetch_market"])
+            if rc != 0:
+                failures.append(f"fetch_market rc={rc}: {summary['fetch_market'][:120]}")
         for name in ("score_prediction_log.py", "simulate_execution.py"):
             rc, out = _run([str(ROOT / "src" / name)])
             summary[name] = (out.splitlines()[-1] if out else "")[:300] + ("" if rc == 0 else f" (rc={rc})")
             print(f"[{name}]", summary[name][:160])
+            if rc != 0:
+                failures.append(f"{name} rc={rc}")
         rc, out = _run([str(ROOT / "tools" / "throughput_watch.py"), "--check-only"])
         st = [ln for ln in out.splitlines() if ln.startswith("status=")]
         summary["throughput"] = st[-1] if st else ""
@@ -285,13 +317,19 @@ def main(argv=None) -> int:
 
     after = _ledger_rows() if args.apply else ledger
     summary["ledger_last_after"] = max((r["date"] for r in after), default="")
+    summary["failures"] = failures
+    for f in failures:
+        print(f"[FAILED] {f}")
     if args.apply:
         SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
         SUMMARY_PATH.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     n_days = len(summary["days"])
     print(f"\n{'applied' if args.apply else 'dry-run'}: 取込 {n_days}日 / 飛ばした日 {len(summary['skipped_days'])} / "
           f"台帳の最終日 {last} → {summary['ledger_last_after']}"
-          + (f" / 行数が10でない日: {summary['partial_days_in_ledger']}" if summary["partial_days_in_ledger"] else ""))
+          + (f" / 行数が10でない日: {summary['partial_days_in_ledger']}" if summary["partial_days_in_ledger"] else "")
+          + (f" / 後段の失敗 {len(failures)}件（--sidecars-for / --force-score でやり直せる）" if failures else ""))
+    if failures:
+        return 3
     return 2 if summary["skipped_days"] else 0
 
 

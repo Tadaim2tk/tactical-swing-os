@@ -139,3 +139,39 @@ def test_no_daily_conversation_is_fatal(repo):
     (repo / "export.json").write_text(json.dumps([_conv("別の会話", ["x" * 2000])]), encoding="utf-8")
     r = _run(repo, "--apply")
     assert r.returncode == 1 and "取り出せなかった" in r.stdout
+
+
+def test_conflicting_invalidation_id_stays_excluded():
+    """fired, not_fired, not_fired と3回出ても、矛盾した ID は記録しない(#210 Codex P2)。"""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import ingest_from_export as ife
+    text = "invalidation_check: 20261109_GOLD_BUY_PULLBACK=fired, 20261109_GOLD_BUY_PULLBACK=not_fired, 20261109_GOLD_BUY_PULLBACK=not_fired, 20261109_BTC_BUY_PULLBACK=unknown"
+    items, skipped = ife.parse_invalidation(text, {"20261109_GOLD_BUY_PULLBACK": "2026-11-09", "20261109_BTC_BUY_PULLBACK": "2026-11-09"}, "2026-11-10")
+    assert items == ["20261109_BTC_BUY_PULLBACK=unknown"]
+    assert sum("矛盾" in s for s in skipped) == 1
+
+
+def test_failed_later_stage_is_reported_and_can_be_retried(repo):
+    """後段(ここでは invalidation の記録)が失敗したら終了コード 3。--sidecars-for でやり直せる(#210 Codex P2)。"""
+    inv_path = repo / "data" / "invalidation_checks.csv"
+    inv_path.unlink()
+    inv_path.mkdir()                       # 記録ツールが書けない状態を作る
+    # 11/11(9行)を外して、取込自体は成功する形にする
+    data = json.loads((repo / "export.json").read_text(encoding="utf-8"))
+    daily = data[0]["mapping"]
+    data[0]["mapping"] = {k: v for k, v in daily.items() if "2026年11月11日" not in v["message"]["content"]["parts"][0]}
+    (repo / "export.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    r = _run(repo, "--apply")
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "[FAILED] record_signal_extras invalidation 2026-11-10" in r.stdout
+    assert len([x for x in _rows(repo / "data" / "signal_log.csv") if x["date"] == "2026-11-10"]) == 10   # 取込は済んでいる
+    summary = json.loads((repo / "results" / "ingest_from_export_summary.json").read_text(encoding="utf-8"))
+    assert summary["failures"]
+    # 直してからやり直す: 台帳は増えず、invalidation だけ入る
+    inv_path.rmdir()
+    inv_path.write_text("check_date,signal_id,invalidation_fired,source,recorded_at\n", encoding="utf-8")
+    r2 = _run(repo, "--apply", "--sidecars-for", "2026-11-10")
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert len(_rows(inv_path)) == 2 and "[ingest]" not in r2.stdout
+    assert len(_rows(repo / "data" / "leader_observations.csv")) == 1        # 主役は記録済みのまま(失敗扱いにしない)
+

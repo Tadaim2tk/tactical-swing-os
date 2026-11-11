@@ -57,7 +57,10 @@ python tools/ingest_from_export.py ~/Downloads/tso_export_YYYYMMDD.json --apply 
 スクリプトがやること: 本文アーカイブ（無い日だけ）→ 未取込の日ごとに「10資産10行・日付一致・列数」を検証 →
 取込（そろわない日は理由を出して飛ばす。部分取込はしない）→ 主役・invalidation_check（本文に明示された値だけ）→
 週次 crypto の2行（未記録の週だけ）→ 価格取得・採点・執行シミュレーション → `results/ingest_from_export_summary.json`。
-終了コード 2 は「取り込めなかった日がある」。
+終了コード 2 は「取り込めなかった日がある」、3 は「取込の後段（アーカイブ・主役・invalidation・週次 crypto・採点など）の
+どれかが失敗した」。後段だけのやり直しは `--sidecars-for 2026-11-10,2026-11-11`（主役・invalidation）と
+`--force-score`（価格取得・採点・執行シミュレーション）。定期タスクは `--no-score` で回し、採点と執行シミュレーションは
+日次の GitHub Actions（daily_cycle）に任せる（取込 PR に採点ファイルを入れると bot のコミットと衝突して PR が止まる。#187）。
 
 定期実行: Claude デスクトップアプリの定期タスク「TSO 日次取込」が毎朝これを回し、データ専用 PR を作って
 auto-merge を予約する（タスクの定義は `~/.claude/scheduled-tasks/tso-daily-ingest/SKILL.md`。
