@@ -8,7 +8,7 @@ v3 は 2026-07-27、v2タスク移設後の連続失敗（7/24「貼り付けプ
 実行なし）を受けた**ユーザー主導の改定**（ChatGPT との対話でタスク本文を全面書き換え）。
 核心は「出力停止を最重大失敗とし、検証を一次情報限定から複数ソース・モデル推測許容へ緩和」。
 経緯・差分・リスクは docs/gpt_prompt_changelog.md (8)。v2全文は git 履歴を参照。
-ChatGPTタスク本文との差分は末尾の**ターミナル経路向け追加2項のみ**。
+ChatGPTタスク本文との差分は末尾の**ターミナル経路向け追加のみ**。
 
 ---
 
@@ -39,10 +39,9 @@ ChatGPTタスク本文との差分は末尾の**ターミナル経路向け追�
   TP1とrrは広げたSLから再計算する。広げた結果rrが1.2を割る判断はB級の監視行として記帳し、A級にはしない。
   7/17の「2倍拡張」（固定倍率、9/1に廃止）とは別物で、値幅に合わせた下限である。
 - 決済は5営業日の時間決済を基本とし、TP1/TP2は参考目標として記帳する。
-- 本文は素の Markdown だけで書く（見出し・箇条書き・表・```csv フェンス）。UI部品のタグ（box / grid / text / CodeBlock /
-  row / title / caption など）、サンドボックスの添付ファイル、ZIP は使わない。CSV は本文中の ```csv フェンスにそのまま書く。
-  理由: Codex の read_thread がウィジェット付きの本文を「content reference」としか返さず、11/3 から自動取込が止まった
-  （changelog(21)）。読み手は人間だけでなく機械でもある。
+- 本文は素の Markdown だけで書く（見出し・箇条書き・表・```csv フェンス）。UI部品のタグ、サンドボックスの添付ファイル、
+  ZIP は使わない。CSV は本文中の ```csv フェンスにそのまま書く（取込は会話の本文テキストからこのフェンスを読む。
+  changelog(21)(22)）。
 - rr は entry中点・SL・TP1 から自分で再計算し、一致を確認してから記帳する（8/27に算術ずれ3件の実績）。
 - regime列は RISK_ON / RISK_OFF / NEUTRAL / MIXED / EVENT / UNKNOWN の6語のみ。ニュアンスは本文に書く。
 - 本文の冒頭付近に、実行に使用しているモデル名を1行で明記する。
@@ -53,21 +52,12 @@ ChatGPTタスク本文との差分は末尾の**ターミナル経路向け追�
   その終値で成行で入る規則を置いた（2026-09-09、人間の承認）。不参加の確率を
   二重に引くと expected_r が過小になり、A級条件 0.45 の手前で落ちる（changelog(16)）。
   時間決済・イベント前の早期撤退を織り込むのは従来どおりでよい。
-- 本文に、**まだ決着していない方向あり判断すべてについて** invalidation が発動したかを1行で記す
-  （書式: `invalidation_check: <signal_id>=fired|not_fired|unknown, ...`）。
-  **前日ぶんだけではない。** 判断は最長5営業日オープンのままなので、1日目は無事でも
-  2〜5日目にシナリオが崩れることがあり、**その遅れて崩れる分こそがこの欄で測りたいもの**
-  （#157 Codex P1）。fired になるか5営業日を過ぎるまで、毎日聞き直すこと。
-  **「過ぎるまで」には、5本目の営業日の翌朝の確認を含む。** 最終日の値動きを観測できるのは
-  その朝が最初で最後だからである。本文の「前回判断の検証」で最終判定
-  （例: `= fired`、`not_fired / 5営業日満了`）を書いた判断は、**同じ値を必ずこの1行にも書く**。
-  本文にだけ書いて1行欄から外すと、最終日の発動が台帳に入らず、発動率が系統的に低く出る
-  （実例: 20260909_USDJPY_SELL と 20260912_BTC_SELL は最終日に fired と本文に明記されたのに
-  1行欄に無かった。changelog(18)）。1行欄から外すのは、その翌日からである。
-  invalidation は毎日ほぼ全行に書かれているのに、発動したかは一度も記録されていなかった。
-  実際の手仕舞いは「SLやTPまで引っ張らずシナリオ崩壊が確認できたら降りる」であり、
-  その基準が当たっていたかを測れる列が無かった（人間の運用の言明、2026-09-07）。
-  判定できない場合は unknown と書く。**推測で fired と書かない**（changelog(15)）。
+- 本文に、invalidation が発動したかを1行で記す（書式: `invalidation_check: <signal_id>=fired|not_fired|unknown, ...`）。
+  対象は**資産ごとに、前日までに出した方向あり判断のうち最新の1件だけ**（最大10件）。同じ資産の古い判断は最新のものに
+  引き継がれたとみなし、書かない。その最新の判断を出してから5営業日と、5本目の翌朝まで毎日書く（途中で見送りに変えた資産も、
+  窓が閉じるまで書く）。`historical_pending_signals=unknown` のようにまとめて書かない。判定は価格で行う: invalidation に
+  書いた水準を、判断日以降の高値・安値が越えていれば fired、越えていなければ not_fired。価格を確認できないときだけ unknown。
+  推測で fired と書かない（changelog(15)(18)(22)）。
 
 - B級の記帳の扱い（2026-11-03。changelog(19)(20)）:
   1. B級監視候補に挙げた資産は、rank=B の行として記帳する。監視用のEntry帯・SL・TP1は暫定値でよい。
@@ -78,7 +68,7 @@ ChatGPTタスク本文との差分は末尾の**ターミナル経路向け追�
   3. 「実取引NO_TRADE」という注記は書かない。ロット数と1回の損失額の上限は人間が発注時に決めるもので、
      GPTの判断条件ではない（changelog(20)）。
   4. 見立てが続く日は、その日の帯とSLで毎日B行を出す（台帳は毎日の判断の記録であり、1本の見立てを
-     1回だけ書く場所ではない。8月はこの形だった）。前日までの signal_id の invalidation_check は別に続ける。
+     1回だけ書く場所ではない。8月はこの形だった）。invalidation_check は上の規則どおり、資産ごとに最新の1件だけ書く。
   5. FOMC・CPI・日銀などのイベント前でもB行は出す。イベントは invalidation と本文に書く。
      イベント前に見送ってよいのは A級の新規だけ。
   6. 直前の判断が SL や fired になったことは、同じ資産の新しい見立てを止める理由にしない。
@@ -109,7 +99,11 @@ date,signal_id,asset,side,rank,type,entry_low,entry_high,sl,tp1,tp2,rr,win_prob,
 
 - 毎日10資産を1行ずつ出す。asset=NONEは禁止。
 - A級・B級のBUY/SELL行はentry_low、entry_high、sl、tp1、rr、win_prob、expected_r、risk_pct、regime、ems、ffs、cds、ias、cbs、mes、invalidation、verification_targetを埋める。B級も監視用Entry帯とSLを定義する。
-- NO_TRADE行は価格・RR・win_prob・expected_rを空欄にし、no_trade_score、regime、ems、ffs、cds、ias、cbs、mesは実評価値を入れる。
+- NO_TRADE行は `side=NONE, rank=NO_TRADE, type=NO_TRADE`、signal_id は `YYYYMMDD_ASSET_NONE_NO_TRADE`。type の直後から
+  expected_r までの8列（entry_low, entry_high, sl, tp1, tp2, rr, win_prob, expected_r）と risk_pct は空欄にし、tq_score、
+  opp_score、no_trade_score、regime、ems、ffs、cds、ias、cbs、mes は実評価値を入れる。
+  例: `2026-11-12,20261112_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,38,29,82,,EVENT,42,40,35,30,39,32,VIX_close_missing,VIX_index,partially_verified`
+- どの行も28列（カンマ27個）。出力前に数える（2026-11-11 は見送り4行が27列で、スコアが1列ずれていた。changelog(22)）。
 - win_probは0〜1。数値は半角、桁区切り・通貨記号なし。
 - signal_idはYYYYMMDD_ASSET_SIDE_TYPE形式。
 - ObsidianやGitHubへ保存できなくても、チャット上の記録を必ず残す。
@@ -129,7 +123,5 @@ date,signal_id,asset,side,rank,type,entry_low,entry_high,sl,tp1,tp2,rr,win_prob,
 
 ## ターミナル経路向け追加（ChatGPTタスク本文には未反映・実質は共通ルール）
 
-- NO_TRADE行の `type` の直後から `expected_r` までの空欄は**8列ちょうど**。その次の列が
-  `tq_score`。余分な空欄を1つ入れると取込時に `date` と `signal_id` がずれて全行rejectになる。
-  例: `...,BTC,NONE,NO_TRADE,NO_TRADE,,,,,,,,,42,38,78,,RISK_OFF,...`（2026-07-24の取込失敗対策、#102）
 - 実売買・発注の指示はしない（これは予測記録であり売買指示ではない）。
+- （NO_TRADE 行の空欄8列と語彙の約束は、2026-11-11 に共通の「TSO_LOG固定28列」節へ移した。changelog(22)）

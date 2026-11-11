@@ -60,6 +60,15 @@ GitHub Actions とは別に、ChatGPT のスケジュール実行が判断その
 | 1日 12:30 | 較正する短期スイングモデル（月次較正） | `prompts/tso_monthly_calibration.md` | `docs/monthly_calibration_YYYY-MM.md` |
 | 月 | 週次決算ウォッチ（監視9銘柄） | （TSO対象外・日本株監視） | 会話のみ |
 
+### 取込の担当（2026-11-11 変更）
+
+日次の出力（毎日 07:00 のタスク）を台帳へ入れるのは、**Claude の定期タスク「TSO 日次取込」**（毎日 07:40 と 12:40。
+`tools/ingest_from_export.py`、docs/daily_log_ingestion.md 経路3）。Codex の自動化 tso-2 は 2026-10-28 の
+レポートから本文を読めず（changelog (22)）、main に当日の行があれば何もしない側に回った。
+台帳が2日以上止まったら、Dashboard の鮮度レイヤー `gpt_signal_ledger` が stale になる。そのときは
+(1) Claude アプリが開いているか (2) Chrome が ChatGPT にログイン済みか (3) 定期タスクの実行履歴、の順で見る。
+月次は Codex の自動化 `tso`（毎月1日 12:30、ローカルのスクリプトだけで動く）。
+
 ### 一時停止中（16本）— 放置されているもの
 
 TSO関連で、再開の可否を判断すべきもの:

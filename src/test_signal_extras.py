@@ -238,3 +238,34 @@ def test_raw_word_may_annotate_an_existing_unknown(repo):
     r = run(["invalidation", "2026-09-24", "S=target_before_entry"], repo)
     assert r.returncode == 0
     assert _rows(repo, "invalidation_raw_verdicts.csv")[0]["raw_verdict"] == "target_before_entry"
+
+
+def test_older_signal_of_the_same_asset_is_superseded_not_missing(repo):
+    """見立てを毎日書き直す契約(2026-11-03)では未決着が1日40件前後になり、GPT は 11/11 に
+    `historical_pending_signals=unknown` の1語へまとめた。聞く単位は資産ごとの最新1件(changelog(22))。"""
+    _ledger(repo, [("2026-11-04", "D4_GOLD", "GOLD", "SELL"),
+                   ("2026-11-05", "D5_GOLD", "GOLD", "BUY"),       # 同じ資産の新しい判断(方向が変わっても同じ)
+                   ("2026-11-05", "D5_WTI", "WTI", "SELL"),
+                   ("2026-11-06", "D6_GOLD", "GOLD", "BUY")])
+    r = run(["invalidation", "2026-11-09", "D6_GOLD=not_fired"], repo)
+    assert r.returncode == 0
+    assert "D5_WTI" in r.stderr and "申告漏れ" in r.stderr           # WTI の最新は 11/5 のまま → 聞く
+    assert "D4_GOLD" not in r.stderr and "D5_GOLD" not in r.stderr   # GOLD の古い2件は引き継がれた
+
+
+def test_same_day_signal_does_not_supersede_yesterdays(repo):
+    """確認日の当日に出した判断は、まだ確認しようがない。前日までの最新が対象のまま。"""
+    _ledger(repo, [("2026-11-06", "D6_GOLD", "GOLD", "BUY"),
+                   ("2026-11-09", "D9_GOLD", "GOLD", "BUY")])
+    r = run(["invalidation", "2026-11-09", "D6_GOLD=not_fired"], repo)
+    assert r.returncode == 0 and "申告漏れ" not in r.stderr
+    r2 = run(["invalidation", "2026-11-10", "D9_GOLD=not_fired"], repo)
+    assert r2.returncode == 0 and "申告漏れ" not in r2.stderr          # 11/10 の朝は 11/9 が最新。11/6 は求めない
+
+
+def test_superseded_signal_may_still_be_declared(repo):
+    """古い判断を書いてきても弾かない(台帳にある id なら記録する)。求めないだけ。"""
+    _ledger(repo, [("2026-11-05", "D5_GOLD", "GOLD", "BUY"), ("2026-11-06", "D6_GOLD", "GOLD", "BUY")])
+    r = run(["invalidation", "2026-11-09", "D5_GOLD=fired,D6_GOLD=not_fired"], repo)
+    assert r.returncode == 0 and len(_rows(repo, "invalidation_checks.csv")) == 2
+
