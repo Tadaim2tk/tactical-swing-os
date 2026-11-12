@@ -203,6 +203,26 @@ def test_declarations_are_recorded_only_when_every_copy_is_readable_and_agrees()
         assert ife.find_expected_r_basis(text) == (None, "本文に expected_r_basis の1行が無い")
 
 
+def test_markdown_escaped_underscores_read_the_same_as_plain_text():
+    """Codex が読む fallbackMarkdown と 11/12 以降のアーカイブは `_` を `\\_` と書く。会話 API の本文は書かない。
+    どちらでも同じ結果になること（外さないと signal_id の形に合わず、invalidation が 0 件になる）。"""
+    ife = _ife()
+    plain = ("market_leader: NASDAQ\ninvalidation_check: 20261111_GOLD_SELL_PULLBACK=not_fired, 20261111_NASDAQ_SELL_PULLBACK=fired\n"
+             "crypto_grounds: etf=有, cme=有\nexpected_r_basis: two_point\n")
+    escaped = plain.replace("_", "\\_")
+    ledger = {"20261111_GOLD_SELL_PULLBACK": "2026-11-11", "20261111_NASDAQ_SELL_PULLBACK": "2026-11-11"}
+    want = ["20261111_GOLD_SELL_PULLBACK=not_fired", "20261111_NASDAQ_SELL_PULLBACK=fired"]
+    for text in (plain, escaped):
+        assert ife.parse_invalidation(text, ledger, "2026-11-12") == (want, [])
+        assert ife.find_leader(text) == "NASDAQ"
+        assert ife.find_crypto_grounds(text) == (("present", "present"), "")
+        assert ife.find_expected_r_basis(text) == ("two_point", "")
+    conv = [{"title": "Crypto market update", "mapping": {"n": {"message": {
+        "author": {"role": "assistant"}, "create_time": 1,
+        "content": {"parts": ["CRYPTO\\_CTX,2026-11-09,MIXED,OUTFLOW,UNKNOWN,NONE,MEDIUM,HIT"]}}}}}]
+    assert ife.crypto_lines(conv, "Crypto market update") == ["CRYPTO_CTX,2026-11-09,MIXED,OUTFLOW,UNKNOWN,NONE,MEDIUM,HIT"]
+
+
 def test_missing_declarations_are_not_a_failure(repo):
     """2行はプロンプトの必須項目ではない（changelog (20) で外した）。無い日は記録しないだけで、終了コードは変えない。"""
     data = json.loads((repo / "export.json").read_text(encoding="utf-8"))

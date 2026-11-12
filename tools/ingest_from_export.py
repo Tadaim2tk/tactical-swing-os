@@ -111,7 +111,18 @@ def validate_day(day: str, text: str) -> tuple[bool, str]:
     return True, fmt
 
 
+def _unescape_md(text: str) -> str:
+    """Markdown のエスケープ `\\_` を `_` に戻す（`_` そのものは消さない）。
+
+    会話 API の本文（content.parts）にはエスケープは無い。同じメッセージの model_dil_v2.fallbackMarkdown は
+    コードフェンスの外の `_` を `\\_` と書く（`invalidation\\_check: 20261111\\_GOLD\\_SELL\\_PULLBACK=not\\_fired`）。
+    Codex の read_thread が返すのは後者で、Codex が保存した 2026-11-12 以降のアーカイブもこの形。
+    どちらの形を渡されても同じ結果になるよう、1行申告を読む前に必ず通す。"""
+    return text.replace("\\_", "_")
+
+
 def find_leader(text: str) -> str | None:
+    text = _unescape_md(text)
     for rx in LEADER_RES:
         m = rx.search(text)
         if m and m.group(1).upper() in ASSETS:
@@ -122,7 +133,7 @@ def find_leader(text: str) -> str | None:
 def _declared_lines(rx: re.Pattern, text: str) -> list[str]:
     """本文の1行申告を、Markdown の飾り（太字・コード・\\_ のエスケープ）と UI 部品の閉じを外して返す。"""
     out = []
-    for m in rx.finditer(text.replace("\\_", "_")):
+    for m in rx.finditer(_unescape_md(text)):
         line = re.sub(r"[*`]", "", m.group(1))
         out.append(re.split(r"[<}]", line)[0].strip())
     return out
@@ -186,7 +197,7 @@ def parse_invalidation(text: str, ledger_dates: dict[str, str], day: str) -> tup
     keep: dict[str, str] = {}
     skipped: list[str] = []
     conflicted: set[str] = set()   # 一度矛盾した ID は、後から何度出ても記録しない(#210 Codex P2)
-    for m in INVAL_LINE_RE.finditer(text):
+    for m in INVAL_LINE_RE.finditer(_unescape_md(text)):
         line = re.sub(r"[*`]", "", m.group(1))
         line = re.split(r"[<}]", line)[0]
         for part in line.split(","):
@@ -230,7 +241,7 @@ def crypto_lines(convs: list[dict], title: str) -> list[str]:
             text = "\n".join(p for p in parts if isinstance(p, str))
             msgs.append((msg.get("create_time") or 0, text))
         for _, text in sorted(msgs, key=lambda x: x[0]):
-            for m in CRYPTO_LINE_RE.finditer(text):
+            for m in CRYPTO_LINE_RE.finditer(_unescape_md(text)):
                 line = m.group(1).strip().rstrip(",.")
                 if line not in out:
                     out.append(line)

@@ -498,4 +498,10 @@
   - 確かめ方: 毎朝、Codex の証跡の `transport` と、その日の本文の部品タグの数を並べる。`<Cite>` が戻った日に
     読めなくなったら、本文に「出典は文字で書き、引用の部品は使わない」を足す（人間が貼る）。
   - 取込の担当は、Codex が主・会話エクスポートの経路が予備になった（docs/operations_runbook.md §1b）。
+  - **同じメッセージに本文が2通りある。** 会話 API の `content.parts`（11/12 は 17,664 文字。`_` はそのまま）と、
+    `model_dil_v2.fallbackMarkdown`（17,915 文字。コードフェンスの外の `_` が `\_` と書かれる。11/12 は 89 か所）。
+    Codex の read_thread が返したのは後者で、Codex が保存した 11/12 のアーカイブは
+    `invalidation\_check: 20261111\_GOLD\_SELL\_PULLBACK=not\_fired, …` の形。11/3〜11/11 のアーカイブ（会話 API から保存）は
+    エスケープなし。アーカイブを横断して1行申告を探すときは両方の形を見る。`tools/ingest_from_export.py` は
+    読む前に `\_` を `_` へ戻す（どちらの形でも主役・invalidation・2行の申告が同じ結果になることをテストで固定）。
 
