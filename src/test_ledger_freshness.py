@@ -8,6 +8,8 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import ledger_freshness as lf  # noqa: E402
@@ -43,6 +45,36 @@ def test_the_october_break_would_have_alerted_on_the_second_missed_morning():
     # 10/28 のレポートから Codex は本文を読めなくなった。10/27 で止まった台帳は 10/30 朝に赤になる。
     assert lf.evaluate(date(2026, 10, 27), date(2026, 10, 29))["status"] == "WARN"
     assert lf.evaluate(date(2026, 10, 27), date(2026, 10, 30))["status"] == "ALERT"
+
+
+def test_the_november_hole_would_have_alerted_four_days_before_it_was_noticed():
+    # 台帳は 11/2 で止まり、11/9 の朝に 6 日ぶんをまとめて入れた（#205）。11/5 の朝に赤になっていた。
+    assert lf.evaluate(date(2026, 11, 2), date(2026, 11, 3))["status"] == "OK"
+    assert lf.evaluate(date(2026, 11, 2), date(2026, 11, 4))["status"] == "WARN"
+    assert lf.evaluate(date(2026, 11, 2), date(2026, 11, 5))["status"] == "ALERT"
+
+
+def test_ledger_that_exists_but_cannot_be_read_is_an_alert_not_a_crash(tmp_path, capsys):
+    # #211 Codex P2: 例外で落ちると終了コードが 1 になり、daily_cycle は警告だけ出して緑のままだった。
+    bad = tmp_path / "signal_log.csv"
+    bad.write_bytes(HEADER.encode("utf-8") + b"2026-11-11,x,VIX,NONE,NO_TRADE,NO_TRADE\n\xff\xfe broken\n")
+    with pytest.raises(lf.LedgerUnreadable):
+        lf.last_ledger_date(bad)
+    assert lf.main(["--ledger", str(bad), "--today", "2026-11-12", "--fail-on-alert"]) == 2
+    out = capsys.readouterr().out
+    assert out.startswith("status=ALERT last_date= today=2026-11-12 lag_days=") and "台帳を読めない" in out
+    assert lf.main(["--ledger", str(bad), "--today", "2026-11-12"]) == 0          # 旗が無ければ落とさない（表示は ALERT）
+    assert capsys.readouterr().out.startswith("status=ALERT ")
+    # ファイルの場所にディレクトリがある（開けない）場合も同じ
+    d = tmp_path / "as_dir.csv"
+    d.mkdir()
+    assert lf.main(["--ledger", str(d), "--today", "2026-11-12", "--fail-on-alert"]) == 2
+    assert "台帳を読めない" in capsys.readouterr().out
+
+
+def test_read_error_wins_over_any_date(tmp_path):
+    r = lf.evaluate(date(2026, 11, 12), date(2026, 11, 12), read_error="UnicodeDecodeError: x")
+    assert r["status"] == "ALERT" and r["lag_days"] is None and "読めない" in r["reason"]
 
 
 def test_unreadable_or_empty_ledger_alerts(tmp_path):
