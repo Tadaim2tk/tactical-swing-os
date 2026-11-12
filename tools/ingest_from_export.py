@@ -11,6 +11,10 @@ chatgpt.com では Computer Use が使えない。残っている確実な経路
 このスクリプトが残りを全部やる。手作業で毎回やっていた手順（アーカイブ → 検証 → 取込 →
 主役・invalidation・週次 crypto の記録 → 採点 → 執行シミュレーション）を固定する。
 
+2026-11-12 追記: 11/12 の出力は read_thread が本文そのものを返し、Codex が取り込んだ（#212）。11/10・11/11 は
+本文に出典の部品 <Cite> が残っていて参照しか返らず、11/12 は部品タグが 0 だった（model_dil_v2 は3日とも付いている。
+原因は確定させていない。docs/gpt_prompt_changelog.md (22) の追記）。毎朝の取込は Codex が主で、この経路は予備。
+
     python tools/ingest_from_export.py ~/Downloads/tso_daily_conversation_YYYYMMDD.json           # dry-run
     python tools/ingest_from_export.py ~/Downloads/tso_daily_conversation_YYYYMMDD.json --apply
 
