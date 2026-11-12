@@ -27,7 +27,8 @@ chatgpt.com では Computer Use が使えない。残っている確実な経路
 * 値は直さない。見送り行の語彙と空欄の数だけ ingest_daily_log が補正し、data/ingest_normalizations.csv に残す。
 * 主役・invalidation・crypto_grounds・expected_r_basis は本文に明示された値だけを既存の記録ツールへ渡す。
   台帳に無い signal_id や集約した書き方（historical_pending_signals=unknown など）は記録しない。
-  crypto_grounds と expected_r_basis は、同じ本文の中で値が食い違っていたら記録しない（どちらが正しいか決めない）。
+  crypto_grounds と expected_r_basis は、本文に何度か出る申告が全部読めて、全部同じ値のときだけ記録する
+  （語彙の外・食い違い・`subjective/two_point` のような曖昧な値は記録しない。どれが正しいかをここで決めない）。
   2026-11-12 まで、この2つはこの経路で記録していなかった（Codex の経路だけが記録していた）ので、
   この経路で入れた 11/3〜11/11 の9日ぶんが両方の台帳から抜けていた。
 * 終了コード: 0=正常（追加0でも）、2=取り込めなかった日がある、3=取込の後段（アーカイブ・主役・invalidation・
@@ -65,9 +66,18 @@ LEADER_RES = [re.compile(r"本日の市場の主役[：:]\s*[*`]*\s*([A-Z0-9]+)"
               re.compile(r"^market_leader:\s*([A-Z0-9]+)", re.M)]
 INVAL_LINE_RE = re.compile(r"(?<![\"\w])invalidation_check:\s*([^\n]+)")
 # 本文の1行申告（changelog (14)(15)）。JSON のキー（"crypto_grounds": {...}）は拾わない（直前が " の形を除く）。
-GROUNDS_LINE_RE = re.compile(r"(?<![\"\w])crypto_grounds:\s*([^\n]+)")
-BASIS_LINE_RE = re.compile(r"(?<![\"\w])expected_r_basis:\s*([^\n]+)")
-GROUNDS_TOKEN = r"\s*[=＝:：]\s*([^\s,、，;；/()（）。]+)"
+# 値が次の行に来る書き方（観察メモの「crypto_grounds:\netf=有\ncme=無」）も読む。続く2行は先読みで覗くだけにして
+# 消費しない（消費すると、すぐ下の行にある別の申告を飲み込んで、食い違いを見落とす）。
+GROUNDS_LINE_RE = re.compile(r"(?<![\"\w])crypto_grounds:[ \t]*\n?[ \t]*([^\n]+)(?=((?:\n[^\n]+){0,2}))")
+BASIS_LINE_RE = re.compile(r"(?<![\"\w])expected_r_basis:[ \t]*\n?[ \t]*([^\n]+)")
+GROUNDS_KV_ONLY_RE = re.compile(r"^\s*(?:etf|cme)\s*[=＝:：]\s*[^\s,、，;；()（）。]+\s*$", re.I)
+# 値は「区切り（空白・読点・括弧・句点）まで」を丸ごと1語として読む。`有/無`（雛形の写し）や `有-一部` を
+# 先頭の1文字だけで「有」と読まない（#213 Codex P2）。
+GROUNDS_TOKEN = r"\s*[=＝:：]\s*([^\s,、，;；()（）。]+)"
+# expected_r_basis の値は1語だけ。後ろに続けてよいのは、括弧書きの補足（`subjective (…)`）か、空白を挟んだ
+# ダッシュ・コロンで始まる説明（`subjective — 未約定を織り込み…`。9〜10月の実際の形）だけ。
+# `subjective/two_point`・`subjective-v2`・`subjective two_point` を subjective と読まない（#213 Codex P2）。
+BASIS_VALUE_RE = re.compile(r"^([A-Za-z_]+)(?:\s*[。.]?\s*$|\s*[(（].*$|\s+[—–\-:：]\s.*$)")
 # 行頭とは限らない: 2026-11-08 の出力は <text preserveWhitespace>{`CRYPTO_CTX,...`}</text> で包まれていた。
 # 欄は英数字・_・-・. だけなので、その文字が続く範囲を1行として拾う。
 CRYPTO_LINE_RE = re.compile(r"(CRYPTO_(?:CTX|PRED),[A-Za-z0-9_.,\-]+)")
@@ -134,8 +144,15 @@ def _declared_lines(rx: re.Pattern, text: str) -> list[str]:
     """本文の1行申告を、Markdown の飾り（太字・コード・\\_ のエスケープ）と UI 部品の閉じを外して返す。"""
     out = []
     for m in rx.finditer(_unescape_md(text)):
-        line = re.sub(r"[*`]", "", m.group(1))
-        out.append(re.split(r"[<}]", line)[0].strip())
+        following = m.group(2) if rx.groups > 1 and m.group(2) else ""
+        rows = [re.split(r"[<}]", re.sub(r"[*`]", "", ln))[0].strip() for ln in (m.group(1) + following).split("\n")]
+        # 2行目以降は「etf=有」「cme=無」だけの行に限って同じ申告の続きとみなす（次の段落の文を巻き込まない）
+        keep = [rows[0]]
+        for extra in rows[1:]:
+            if not GROUNDS_KV_ONLY_RE.match(extra):
+                break
+            keep.append(extra)
+        out.append(", ".join(keep) if len(keep) > 1 else keep[0])
     return out
 
 
@@ -159,9 +176,12 @@ def find_crypto_grounds(text: str) -> tuple[tuple[str, str] | None, str]:
         return None, "本文に crypto_grounds の1行が無い"
     seen: list[tuple[str, str]] = []
     for line in lines:
-        e = re.search("etf" + GROUNDS_TOKEN, line, re.I)
-        c = re.search("cme" + GROUNDS_TOKEN, line, re.I)
-        pair = (_grounds_word(e.group(1)) if e else None, _grounds_word(c.group(1)) if c else None)
+        words = []
+        for key in ("etf", "cme"):
+            # 同じ行に同じ欄が2回あれば全部読む。1つでも語彙の外、または食い違えば、その申告は読めない扱い。
+            vals = {_grounds_word(tok) for tok in re.findall(key + GROUNDS_TOKEN, line, re.I)}
+            words.append(vals.pop() if len(vals) == 1 else None)
+        pair = (words[0], words[1])
         if not (pair[0] and pair[1]):
             return None, f"crypto_grounds を閉じた語彙（有/無）で読めない申告がある: {line[:60]}"
         if pair not in seen:
@@ -174,15 +194,18 @@ def find_crypto_grounds(text: str) -> tuple[tuple[str, str] | None, str]:
 def find_expected_r_basis(text: str) -> tuple[str | None, str]:
     """本文の `expected_r_basis: subjective` から (値, 理由) を返す。語彙は tools/record_signal_extras.py と同じ。
 
-    crypto_grounds と同じく、全部の申告が読めて同じ値のときだけ記録する。値の後ろの補足（括弧書き）は読まない。"""
+    crypto_grounds と同じく、全部の申告が読めて同じ値のときだけ記録する。値は1語を丸ごと語彙と照らす。
+    後ろに続けてよいのは括弧書きの補足だけで、`subjective/two_point` や `subjective-v2` は読めない扱いにする。"""
     lines = _declared_lines(BASIS_LINE_RE, text)
     if not lines:
         return None, "本文に expected_r_basis の1行が無い"
     seen: list[str] = []
     for line in lines:
-        m = re.match(r"[A-Za-z_]+", line)
-        word = m.group(0).lower() if m else ""
-        if word not in rse.BASIS_VOCAB:
+        m = BASIS_VALUE_RE.match(line)
+        word = m.group(1).lower() if m else ""
+        # 説明の中に別の語彙（two_point など）が出てくる申告は、どちらの意味か決めない
+        others = [w for w in rse.BASIS_VOCAB if w != word and re.search(rf"(?<![A-Za-z_]){w}(?![A-Za-z_])", line, re.I)]
+        if word not in rse.BASIS_VOCAB or others:
             return None, (f"expected_r_basis を閉じた語彙（{' / '.join(sorted(rse.BASIS_VOCAB))}）で読めない申告がある: "
                           f"{line[:60]}")
         if word not in seen:

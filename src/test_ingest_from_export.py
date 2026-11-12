@@ -197,6 +197,32 @@ def test_declarations_are_recorded_only_when_every_copy_is_readable_and_agrees()
     assert b is None and "読めない" in why
     # 片方しか書いていない
     assert ife.find_crypto_grounds("crypto_grounds: etf=有\n")[0] is None
+    # 値は1語を丸ごと読む。先頭だけ語彙に合っていても採らない（#213 Codex P2）
+    for bad in ("subjective/two_point", "subjective-v2", "subjective two_point", "subjective, two_point", "subjective or two_point"):
+        b, why = ife.find_expected_r_basis(f"expected_r_basis: {bad}\n")
+        assert b is None and "読めない" in why, bad
+    for bad in ("subjective — two_point ではない", "subjective - two_point も併記"):      # 説明に別の語彙が出る
+        assert ife.find_expected_r_basis(f"expected_r_basis: {bad}\n")[0] is None, bad
+    for good in ("subjective", "subjective。", "subjective (new direction signals = none; fixed to +0.34R)", "two_point（式どおり）",
+                 "**Subjective**", "**subjective** — 未約定確率とイベントギャップを織り込み、単純な二点分布式より低く評価。"):
+        assert ife.find_expected_r_basis(f"expected_r_basis: {good}\n")[0] in ("subjective", "two_point"), good
+    # 値が次の行に来る書き方（観察メモ。2026-09〜10 の実際の形）
+    assert ife.find_expected_r_basis("expected_r_basis:\nsubjective\n\n## Conclusion\n") == ("subjective", "")
+    assert ife.find_crypto_grounds("crypto_grounds:\netf=有\ncme=無\n\n## Regime\nEVENT\n") == (("present", "absent"), "")
+    assert ife.find_crypto_grounds("crypto_grounds:\netf=有, cme=有\n\nexpected_r_basis:\nsubjective\n") == (("present", "present"), "")
+    # 続きとみなすのは「etf=…」「cme=…」だけの行。次の段落の文は巻き込まない
+    assert ife.find_crypto_grounds("**crypto_grounds: etf=有, cme=有** — 9/18 の ETF は流入。\nCME=basis のみ確認、と本文に書いた。\n")[0] == ("present", "present")
+    assert ife.find_crypto_grounds("crypto_grounds: etf=有\n本文が続く cme=無 という文。\n")[0] is None
+    # すぐ下の行にある別の申告を飲み込まない（食い違いを見落とさない）
+    assert ife.find_crypto_grounds("crypto_grounds: etf=有, cme=有\ncrypto_grounds: etf=無, cme=無\n")[0] is None
+    assert ife.find_crypto_grounds("crypto_grounds:\netf=有\ncme=有\ncrypto_grounds:\netf=無\ncme=無\n")[0] is None
+    # 見出しだけで値が無い申告は、申告として数えない
+    assert ife.find_expected_r_basis("expected_r_basis:\n\n## Conclusion\n") == (None, "本文に expected_r_basis の1行が無い")
+    for bad in ("etf=有/無, cme=有/無", "etf=有-一部, cme=有", "etf=有, etf=無, cme=有", "etf=有/cme=有"):
+        g, why = ife.find_crypto_grounds(f"crypto_grounds: {bad}\n")
+        assert g is None and "読めない" in why, bad
+    for good in ("etf=有, cme=無", "ETF=yes / CME=no", "etf＝有、cme＝無。", "etf=有（フロー確認）, cme=無 (basis なし)"):
+        assert ife.find_crypto_grounds(f"crypto_grounds: {good}\n")[0] == ("present", "absent"), good
     # 申告が無い・JSON のキーしか無い
     for text in ("本文だけ", '{"crypto_grounds": {"etf": "有"}, "expected_r_basis": "subjective"}'):
         assert ife.find_crypto_grounds(text) == (None, "本文に crypto_grounds の1行が無い")
