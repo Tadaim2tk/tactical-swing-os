@@ -56,9 +56,10 @@ python tools/ingest_from_export.py ~/Downloads/tso_export_YYYYMMDD.json --apply 
 
 スクリプトがやること: 本文アーカイブ（無い日だけ）→ 未取込の日ごとに「10資産10行・日付一致・列数」を検証 →
 取込（そろわない日は理由を出して飛ばす。部分取込はしない）→ 主役・invalidation_check（本文に明示された値だけ）→
+crypto_grounds・expected_r_basis（本文に1行申告があり、全部の申告が読めて同じ値のときだけ。2026-11-12 追加）→
 週次 crypto の2行（未記録の週だけ）→ 価格取得・採点・執行シミュレーション → `results/ingest_from_export_summary.json`。
 終了コード 2 は「取り込めなかった日がある」、3 は「取込の後段（アーカイブ・主役・invalidation・週次 crypto・採点など）の
-どれかが失敗した」。後段だけのやり直しは `--sidecars-for 2026-11-10,2026-11-11`（主役・invalidation）と
+どれかが失敗した」。後段だけのやり直しは `--sidecars-for 2026-11-10,2026-11-11`（主役・invalidation・crypto_grounds・expected_r_basis）と
 `--force-score`（価格取得・採点・執行シミュレーション）。定期タスクは `--no-score` で回し、採点と執行シミュレーションは
 日次の GitHub Actions（daily_cycle）に任せる（取込 PR に採点ファイルを入れると bot のコミットと衝突して PR が止まる。#187）。
 

@@ -21,12 +21,16 @@ chatgpt.com では Computer Use が使えない。残っている確実な経路
 ----
 * 1日は10資産10行そろったときだけ取り込む（部分取込はしない）。そろわない日は理由を出して飛ばす。
 * 値は直さない。見送り行の語彙と空欄の数だけ ingest_daily_log が補正し、data/ingest_normalizations.csv に残す。
-* 主役・invalidation は本文に明示された値だけを既存の記録ツールへ渡す。台帳に無い signal_id や
-  集約した書き方（historical_pending_signals=unknown など）は記録しない。
+* 主役・invalidation・crypto_grounds・expected_r_basis は本文に明示された値だけを既存の記録ツールへ渡す。
+  台帳に無い signal_id や集約した書き方（historical_pending_signals=unknown など）は記録しない。
+  crypto_grounds と expected_r_basis は、同じ本文の中で値が食い違っていたら記録しない（どちらが正しいか決めない）。
+  2026-11-12 まで、この2つはこの経路で記録していなかった（Codex の経路だけが記録していた）ので、
+  この経路で入れた 11/3〜11/11 の9日ぶんが両方の台帳から抜けていた。
 * 終了コード: 0=正常（追加0でも）、2=取り込めなかった日がある、3=取込の後段（アーカイブ・主役・invalidation・
   週次 crypto・価格取得・採点・執行シミュレーション）のどれかが失敗した、1=致命的（日次会話が見つからない等）。
-* 後段だけをやり直す: `--sidecars-for 2026-11-10,2026-11-11`（その日の主役・invalidation を本文から記録し直す。
-  記録ツールは追記型なので、既にある値は上書きされない）、`--force-score`（追加0でも価格取得・採点・執行simを回す）。
+* 後段だけをやり直す: `--sidecars-for 2026-11-10,2026-11-11`（その日の主役・invalidation・crypto_grounds・
+  expected_r_basis を本文から記録し直す。記録ツールは追記型なので、既にある値は上書きされない）、
+  `--force-score`（追加0でも価格取得・採点・執行simを回す）。
 """
 from __future__ import annotations
 
@@ -44,6 +48,8 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 import archive_gpt_prose as agp  # noqa: E402
 import ingest_daily_log as idl  # noqa: E402
+import record_crypto_grounds as rcg  # noqa: E402  語彙だけ借りる（有/無）
+import record_signal_extras as rse  # noqa: E402  語彙だけ借りる（subjective/two_point）
 
 ASSETS = ["GOLD", "BTC", "ETH", "WTI", "USDJPY", "SPX", "NASDAQ", "DXY", "US10Y", "VIX"]
 LEDGER = Path("data/signal_log.csv")
@@ -54,6 +60,10 @@ SID_RE = re.compile(r"^\d{8}_[A-Z0-9]+_[A-Z0-9_\-]+$")
 LEADER_RES = [re.compile(r"本日の市場の主役[：:]\s*[*`]*\s*([A-Z0-9]+)"),
               re.compile(r"^market_leader:\s*([A-Z0-9]+)", re.M)]
 INVAL_LINE_RE = re.compile(r"(?<![\"\w])invalidation_check:\s*([^\n]+)")
+# 本文の1行申告（changelog (14)(15)）。JSON のキー（"crypto_grounds": {...}）は拾わない（直前が " の形を除く）。
+GROUNDS_LINE_RE = re.compile(r"(?<![\"\w])crypto_grounds:\s*([^\n]+)")
+BASIS_LINE_RE = re.compile(r"(?<![\"\w])expected_r_basis:\s*([^\n]+)")
+GROUNDS_TOKEN = r"\s*[=＝:：]\s*([^\s,、，;；/()（）。]+)"
 # 行頭とは限らない: 2026-11-08 の出力は <text preserveWhitespace>{`CRYPTO_CTX,...`}</text> で包まれていた。
 # 欄は英数字・_・-・. だけなので、その文字が続く範囲を1行として拾う。
 CRYPTO_LINE_RE = re.compile(r"(CRYPTO_(?:CTX|PRED),[A-Za-z0-9_.,\-]+)")
@@ -103,6 +113,68 @@ def find_leader(text: str) -> str | None:
         if m and m.group(1).upper() in ASSETS:
             return m.group(1).upper()
     return None
+
+
+def _declared_lines(rx: re.Pattern, text: str) -> list[str]:
+    """本文の1行申告を、Markdown の飾り（太字・コード・\\_ のエスケープ）と UI 部品の閉じを外して返す。"""
+    out = []
+    for m in rx.finditer(text.replace("\\_", "_")):
+        line = re.sub(r"[*`]", "", m.group(1))
+        out.append(re.split(r"[<}]", line)[0].strip())
+    return out
+
+
+def _grounds_word(token: str) -> str | None:
+    t = token.strip().rstrip("。.").lower()
+    if t in {x.lower() for x in rcg.TRUE}:
+        return "present"
+    if t in {x.lower() for x in rcg.FALSE}:
+        return "absent"
+    return None
+
+
+def find_crypto_grounds(text: str) -> tuple[tuple[str, str] | None, str]:
+    """本文の `crypto_grounds: etf=有, cme=無` から ((etf, cme), 理由) を返す。値は present / absent。
+
+    本文には同じ申告が何度か出る（冒頭・観察メモ・ログの前）。全部が閉じた語彙（有/無 など。
+    tools/record_crypto_grounds.py と同じ）で読めて、全部が同じ値のときだけ記録する。1つでも読めない
+    申告や食い違う申告があれば記録しない（どれが正しいかをここで決めない）。"""
+    lines = _declared_lines(GROUNDS_LINE_RE, text)
+    if not lines:
+        return None, "本文に crypto_grounds の1行が無い"
+    seen: list[tuple[str, str]] = []
+    for line in lines:
+        e = re.search("etf" + GROUNDS_TOKEN, line, re.I)
+        c = re.search("cme" + GROUNDS_TOKEN, line, re.I)
+        pair = (_grounds_word(e.group(1)) if e else None, _grounds_word(c.group(1)) if c else None)
+        if not (pair[0] and pair[1]):
+            return None, f"crypto_grounds を閉じた語彙（有/無）で読めない申告がある: {line[:60]}"
+        if pair not in seen:
+            seen.append(pair)
+    if len(seen) > 1:
+        return None, "同じ本文に食い違う crypto_grounds がある: " + " / ".join(f"etf={e},cme={c}" for e, c in seen)
+    return seen[0], ""
+
+
+def find_expected_r_basis(text: str) -> tuple[str | None, str]:
+    """本文の `expected_r_basis: subjective` から (値, 理由) を返す。語彙は tools/record_signal_extras.py と同じ。
+
+    crypto_grounds と同じく、全部の申告が読めて同じ値のときだけ記録する。値の後ろの補足（括弧書き）は読まない。"""
+    lines = _declared_lines(BASIS_LINE_RE, text)
+    if not lines:
+        return None, "本文に expected_r_basis の1行が無い"
+    seen: list[str] = []
+    for line in lines:
+        m = re.match(r"[A-Za-z_]+", line)
+        word = m.group(0).lower() if m else ""
+        if word not in rse.BASIS_VOCAB:
+            return None, (f"expected_r_basis を閉じた語彙（{' / '.join(sorted(rse.BASIS_VOCAB))}）で読めない申告がある: "
+                          f"{line[:60]}")
+        if word not in seen:
+            seen.append(word)
+    if len(seen) > 1:
+        return None, "同じ本文に食い違う expected_r_basis がある: " + " / ".join(seen)
+    return seen[0], ""
 
 
 def parse_invalidation(text: str, ledger_dates: dict[str, str], day: str) -> tuple[list[str], list[str]]:
@@ -183,7 +255,7 @@ def main(argv=None) -> int:
     ap.add_argument("--no-score", action="store_true", help="価格取得・採点・執行シミュレーションを飛ばす")
     ap.add_argument("--no-fetch", action="store_true", help="価格取得(src/fetch_market.py)だけ飛ばす")
     ap.add_argument("--force-score", action="store_true", help="追加0でも価格取得・採点・執行シミュレーションを回す（後段の再試行）")
-    ap.add_argument("--sidecars-for", default="", help="取込済みの日の主役・invalidation を本文から記録し直す（カンマ区切りの日付）")
+    ap.add_argument("--sidecars-for", default="", help="取込済みの日の主役・invalidation・crypto_grounds・expected_r_basis を本文から記録し直す（カンマ区切りの日付）")
     args = ap.parse_args(argv)
     failures: list[str] = []      # 後段の失敗。1つでもあれば終了コード 3 (#210 Codex P2)
 
@@ -204,7 +276,8 @@ def main(argv=None) -> int:
     last = max(counts) if counts else "0000-00-00"
     since = args.since or (date.fromisoformat(last) - timedelta(days=14)).isoformat()
     summary: dict = {"export": str(src), "applied": bool(args.apply), "ledger_last_before": last, "since": since,
-                     "days": [], "skipped_days": [], "leaders": [], "invalidation": [], "crypto": [],
+                     "days": [], "skipped_days": [], "leaders": [], "invalidation": [],
+                     "crypto_grounds": [], "expected_r_basis": [], "crypto": [],
                      "partial_days_in_ledger": sorted(d for d, n in counts.items() if d >= since and n != len(ASSETS))}
 
     # 1) 本文アーカイブ（無い日だけ。既存は上書きしない）
@@ -240,7 +313,8 @@ def main(argv=None) -> int:
         print(f"[ingest] {day}: 10行（A/B {ab}）" + ("" if args.apply else " [dry-run]") + (f" 警告 {len(warns)}" if warns else ""))
         ingested.append((day, text))
 
-    # 3) 主役・invalidation（取り込んだ日と、--sidecars-for で指定した取込済みの日。dry-run では読むだけ）
+    # 3) 主役・invalidation・crypto_grounds・expected_r_basis
+    #    （取り込んだ日と、--sidecars-for で指定した取込済みの日。dry-run では読むだけ）
     ledger_dates = {r["signal_id"]: r["date"] for r in (_ledger_rows() if args.apply else ledger)}
     redo = [d.strip() for d in args.sidecars_for.split(",") if d.strip()]
     by_day = {d: t for d, _n, t in entries}
@@ -277,6 +351,31 @@ def main(argv=None) -> int:
         summary["invalidation"].append(entry)
         print(f"[sidecar] {day}: 主役 {leader or '—'} / invalidation {len(items)}件"
               + (f"（記録しない {len(skipped)}件）" if skipped else "") + (f" {entry['result']}" if entry["result"] else ""))
+
+        grounds, why = find_crypto_grounds(text)
+        g_entry = {"day": day, "etf": grounds[0] if grounds else "", "cme": grounds[1] if grounds else "", "result": why}
+        if grounds and args.apply:
+            rc, out = _run([str(ROOT / "tools" / "record_crypto_grounds.py"), day, grounds[0], grounds[1], args.origin])
+            g_entry["result"] = ([ln for ln in out.splitlines() if ln.strip()] or [f"rc={rc}"])[-1]
+            if rc != 0 and "already recorded" not in out:      # 記録済み(rc=1)は失敗ではない
+                failures.append(f"record_crypto_grounds {day} rc={rc}: {g_entry['result'][:120]}")
+        elif grounds:
+            g_entry["result"] = "dry-run"
+        summary["crypto_grounds"].append(g_entry)
+
+        basis, why = find_expected_r_basis(text)
+        b_entry = {"day": day, "basis": basis or "", "result": why}
+        if basis and args.apply:
+            rc, out = _run([str(ROOT / "tools" / "record_signal_extras.py"), "basis", day, basis, args.origin])
+            b_entry["result"] = ([ln for ln in out.splitlines() if ln.strip()] or [f"rc={rc}"])[-1]
+            if rc != 0:
+                failures.append(f"record_signal_extras basis {day} rc={rc}: {b_entry['result'][:120]}")
+        elif basis:
+            b_entry["result"] = "dry-run"
+        summary["expected_r_basis"].append(b_entry)
+        print(f"[sidecar] {day}: crypto_grounds " + (f"etf={grounds[0]} cme={grounds[1]}" if grounds else "—")
+              + f" / expected_r_basis {basis or '—'}"
+              + "".join(f"（{e['result']}）" for e, v in ((g_entry, grounds), (b_entry, basis)) if not v))
 
     # 4) 週次 crypto の2行（未記録の週だけ）
     ctx_have, pred_have = _existing_weeks()
