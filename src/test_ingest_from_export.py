@@ -5,6 +5,8 @@
 2. dry-run は何も書かない
 3. 主役・invalidation は本文に明示された値だけ。台帳に無い signal_id や集約した書き方は記録しない
 4. 週次 crypto の2行は未記録の週だけ足す（2回目は何も足さない）
+5. crypto_grounds・expected_r_basis は、本文の申告が全部読めて全部同じ値のときだけ記録する（2026-11-12。
+   Codex の経路は記録し、この経路は記録していなかった。同じ入力から同じ記録にそろえる）
 """
 from __future__ import annotations
 
@@ -39,11 +41,13 @@ def _nt_swapped(day, asset):
     return f"{day},{d}_{asset}_NO_TRADE_NONE,{asset},NO_TRADE,NONE,NONE,,,,,,,,,40,30,80,0,EVENT,42,40,35,30,39,32,x,y,verified"
 
 
-def _report(day, rows, leader="WTI", inval=""):
+def _report(day, rows, leader="WTI", inval="", extras=""):
     jp = f"{int(day[:4])}年{int(day[5:7])}月{int(day[8:])}日"
     body = "\n".join([f"# Tactical Swing OS — {jp}", "", f"**本日の市場の主役：{leader}**", "", "本文" * 400, ""])
     if inval:
         body += f"`invalidation_check: {inval}`\n\n"
+    if extras:
+        body += extras + "\n\n"
     return body + "## 10. TSO_LOG\n\n```csv\n" + HEADER + "\n" + "\n".join(rows) + "\n```\n"
 
 
@@ -53,6 +57,12 @@ def _conv(title, texts):
         mapping[f"n{i}"] = {"message": {"id": f"m{i}", "author": {"role": "assistant"}, "create_time": 1000 + i,
                                         "content": {"content_type": "text", "parts": [t]}}}
     return {"title": title, "mapping": mapping}
+
+
+# 2026-11-10〜12 の実際の出力の形: 太字、コード、Markdown の \\_ エスケープ、同じ申告のくり返し、JSON のキー。
+EXTRAS_1110 = ("**crypto_grounds: etf=無, cme=無**\n**expected_r_basis: subjective**\n\n"
+               "crypto\\_grounds: etf=無, cme=無\n`expected_r_basis: subjective`\n\n"
+               '```json\n{"crypto_grounds": {"etf": "有", "cme": "有"}, "expected_r_basis": "two_point"}\n```')
 
 
 @pytest.fixture
@@ -75,7 +85,8 @@ def repo(tmp_path):
               "CRYPTO_PRED,2026-11-02,BTC,BELOW,78000,2026-11-13`}</text>\n")
     export = tmp_path / "export.json"
     export.write_text(json.dumps([
-        _conv("TSO Daily Signal Log v2", [_report("2026-11-10", day10, "WTI", inval), _report("2026-11-11", day11, "US10Y")]),
+        _conv("TSO Daily Signal Log v2", [_report("2026-11-10", day10, "WTI", inval, EXTRAS_1110),
+                                          _report("2026-11-11", day11, "US10Y")]),
         _conv("Crypto market update: macro vs regulation dynamics", [crypto]),
     ], ensure_ascii=False), encoding="utf-8")
     return tmp_path
@@ -100,6 +111,9 @@ def test_dry_run_writes_nothing(repo):
     assert not list((repo / "data" / "prediction_log_archive").glob("*.md"))
     assert not (repo / "data" / "crypto_context_weekly.csv").exists()
     assert len(_rows(repo / "data" / "leader_observations.csv")) == 0
+    assert not (repo / "data" / "crypto_grounds_observations.csv").exists()
+    assert not (repo / "data" / "expected_r_basis.csv").exists()
+    assert "crypto_grounds etf=absent cme=absent / expected_r_basis subjective" in r.stdout    # 読むだけは読む
 
 
 def test_apply_ingests_complete_days_only_and_records_sidecars(repo):
@@ -125,6 +139,13 @@ def test_apply_ingests_complete_days_only_and_records_sidecars(repo):
     assert [d["day"] for d in summary["days"]] == ["2026-11-10"] and summary["skipped_days"][0]["day"] == "2026-11-11"
     assert any("台帳に無い" in s for s in summary["invalidation"][0]["skipped"])
     assert any("signal_id の形でない" in s for s in summary["invalidation"][0]["skipped"])
+    # 本文の申告（JSON のキーの値 有/two_point ではなく、1行申告の 無/subjective）
+    g = _rows(repo / "data" / "crypto_grounds_observations.csv")
+    assert [(x["date"], x["etf_grounds"], x["cme_grounds"], x["source"]) for x in g] == [("2026-11-10", "absent", "absent", "chatgpt_app")]
+    b = _rows(repo / "data" / "expected_r_basis.csv")
+    assert [(x["date"], x["expected_r_basis"], x["source"]) for x in b] == [("2026-11-10", "subjective", "chatgpt_app")]
+    assert summary["crypto_grounds"] == [{"day": "2026-11-10", "etf": "absent", "cme": "absent", "result": "recorded: 2026-11-10 etf=absent cme=absent"}]
+    assert summary["expected_r_basis"][0]["basis"] == "subjective" and "recorded basis" in summary["expected_r_basis"][0]["result"]
 
 
 def test_second_run_adds_nothing(repo):
@@ -149,6 +170,118 @@ def test_conflicting_invalidation_id_stays_excluded():
     items, skipped = ife.parse_invalidation(text, {"20261109_GOLD_BUY_PULLBACK": "2026-11-09", "20261109_BTC_BUY_PULLBACK": "2026-11-09"}, "2026-11-10")
     assert items == ["20261109_BTC_BUY_PULLBACK=unknown"]
     assert sum("矛盾" in s for s in skipped) == 1
+
+
+def _ife():
+    sys.path.insert(0, str(ROOT / "tools"))
+    import ingest_from_export as ife
+    return ife
+
+
+def test_declarations_are_recorded_only_when_every_copy_is_readable_and_agrees():
+    ife = _ife()
+    ok = "**crypto_grounds: etf=有, cme=無**\nexpected_r_basis: subjective (new direction signals = none)\n"
+    assert ife.find_crypto_grounds(ok) == (("present", "absent"), "")
+    assert ife.find_expected_r_basis(ok) == ("subjective", "")
+    # UI 部品で包まれた形と、全角の区切り
+    assert ife.find_crypto_grounds("<text>{`crypto_grounds: ETF＝有、CME＝有（basis のみ）`}</text>")[0] == ("present", "present")
+    # 食い違い: どちらも記録しない
+    g, why = ife.find_crypto_grounds("crypto_grounds: etf=有, cme=有\n- crypto_grounds: etf=無, cme=無\n")
+    assert g is None and "食い違う" in why
+    b, why = ife.find_expected_r_basis("expected_r_basis: subjective\nexpected_r_basis: two_point\n")
+    assert b is None and "食い違う" in why
+    # 語彙の外が1つでも混じったら記録しない（読めた方だけを採らない）
+    g, why = ife.find_crypto_grounds("crypto_grounds: etf=有, cme=有\ncrypto_grounds: etf=partial, cme=有\n")
+    assert g is None and "読めない" in why
+    b, why = ife.find_expected_r_basis("expected_r_basis: subjective\nexpected_r_basis: mixed\n")
+    assert b is None and "読めない" in why
+    # 片方しか書いていない
+    assert ife.find_crypto_grounds("crypto_grounds: etf=有\n")[0] is None
+    # 値は1語を丸ごと読む。先頭だけ語彙に合っていても採らない（#213 Codex P2）
+    for bad in ("subjective/two_point", "subjective-v2", "subjective two_point", "subjective, two_point", "subjective or two_point"):
+        b, why = ife.find_expected_r_basis(f"expected_r_basis: {bad}\n")
+        assert b is None and "読めない" in why, bad
+    for bad in ("subjective — two_point ではない", "subjective - two_point も併記"):      # 説明に別の語彙が出る
+        assert ife.find_expected_r_basis(f"expected_r_basis: {bad}\n")[0] is None, bad
+    for good in ("subjective", "subjective。", "subjective (new direction signals = none; fixed to +0.34R)", "two_point（式どおり）",
+                 "**Subjective**", "**subjective** — 未約定確率とイベントギャップを織り込み、単純な二点分布式より低く評価。"):
+        assert ife.find_expected_r_basis(f"expected_r_basis: {good}\n")[0] in ("subjective", "two_point"), good
+    # 値が次の行に来る書き方（観察メモ。2026-09〜10 の実際の形）
+    assert ife.find_expected_r_basis("expected_r_basis:\nsubjective\n\n## Conclusion\n") == ("subjective", "")
+    assert ife.find_crypto_grounds("crypto_grounds:\netf=有\ncme=無\n\n## Regime\nEVENT\n") == (("present", "absent"), "")
+    assert ife.find_crypto_grounds("crypto_grounds:\netf=有, cme=有\n\nexpected_r_basis:\nsubjective\n") == (("present", "present"), "")
+    # 続きとみなすのは「etf=…」「cme=…」だけの行。次の段落の文は巻き込まない
+    assert ife.find_crypto_grounds("**crypto_grounds: etf=有, cme=有** — 9/18 の ETF は流入。\nCME=basis のみ確認、と本文に書いた。\n")[0] == ("present", "present")
+    assert ife.find_crypto_grounds("crypto_grounds: etf=有\n本文が続く cme=無 という文。\n")[0] is None
+    # すぐ下の行にある別の申告を飲み込まない（食い違いを見落とさない）
+    assert ife.find_crypto_grounds("crypto_grounds: etf=有, cme=有\ncrypto_grounds: etf=無, cme=無\n")[0] is None
+    assert ife.find_crypto_grounds("crypto_grounds:\netf=有\ncme=有\ncrypto_grounds:\netf=無\ncme=無\n")[0] is None
+    # 見出しだけで値が無い申告は、申告として数えない
+    assert ife.find_expected_r_basis("expected_r_basis:\n\n## Conclusion\n") == (None, "本文に expected_r_basis の1行が無い")
+    for bad in ("etf=有/無, cme=有/無", "etf=有-一部, cme=有", "etf=有, etf=無, cme=有", "etf=有/cme=有"):
+        g, why = ife.find_crypto_grounds(f"crypto_grounds: {bad}\n")
+        assert g is None and "読めない" in why, bad
+    for good in ("etf=有, cme=無", "ETF=yes / CME=no", "etf＝有、cme＝無。", "etf=有（フロー確認）, cme=無 (basis なし)"):
+        assert ife.find_crypto_grounds(f"crypto_grounds: {good}\n")[0] == ("present", "absent"), good
+    # 申告が無い・JSON のキーしか無い
+    for text in ("本文だけ", '{"crypto_grounds": {"etf": "有"}, "expected_r_basis": "subjective"}'):
+        assert ife.find_crypto_grounds(text) == (None, "本文に crypto_grounds の1行が無い")
+        assert ife.find_expected_r_basis(text) == (None, "本文に expected_r_basis の1行が無い")
+
+
+def test_markdown_escaped_underscores_read_the_same_as_plain_text():
+    """Codex が読む fallbackMarkdown と 11/12 以降のアーカイブは `_` を `\\_` と書く。会話 API の本文は書かない。
+    どちらでも同じ結果になること（外さないと signal_id の形に合わず、invalidation が 0 件になる）。"""
+    ife = _ife()
+    plain = ("market_leader: NASDAQ\ninvalidation_check: 20261111_GOLD_SELL_PULLBACK=not_fired, 20261111_NASDAQ_SELL_PULLBACK=fired\n"
+             "crypto_grounds: etf=有, cme=有\nexpected_r_basis: two_point\n")
+    escaped = plain.replace("_", "\\_")
+    ledger = {"20261111_GOLD_SELL_PULLBACK": "2026-11-11", "20261111_NASDAQ_SELL_PULLBACK": "2026-11-11"}
+    want = ["20261111_GOLD_SELL_PULLBACK=not_fired", "20261111_NASDAQ_SELL_PULLBACK=fired"]
+    for text in (plain, escaped):
+        assert ife.parse_invalidation(text, ledger, "2026-11-12") == (want, [])
+        assert ife.find_leader(text) == "NASDAQ"
+        assert ife.find_crypto_grounds(text) == (("present", "present"), "")
+        assert ife.find_expected_r_basis(text) == ("two_point", "")
+    conv = [{"title": "Crypto market update", "mapping": {"n": {"message": {
+        "author": {"role": "assistant"}, "create_time": 1,
+        "content": {"parts": ["CRYPTO\\_CTX,2026-11-09,MIXED,OUTFLOW,UNKNOWN,NONE,MEDIUM,HIT"]}}}}}]
+    assert ife.crypto_lines(conv, "Crypto market update") == ["CRYPTO_CTX,2026-11-09,MIXED,OUTFLOW,UNKNOWN,NONE,MEDIUM,HIT"]
+
+
+def test_missing_declarations_are_not_a_failure(repo):
+    """2行はプロンプトの必須項目ではない（changelog (20) で外した）。無い日は記録しないだけで、終了コードは変えない。"""
+    data = json.loads((repo / "export.json").read_text(encoding="utf-8"))
+    for node in data[0]["mapping"].values():
+        parts = node["message"]["content"]["parts"]
+        parts[0] = parts[0].replace(EXTRAS_1110, "")
+    data[0]["mapping"] = {k: v for k, v in data[0]["mapping"].items() if "2026年11月11日" not in v["message"]["content"]["parts"][0]}
+    (repo / "export.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    r = _run(repo, "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "crypto_grounds — / expected_r_basis —" in r.stdout
+    assert not (repo / "data" / "crypto_grounds_observations.csv").exists()
+    assert not (repo / "data" / "expected_r_basis.csv").exists()
+
+
+def test_sidecars_for_backfills_declarations_without_touching_the_ledger(repo):
+    """取込済みの日に、後から2行だけ足せる（11/3〜11/11 を埋めた手順）。2回目は何も足さない。"""
+    data = json.loads((repo / "export.json").read_text(encoding="utf-8"))
+    data[0]["mapping"] = {k: v for k, v in data[0]["mapping"].items() if "2026年11月11日" not in v["message"]["content"]["parts"][0]}
+    (repo / "export.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert _run(repo, "--apply").returncode == 0
+    (repo / "data" / "crypto_grounds_observations.csv").unlink()        # 記録していなかった頃の状態に戻す
+    (repo / "data" / "expected_r_basis.csv").unlink()
+    ledger = (repo / "data" / "signal_log.csv").read_text(encoding="utf-8")
+    r = _run(repo, "--apply", "--sidecars-for", "2026-11-10")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (repo / "data" / "signal_log.csv").read_text(encoding="utf-8") == ledger and "[ingest]" not in r.stdout
+    assert len(_rows(repo / "data" / "crypto_grounds_observations.csv")) == 1
+    assert len(_rows(repo / "data" / "expected_r_basis.csv")) == 1
+    snap = {p.name: p.read_text(encoding="utf-8") for p in (repo / "data").glob("*.csv")}
+    r2 = _run(repo, "--apply", "--sidecars-for", "2026-11-10")
+    assert r2.returncode == 0, r2.stdout + r2.stderr                     # 記録済みは失敗ではない
+    assert {p.name: p.read_text(encoding="utf-8") for p in (repo / "data").glob("*.csv")} == snap
 
 
 def test_failed_later_stage_is_reported_and_can_be_retried(repo):

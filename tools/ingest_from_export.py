@@ -11,6 +11,10 @@ chatgpt.com では Computer Use が使えない。残っている確実な経路
 このスクリプトが残りを全部やる。手作業で毎回やっていた手順（アーカイブ → 検証 → 取込 →
 主役・invalidation・週次 crypto の記録 → 採点 → 執行シミュレーション）を固定する。
 
+2026-11-12 追記: 11/12 の出力は read_thread が本文そのものを返し、Codex が取り込んだ（#212）。11/10・11/11 は
+本文に出典の部品 <Cite> が残っていて参照しか返らず、11/12 は部品タグが 0 だった（model_dil_v2 は3日とも付いている。
+原因は確定させていない。docs/gpt_prompt_changelog.md (22) の追記）。毎朝の取込は Codex が主で、この経路は予備。
+
     python tools/ingest_from_export.py ~/Downloads/tso_daily_conversation_YYYYMMDD.json           # dry-run
     python tools/ingest_from_export.py ~/Downloads/tso_daily_conversation_YYYYMMDD.json --apply
 
@@ -21,12 +25,17 @@ chatgpt.com では Computer Use が使えない。残っている確実な経路
 ----
 * 1日は10資産10行そろったときだけ取り込む（部分取込はしない）。そろわない日は理由を出して飛ばす。
 * 値は直さない。見送り行の語彙と空欄の数だけ ingest_daily_log が補正し、data/ingest_normalizations.csv に残す。
-* 主役・invalidation は本文に明示された値だけを既存の記録ツールへ渡す。台帳に無い signal_id や
-  集約した書き方（historical_pending_signals=unknown など）は記録しない。
+* 主役・invalidation・crypto_grounds・expected_r_basis は本文に明示された値だけを既存の記録ツールへ渡す。
+  台帳に無い signal_id や集約した書き方（historical_pending_signals=unknown など）は記録しない。
+  crypto_grounds と expected_r_basis は、本文に何度か出る申告が全部読めて、全部同じ値のときだけ記録する
+  （語彙の外・食い違い・`subjective/two_point` のような曖昧な値は記録しない。どれが正しいかをここで決めない）。
+  2026-11-12 まで、この2つはこの経路で記録していなかった（Codex の経路だけが記録していた）ので、
+  この経路で入れた 11/3〜11/11 の9日ぶんが両方の台帳から抜けていた。
 * 終了コード: 0=正常（追加0でも）、2=取り込めなかった日がある、3=取込の後段（アーカイブ・主役・invalidation・
   週次 crypto・価格取得・採点・執行シミュレーション）のどれかが失敗した、1=致命的（日次会話が見つからない等）。
-* 後段だけをやり直す: `--sidecars-for 2026-11-10,2026-11-11`（その日の主役・invalidation を本文から記録し直す。
-  記録ツールは追記型なので、既にある値は上書きされない）、`--force-score`（追加0でも価格取得・採点・執行simを回す）。
+* 後段だけをやり直す: `--sidecars-for 2026-11-10,2026-11-11`（その日の主役・invalidation・crypto_grounds・
+  expected_r_basis を本文から記録し直す。記録ツールは追記型なので、既にある値は上書きされない）、
+  `--force-score`（追加0でも価格取得・採点・執行simを回す）。
 """
 from __future__ import annotations
 
@@ -44,6 +53,8 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 import archive_gpt_prose as agp  # noqa: E402
 import ingest_daily_log as idl  # noqa: E402
+import record_crypto_grounds as rcg  # noqa: E402  語彙だけ借りる（有/無）
+import record_signal_extras as rse  # noqa: E402  語彙だけ借りる（subjective/two_point）
 
 ASSETS = ["GOLD", "BTC", "ETH", "WTI", "USDJPY", "SPX", "NASDAQ", "DXY", "US10Y", "VIX"]
 LEDGER = Path("data/signal_log.csv")
@@ -54,6 +65,19 @@ SID_RE = re.compile(r"^\d{8}_[A-Z0-9]+_[A-Z0-9_\-]+$")
 LEADER_RES = [re.compile(r"本日の市場の主役[：:]\s*[*`]*\s*([A-Z0-9]+)"),
               re.compile(r"^market_leader:\s*([A-Z0-9]+)", re.M)]
 INVAL_LINE_RE = re.compile(r"(?<![\"\w])invalidation_check:\s*([^\n]+)")
+# 本文の1行申告（changelog (14)(15)）。JSON のキー（"crypto_grounds": {...}）は拾わない（直前が " の形を除く）。
+# 値が次の行に来る書き方（観察メモの「crypto_grounds:\netf=有\ncme=無」）も読む。続く2行は先読みで覗くだけにして
+# 消費しない（消費すると、すぐ下の行にある別の申告を飲み込んで、食い違いを見落とす）。
+GROUNDS_LINE_RE = re.compile(r"(?<![\"\w])crypto_grounds:[ \t]*\n?[ \t]*([^\n]+)(?=((?:\n[^\n]+){0,2}))")
+BASIS_LINE_RE = re.compile(r"(?<![\"\w])expected_r_basis:[ \t]*\n?[ \t]*([^\n]+)")
+GROUNDS_KV_ONLY_RE = re.compile(r"^\s*(?:etf|cme)\s*[=＝:：]\s*[^\s,、，;；()（）。]+\s*$", re.I)
+# 値は「区切り（空白・読点・括弧・句点）まで」を丸ごと1語として読む。`有/無`（雛形の写し）や `有-一部` を
+# 先頭の1文字だけで「有」と読まない（#213 Codex P2）。
+GROUNDS_TOKEN = r"\s*[=＝:：]\s*([^\s,、，;；()（）。]+)"
+# expected_r_basis の値は1語だけ。後ろに続けてよいのは、括弧書きの補足（`subjective (…)`）か、空白を挟んだ
+# ダッシュ・コロンで始まる説明（`subjective — 未約定を織り込み…`。9〜10月の実際の形）だけ。
+# `subjective/two_point`・`subjective-v2`・`subjective two_point` を subjective と読まない（#213 Codex P2）。
+BASIS_VALUE_RE = re.compile(r"^([A-Za-z_]+)(?:\s*[。.]?\s*$|\s*[(（].*$|\s+[—–\-:：]\s.*$)")
 # 行頭とは限らない: 2026-11-08 の出力は <text preserveWhitespace>{`CRYPTO_CTX,...`}</text> で包まれていた。
 # 欄は英数字・_・-・. だけなので、その文字が続く範囲を1行として拾う。
 CRYPTO_LINE_RE = re.compile(r"(CRYPTO_(?:CTX|PRED),[A-Za-z0-9_.,\-]+)")
@@ -97,7 +121,18 @@ def validate_day(day: str, text: str) -> tuple[bool, str]:
     return True, fmt
 
 
+def _unescape_md(text: str) -> str:
+    """Markdown のエスケープ `\\_` を `_` に戻す（`_` そのものは消さない）。
+
+    会話 API の本文（content.parts）にはエスケープは無い。同じメッセージの model_dil_v2.fallbackMarkdown は
+    コードフェンスの外の `_` を `\\_` と書く（`invalidation\\_check: 20261111\\_GOLD\\_SELL\\_PULLBACK=not\\_fired`）。
+    Codex の read_thread が返すのは後者で、Codex が保存した 2026-11-12 以降のアーカイブもこの形。
+    どちらの形を渡されても同じ結果になるよう、1行申告を読む前に必ず通す。"""
+    return text.replace("\\_", "_")
+
+
 def find_leader(text: str) -> str | None:
+    text = _unescape_md(text)
     for rx in LEADER_RES:
         m = rx.search(text)
         if m and m.group(1).upper() in ASSETS:
@@ -105,12 +140,87 @@ def find_leader(text: str) -> str | None:
     return None
 
 
+def _declared_lines(rx: re.Pattern, text: str) -> list[str]:
+    """本文の1行申告を、Markdown の飾り（太字・コード・\\_ のエスケープ）と UI 部品の閉じを外して返す。"""
+    out = []
+    for m in rx.finditer(_unescape_md(text)):
+        following = m.group(2) if rx.groups > 1 and m.group(2) else ""
+        rows = [re.split(r"[<}]", re.sub(r"[*`]", "", ln))[0].strip() for ln in (m.group(1) + following).split("\n")]
+        # 2行目以降は「etf=有」「cme=無」だけの行に限って同じ申告の続きとみなす（次の段落の文を巻き込まない）
+        keep = [rows[0]]
+        for extra in rows[1:]:
+            if not GROUNDS_KV_ONLY_RE.match(extra):
+                break
+            keep.append(extra)
+        out.append(", ".join(keep) if len(keep) > 1 else keep[0])
+    return out
+
+
+def _grounds_word(token: str) -> str | None:
+    t = token.strip().rstrip("。.").lower()
+    if t in {x.lower() for x in rcg.TRUE}:
+        return "present"
+    if t in {x.lower() for x in rcg.FALSE}:
+        return "absent"
+    return None
+
+
+def find_crypto_grounds(text: str) -> tuple[tuple[str, str] | None, str]:
+    """本文の `crypto_grounds: etf=有, cme=無` から ((etf, cme), 理由) を返す。値は present / absent。
+
+    本文には同じ申告が何度か出る（冒頭・観察メモ・ログの前）。全部が閉じた語彙（有/無 など。
+    tools/record_crypto_grounds.py と同じ）で読めて、全部が同じ値のときだけ記録する。1つでも読めない
+    申告や食い違う申告があれば記録しない（どれが正しいかをここで決めない）。"""
+    lines = _declared_lines(GROUNDS_LINE_RE, text)
+    if not lines:
+        return None, "本文に crypto_grounds の1行が無い"
+    seen: list[tuple[str, str]] = []
+    for line in lines:
+        words = []
+        for key in ("etf", "cme"):
+            # 同じ行に同じ欄が2回あれば全部読む。1つでも語彙の外、または食い違えば、その申告は読めない扱い。
+            vals = {_grounds_word(tok) for tok in re.findall(key + GROUNDS_TOKEN, line, re.I)}
+            words.append(vals.pop() if len(vals) == 1 else None)
+        pair = (words[0], words[1])
+        if not (pair[0] and pair[1]):
+            return None, f"crypto_grounds を閉じた語彙（有/無）で読めない申告がある: {line[:60]}"
+        if pair not in seen:
+            seen.append(pair)
+    if len(seen) > 1:
+        return None, "同じ本文に食い違う crypto_grounds がある: " + " / ".join(f"etf={e},cme={c}" for e, c in seen)
+    return seen[0], ""
+
+
+def find_expected_r_basis(text: str) -> tuple[str | None, str]:
+    """本文の `expected_r_basis: subjective` から (値, 理由) を返す。語彙は tools/record_signal_extras.py と同じ。
+
+    crypto_grounds と同じく、全部の申告が読めて同じ値のときだけ記録する。値は1語を丸ごと語彙と照らす。
+    後ろに続けてよいのは括弧書きの補足だけで、`subjective/two_point` や `subjective-v2` は読めない扱いにする。"""
+    lines = _declared_lines(BASIS_LINE_RE, text)
+    if not lines:
+        return None, "本文に expected_r_basis の1行が無い"
+    seen: list[str] = []
+    for line in lines:
+        m = BASIS_VALUE_RE.match(line)
+        word = m.group(1).lower() if m else ""
+        # 説明の中に別の語彙（two_point など）が出てくる申告は、どちらの意味か決めない
+        others = [w for w in rse.BASIS_VOCAB if w != word and re.search(rf"(?<![A-Za-z_]){w}(?![A-Za-z_])", line, re.I)]
+        if word not in rse.BASIS_VOCAB or others:
+            return None, (f"expected_r_basis を閉じた語彙（{' / '.join(sorted(rse.BASIS_VOCAB))}）で読めない申告がある: "
+                          f"{line[:60]}")
+        if word not in seen:
+            seen.append(word)
+    if len(seen) > 1:
+        return None, "同じ本文に食い違う expected_r_basis がある: " + " / ".join(seen)
+    return seen[0], ""
+
+
 def parse_invalidation(text: str, ledger_dates: dict[str, str], day: str) -> tuple[list[str], list[str]]:
     """本文の invalidation_check 行から (記録できる項目, 記録しない項目と理由) を返す。"""
     keep: dict[str, str] = {}
     skipped: list[str] = []
     conflicted: set[str] = set()   # 一度矛盾した ID は、後から何度出ても記録しない(#210 Codex P2)
-    for m in INVAL_LINE_RE.finditer(text):
+    for m in INVAL_LINE_RE.finditer(_unescape_md(text)):
         line = re.sub(r"[*`]", "", m.group(1))
         line = re.split(r"[<}]", line)[0]
         for part in line.split(","):
@@ -154,7 +264,7 @@ def crypto_lines(convs: list[dict], title: str) -> list[str]:
             text = "\n".join(p for p in parts if isinstance(p, str))
             msgs.append((msg.get("create_time") or 0, text))
         for _, text in sorted(msgs, key=lambda x: x[0]):
-            for m in CRYPTO_LINE_RE.finditer(text):
+            for m in CRYPTO_LINE_RE.finditer(_unescape_md(text)):
                 line = m.group(1).strip().rstrip(",.")
                 if line not in out:
                     out.append(line)
@@ -183,7 +293,7 @@ def main(argv=None) -> int:
     ap.add_argument("--no-score", action="store_true", help="価格取得・採点・執行シミュレーションを飛ばす")
     ap.add_argument("--no-fetch", action="store_true", help="価格取得(src/fetch_market.py)だけ飛ばす")
     ap.add_argument("--force-score", action="store_true", help="追加0でも価格取得・採点・執行シミュレーションを回す（後段の再試行）")
-    ap.add_argument("--sidecars-for", default="", help="取込済みの日の主役・invalidation を本文から記録し直す（カンマ区切りの日付）")
+    ap.add_argument("--sidecars-for", default="", help="取込済みの日の主役・invalidation・crypto_grounds・expected_r_basis を本文から記録し直す（カンマ区切りの日付）")
     args = ap.parse_args(argv)
     failures: list[str] = []      # 後段の失敗。1つでもあれば終了コード 3 (#210 Codex P2)
 
@@ -204,7 +314,8 @@ def main(argv=None) -> int:
     last = max(counts) if counts else "0000-00-00"
     since = args.since or (date.fromisoformat(last) - timedelta(days=14)).isoformat()
     summary: dict = {"export": str(src), "applied": bool(args.apply), "ledger_last_before": last, "since": since,
-                     "days": [], "skipped_days": [], "leaders": [], "invalidation": [], "crypto": [],
+                     "days": [], "skipped_days": [], "leaders": [], "invalidation": [],
+                     "crypto_grounds": [], "expected_r_basis": [], "crypto": [],
                      "partial_days_in_ledger": sorted(d for d, n in counts.items() if d >= since and n != len(ASSETS))}
 
     # 1) 本文アーカイブ（無い日だけ。既存は上書きしない）
@@ -240,7 +351,8 @@ def main(argv=None) -> int:
         print(f"[ingest] {day}: 10行（A/B {ab}）" + ("" if args.apply else " [dry-run]") + (f" 警告 {len(warns)}" if warns else ""))
         ingested.append((day, text))
 
-    # 3) 主役・invalidation（取り込んだ日と、--sidecars-for で指定した取込済みの日。dry-run では読むだけ）
+    # 3) 主役・invalidation・crypto_grounds・expected_r_basis
+    #    （取り込んだ日と、--sidecars-for で指定した取込済みの日。dry-run では読むだけ）
     ledger_dates = {r["signal_id"]: r["date"] for r in (_ledger_rows() if args.apply else ledger)}
     redo = [d.strip() for d in args.sidecars_for.split(",") if d.strip()]
     by_day = {d: t for d, _n, t in entries}
@@ -277,6 +389,31 @@ def main(argv=None) -> int:
         summary["invalidation"].append(entry)
         print(f"[sidecar] {day}: 主役 {leader or '—'} / invalidation {len(items)}件"
               + (f"（記録しない {len(skipped)}件）" if skipped else "") + (f" {entry['result']}" if entry["result"] else ""))
+
+        grounds, why = find_crypto_grounds(text)
+        g_entry = {"day": day, "etf": grounds[0] if grounds else "", "cme": grounds[1] if grounds else "", "result": why}
+        if grounds and args.apply:
+            rc, out = _run([str(ROOT / "tools" / "record_crypto_grounds.py"), day, grounds[0], grounds[1], args.origin])
+            g_entry["result"] = ([ln for ln in out.splitlines() if ln.strip()] or [f"rc={rc}"])[-1]
+            if rc != 0 and "already recorded" not in out:      # 記録済み(rc=1)は失敗ではない
+                failures.append(f"record_crypto_grounds {day} rc={rc}: {g_entry['result'][:120]}")
+        elif grounds:
+            g_entry["result"] = "dry-run"
+        summary["crypto_grounds"].append(g_entry)
+
+        basis, why = find_expected_r_basis(text)
+        b_entry = {"day": day, "basis": basis or "", "result": why}
+        if basis and args.apply:
+            rc, out = _run([str(ROOT / "tools" / "record_signal_extras.py"), "basis", day, basis, args.origin])
+            b_entry["result"] = ([ln for ln in out.splitlines() if ln.strip()] or [f"rc={rc}"])[-1]
+            if rc != 0:
+                failures.append(f"record_signal_extras basis {day} rc={rc}: {b_entry['result'][:120]}")
+        elif basis:
+            b_entry["result"] = "dry-run"
+        summary["expected_r_basis"].append(b_entry)
+        print(f"[sidecar] {day}: crypto_grounds " + (f"etf={grounds[0]} cme={grounds[1]}" if grounds else "—")
+              + f" / expected_r_basis {basis or '—'}"
+              + "".join(f"（{e['result']}）" for e, v in ((g_entry, grounds), (b_entry, basis)) if not v))
 
     # 4) 週次 crypto の2行（未記録の週だけ）
     ctx_have, pred_have = _existing_weeks()
