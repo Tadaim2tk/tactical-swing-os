@@ -1,3 +1,4 @@
 as_of,window_days,baseline_days,ledger_days_window,orders_window,ideas_window,ledger_days_baseline,orders_baseline,ideas_baseline,orders_ratio,ideas_ratio,status,note,ledger_last_date,recorded_at
 2026-11-02,14,56,14,2,2,56,45,15,0.178,0.533,ALERT,見立てが14日で2本（床 3 本未満＝週1本以下）,2026-11-02,2026-11-08T00:55:54Z
 2026-11-09,14,56,14,47,17,56,29,14,6.483,4.857,OK,,2026-11-09,2026-11-11T01:29:44Z
+2026-11-12,14,56,14,71,21,56,21,12,13.524,7.0,OK,,2026-11-12,2026-11-12T02:33:16Z
