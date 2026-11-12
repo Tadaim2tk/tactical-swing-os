@@ -62,9 +62,12 @@ python tools/ingest_from_export.py ~/Downloads/tso_export_YYYYMMDD.json --apply 
 `--force-score`（価格取得・採点・執行シミュレーション）。定期タスクは `--no-score` で回し、採点と執行シミュレーションは
 日次の GitHub Actions（daily_cycle）に任せる（取込 PR に採点ファイルを入れると bot のコミットと衝突して PR が止まる。#187）。
 
-定期実行: Claude デスクトップアプリの定期タスク「TSO 日次取込」が毎朝これを回し、データ専用 PR を作って
-auto-merge を予約する（タスクの定義は `~/.claude/scheduled-tasks/tso-daily-ingest/SKILL.md`。
-アプリが開いていて Chrome が ChatGPT にログイン済みであることが条件）。
+定期実行: 2026-11-12 から、毎朝の取込は Codex の自動化 tso-2（08:00）が主で、この経路は予備
+（docs/operations_runbook.md §1b）。予備は Claude デスクトップアプリの定期タスク「TSO 日次取込」（09:40 と 12:40。
+タスクの定義は `~/.claude/scheduled-tasks/tso-daily-ingest/SKILL.md`。アプリが開いていて Chrome が ChatGPT に
+ログイン済みであることが条件）で、main にも開いている取込 PR にも当日の行が無いときだけ動く。
+権限モードはタスクごとの設定で、既定（毎回確認する）のままでは最初のコマンドで承認待ちになる。人間がタスクの
+編集画面で選ぶまで、このタスクは止めてある（同 §1b）。取込が2日続けて入らなければ daily_cycle が赤になる（同 §1g）。
 
 ## 取込時の検証（ingest_daily_log.py）
 

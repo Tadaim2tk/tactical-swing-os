@@ -81,6 +81,30 @@ jobs:
             echo "::warning::throughput watch WARN - 売買頻度が基準の半分以下 (reports/throughput_watch.md)"
           fi
 
+      - name: Ledger freshness (取込が止まっていないか)
+        # 2026-11-11: 取込の経路(ChatGPT → 台帳)は外の道具に依存していて黙って止まる。10/28 のレポートから
+        # Codex が本文を読めなくなり 11/3〜11/9 は取込が止まったが、このジョブは緑のままだった
+        # (上の throughput watch は台帳の最終日を基準に数えるので、台帳と一緒に止まる)。
+        # 「今日(JST)」から数え、2日続けて増えていなければ ALERT としてこのジョブを赤にする。観測だけ。
+        run: |
+          rm -f results/.ledger_stale results/.ledger_check_error
+          set +e
+          out=$(python tools/ledger_freshness.py --fail-on-alert)
+          rc=$?
+          set -e
+          echo "$out"
+          if [ "$rc" = "2" ]; then
+            echo "::error::ledger freshness ALERT - 台帳(data/signal_log.csv)が2日続けて増えていないか、読めない。取込の経路を確認 (docs/operations_runbook.md §1g)"
+            touch results/.ledger_stale
+          elif [ "$rc" != "0" ]; then
+            # 監視そのものが動かなかった。ここを警告で流すと「黙って止まる」を拾う警報が黙って止まる
+            # (#211 Codex P2)。サイクルは最後まで走らせ、ジョブは赤にする。
+            echo "::error::ledger freshness could not run (rc=$rc) - 鮮度の確認そのものが動かなかった。このステップのログを見る"
+            touch results/.ledger_check_error
+          elif echo "$out" | grep -q "^status=WARN"; then
+            echo "::warning::ledger freshness WARN - 台帳が1日ぶん遅れている(次の取込が拾えば戻る)"
+          fi
+
       - name: Sync to Google Sheets
         run: python src/sync_to_sheets.py
         env:
@@ -114,7 +138,7 @@ jobs:
               git push "git@github.com:$GITHUB_REPOSITORY.git" HEAD:main
           fi
 
-      - name: Fail if the point-in-time snapshot was not recorded, or throughput is in ALERT
+      - name: Fail if the point-in-time snapshot was not recorded, throughput is in ALERT, or the ledger stopped growing / could not be checked
         if: always()
         run: |
           # この欠落は後から埋められない(当時の値は再構成すると lookahead 汚染になる)。
@@ -128,6 +152,14 @@ jobs:
           fi
           if [ -f results/.throughput_alert ]; then
             echo "::error::throughput watch ALERT - 売買頻度が床を割っている。reports/throughput_watch.md を読む"
+            fail=1
+          fi
+          if [ -f results/.ledger_stale ]; then
+            echo "::error::ledger freshness ALERT - 台帳が2日続けて増えていないか、読めない。取込の経路が止まっている (docs/operations_runbook.md §1g)"
+            fail=1
+          fi
+          if [ -f results/.ledger_check_error ]; then
+            echo "::error::ledger freshness could not run - 台帳の鮮度を確認できなかった(Ledger freshness ステップのログを見る)"
             fail=1
           fi
           exit $fail
