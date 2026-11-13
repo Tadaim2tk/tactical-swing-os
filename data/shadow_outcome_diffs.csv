@@ -820,3 +820,8 @@ date,asset,signal_id,weights_version,pair_type,base_r,weighted_r,diff,linked_at_
 2026-11-11,VIX,20261111_VIX_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-12 02:33:12 UTC
 2026-11-11,WTI,20261111_WTI_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-12 02:33:12 UTC
 2026-11-12,BTC,20261112_BTC_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-12 02:33:12 UTC
+2026-11-12,NASDAQ,20261112_NASDAQ_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-13 02:10:01 UTC
+2026-11-12,SPX,20261112_SPX_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-13 02:10:01 UTC
+2026-11-12,US10Y,20261112_US10Y_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-13 02:10:01 UTC
+2026-11-12,VIX,20261112_VIX_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-13 02:10:01 UTC
+2026-11-12,WTI,20261112_WTI_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-13 02:10:01 UTC
