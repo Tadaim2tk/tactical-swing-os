@@ -9,3 +9,4 @@ week_start,week_end,total_signals,a_signals,b_signals,no_trade_signals,closed_si
 2026-10-18,2026-10-24,60,0,0,60,0,0,0,60,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,データ不足,,,prediction_log_scores,False,True,prediction_log,60,60,60
 2026-10-25,2026-10-31,60,0,0,60,0,0,0,60,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,データ不足,,,prediction_log_scores,False,True,prediction_log,60,60,60
 2026-11-01,2026-11-07,20,0,0,20,0,0,0,20,0.0,0.0,0.0,0.0,0.0,0.0,,,通常,0.5,データ不足,,,prediction_log_scores,False,True,prediction_log,20,20,20
+2026-11-08,2026-11-14,70,0,50,20,1,49,0,20,1.0,inf,1.7642,1.7642,1.7642,1.7642,ETH,ETH,通常,0.5,現行ルール維持,A級判定条件を再検証,予測ログは評価期間中（awaiting_horizon）,prediction_log_scores,False,True,prediction_log,70,70,70
