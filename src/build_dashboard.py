@@ -137,6 +137,12 @@ def build_dashboard() -> tuple[dict, str]:
     eval_summary = evaluation_summary(evaluations, as_of=dashboard_as_of)
     asset_table = asset_performance(signals, evaluations, as_of=dashboard_as_of)
     mode = weekly_monthly_mode(weekly, monthly)
+    # 週次・月次の層の有無と鮮度は、job の中に成果物が無ければコミットされた記録で確かめる（dashboard_io の説明）。
+    # 上の mode は従来どおり job の中の表だけを見る。表示する運用モードは変えない。
+    weekly_rows, weekly_date = review_evidence(
+        len(weekly), latest_file_date("reports/weekly/*_weekly_review.md"), committed_weekly_review())
+    monthly_rows, monthly_date = review_evidence(
+        len(monthly), latest_file_date("reports/monthly/*_monthly_calibration.md"), committed_monthly_calibration())
     reason_tops = top_reason_codes(reason_table)
     generated_at_jst = format_jst(generated_dt_utc)
     generated_at_utc = format_utc(generated_dt_utc)
@@ -148,8 +154,8 @@ def build_dashboard() -> tuple[dict, str]:
         "evaluations": len(evaluations),
         "raw_evaluations": len(raw_evaluations),
         "latest_evaluations": len(extras["latest_evaluations"]),
-        "weekly_review": len(weekly),
-        "monthly_calibration": len(monthly),
+        "weekly_review": weekly_rows,
+        "monthly_calibration": monthly_rows,
         "reason_code_analysis": len(reason_table),
         "rule_update_proposals": len(rule_updates),
         "model_state_update_proposals": len(model_state_updates),
@@ -183,8 +189,8 @@ def build_dashboard() -> tuple[dict, str]:
         "latest_gpt_ledger_date": latest_gpt_ledger_date,
         "latest_evaluation_date": latest_evaluation_date,
         "latest_daily_report_date": latest_file_date("reports/*.md"),
-        "latest_weekly_review_date": latest_file_date("reports/weekly/*_weekly_review.md"),
-        "latest_monthly_calibration_date": latest_file_date("reports/monthly/*_monthly_calibration.md"),
+        "latest_weekly_review_date": weekly_date,
+        "latest_monthly_calibration_date": monthly_date,
         "latest_reason_code_analysis_date": latest_file_date("reports/reason_codes/*_reason_code_analysis.md"),
         "latest_rule_update_proposals_date": latest_file_date("reports/rule_updates/*_rule_update_proposals.md"),
         "latest_model_state_update_proposals_date": latest_file_date("reports/model_state/*_model_state_update_proposals.md"),

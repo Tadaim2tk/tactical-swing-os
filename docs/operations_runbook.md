@@ -151,7 +151,7 @@ SOXX Read Review（2026-07-07）/ Provide strong asset update（2025-12-05）
 | 系統 | 出力先 | 寿命 |
 |---|---|---|
 | ChatGPT 12:00「レビューする短期スイングモデル」 | 会話のみ | ChatGPTの会話が残る限り |
-| GitHub Actions 12:10 `weekly_review` | `results/weekly_review.csv` / `reports/weekly/*.md` | **どちらも .gitignore 済み**。実体はCI artifact のみで、retention-days の指定がゼロなので**既定の90日で消える** |
+| GitHub Actions 12:10 `weekly_review` | `results/weekly_review.csv` / `reports/weekly/*.md` | **どちらも .gitignore 済み**。実体はCI artifact のみで、retention-days の指定がゼロなので**既定の90日で消える**。2026-09-05 から1週1行を `data/weekly_review_log.csv` に追記（dashboard の鮮度はこちらで見る。§3.1） |
 
 つまり `best_module` / `next_week_mode` / `missed_r` といった週次でしか作られない値は、
 90日より前のものが既に取り出せない。これは監査 P1-7「一次データの時限消失」と同じ構造で、
@@ -417,6 +417,21 @@ Dashboard を開いて、**この順番**で見る。上ほど「土台の健全
 
 > `critical` は「失敗」ではなく「正直な状態表示」。データ蓄積前は critical が普通。
 > 重要なのは *criticalだと分かっていること*。
+
+**2026-11-17 の点検: Data Health は 2026-09 から毎日 `critical` で、色が情報を運んでいなかった。**
+要注意に出ていたのは毎日同じ4層（`weekly_review`・`monthly_calibration` が missing、`prediction_calibration`・
+`narrative_reliability` が unavailable）。11/3〜11/9 に取込が本当に止まった日（`gpt_signal_ledger` が stale）も、
+すでに critical だったので全体の色は変わらなかった。4層の中身は2種類ある。
+
+| 層 | 実際の状態 | 2026-11-17 の扱い |
+|---|---|---|
+| `weekly_review` | 毎週土曜に動いていて、`data/weekly_review_log.csv` に1週1行が残っている。dashboard は git 管理外の `results/weekly_review.csv` と `reports/weekly/*.md` を見ていたので、常に missing だった | **直した。** job の中に成果物が無ければ、コミットされた記録の最後の `week_end` で確かめる。次の週の行が来なければ 8.5日で stale |
+| `monthly_calibration` | 文書 `docs/monthly_calibration_YYYY-MM.md` は作られている（最新は 2026-10）。dashboard は git 管理外の `results/monthly_calibration.csv` と `reports/monthly/*.md` を見ていた | **直した。** 最後の対象月の末日で確かめる。翌月の文書が出なければ 35日で stale（10月分なら 12/5 ごろ） |
+| `prediction_calibration` | **一度も結果を出していない。** 入力の `results/signals.csv` が、これを動かす job（dashboard・validation_suite）のどこにも無い | 未対応。入力をつなぐか、未接続の層として critical の判定から外すかを人間が決める |
+| `narrative_reliability` | **一度も結果を出していない。** 探しているファイル名（`narrative_scores.csv` ほか3つ）を書くスクリプトが無い。専用の workflow も毎日 success のまま `unavailable` を出している | 同上 |
+
+残りの2層がある間、全体は critical のまま。表示されている「週次レビューの最新の週」「月次較正の最新の対象月」の日付は、
+作った日ではなく、それぞれ週の末日・対象月の末日。
 
 レイヤー別 status: `fresh / stale / empty / missing / unavailable / unknown_age / future_timestamp`
 （監査系は0件でも `fresh`＝allow_empty。詳細は [dashboard_health.md](dashboard_health.md)）
