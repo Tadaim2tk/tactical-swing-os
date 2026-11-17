@@ -833,4 +833,6 @@ date,asset,signal_id,weights_version,pair_type,base_r,weighted_r,diff,linked_at_
 2026-11-15,NASDAQ,20261115_NASDAQ_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-16 01:26:16 UTC
 2026-11-15,SPX,20261115_SPX_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-16 01:26:16 UTC
 2026-11-15,WTI,20261115_WTI_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-16 01:26:16 UTC
+2026-11-16,US10Y,20261116_US10Y_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-17 04:12:09 UTC
 2026-11-16,USDJPY,20261116_USDJPY_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-16 01:26:16 UTC
+2026-11-17,USDJPY,20261117_USDJPY_NONE_NO_TRADE,v0-identity,both_no_trade,0.0,0.0,0.0,2026-11-17 04:12:09 UTC
