@@ -113,3 +113,24 @@ def test_daily_bets_uses_only_returns_before_the_decision_day_and_splits_context
     broken = returns.copy()
     broken.iloc[80:] = 99.0
     assert ir.daily_bets(orders, broken, {"DXY"}).iloc[0]["bets"] == pytest.approx(got["bets"])
+
+
+def test_days_without_orders_count_as_zero_in_the_daily_average():
+    """14日のうち2日しか注文が無い期間を「1日 1.0 行」と読まない（#219 Codex P2）。"""
+    idx = pd.bdate_range("2026-07-01", periods=100)
+    rng = np.random.RandomState(2)
+    returns = pd.DataFrame({"GOLD": rng.normal(size=100), "WTI": rng.normal(size=100), "DXY": rng.normal(size=100)}, index=idx)
+    days = list(idx[80:94])                                            # 台帳の14日
+    orders = ir.attach_runs(tm.mark_runs(_ledger([(days[0].strftime("%Y-%m-%d"), "GOLD", "BUY", "B"),
+                                                  (days[5].strftime("%Y-%m-%d"), "DXY", "BUY", "B")])))
+    bets = ir.daily_bets(orders, returns, {"DXY"}, days=days)
+    assert len(bets) == 14 and int((bets["orders"] == 0).sum()) == 12
+    assert bets["orders"].mean() == pytest.approx(2 / 14)
+    assert bets["bets"].mean() == pytest.approx(2 / 14)               # 1行の日は 1 本
+    # 文脈用の資産しか無い日は、取引する資産の側を 0 行・0 本にする（平均から抜け落ちない）
+    assert bets["orders_tradable"].sum() == 1 and bets["bets_tradable"].mean() == pytest.approx(1 / 14)
+    assert not bets[["bets", "bets_tradable"]].isna().any().any()
+    # 注文が1つも無い期間でも落ちない
+    none = ir.daily_bets(orders.iloc[0:0], returns, {"DXY"}, days=days)
+    assert len(none) == 14 and none["orders"].sum() == 0 and none["bets"].mean() == 0.0
+    assert list(ir.daily_bets(orders.iloc[0:0], returns, {"DXY"}).columns) == ["date", "orders", "bets", "orders_tradable", "bets_tradable"]

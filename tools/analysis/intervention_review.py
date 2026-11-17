@@ -22,6 +22,8 @@ changelog (20) は「貼った日の14日後に、頻度・SL幅・成績を見�
 * 連動を差し引いた賭けの本数 = n² ÷ Σρ。ρ は、その日の注文どうしの、向きをそろえた日次終値リターンの
   相関（判断日より前の60営業日。全資産に値がある日だけ）。互いに打ち消す組が多い日は式の値が行数 n を
   超えるので、n で頭打ちにする。全部が同じ動きなら 1、無関係なら n。
+  1日あたりの平均は、**期間の中の台帳の日すべて**で割る。注文が無い日は 0 行・0 本として数える
+  （注文のある日だけで割ると、14日のうち2日しか注文が無い期間が「1日 1.0 行」に見える。#219 Codex P2）。
 * SL の後で戻ったか = SL になった注文のうち、判断後5本目の終値が予測方向の側にあった件数
   （tools/analysis/sl_width_vs_atr.py の close5_R > 0）。5本目がまだ無い注文は分母に入れない。
 
@@ -149,15 +151,28 @@ def load_returns(raw_dir: Path = Path("data/raw")) -> pd.DataFrame:
     return pd.DataFrame(closes).dropna().pct_change().dropna()
 
 
-def daily_bets(orders: pd.DataFrame, returns: pd.DataFrame, context: set, lookback: int = LOOKBACK) -> pd.DataFrame:
+def daily_bets(orders: pd.DataFrame, returns: pd.DataFrame, context: set, lookback: int = LOOKBACK,
+               days=None) -> pd.DataFrame:
+    """日ごとの注文の行数と、連動を差し引いた本数。days は期間の中の台帳の日（注文が無い日も含む）。
+
+    days を渡すと、注文が無い日は 0 行・0 本の行として入る。渡さなければ注文のある日だけ（従来の形）。
+    注文はあるが取引する資産が1つも無い日は、取引する資産の側を 0 行・0 本にする。"""
+    cols = ["date", "orders", "bets", "orders_tradable", "bets_tradable"]
+    by_day = {day: x for day, x in orders.groupby("date")}
+    all_days = sorted(set(by_day) | {pd.Timestamp(d) for d in (days if days is not None else [])})
     out = []
-    for day, x in orders.groupby("date"):
+    for day in all_days:
+        x = by_day.get(day)
+        if x is None:
+            out.append({"date": day, "orders": 0, "bets": 0.0, "orders_tradable": 0, "bets_tradable": 0.0})
+            continue
         hist = returns[returns.index < day].tail(lookback)
         sides = dict(zip(x["asset"], x["side_n"]))
         tradable = {a: s for a, s in sides.items() if a not in context}
         out.append({"date": day, "orders": len(sides), "bets": effective_bets(sides, hist),
-                    "orders_tradable": len(tradable), "bets_tradable": effective_bets(tradable, hist)})
-    return pd.DataFrame(out)
+                    "orders_tradable": len(tradable),
+                    "bets_tradable": effective_bets(tradable, hist) if tradable else 0.0})
+    return pd.DataFrame(out, columns=cols)
 
 
 def sl_readout(start: pd.Timestamp, end: pd.Timestamp, ledger_raw: pd.DataFrame, sim: pd.DataFrame) -> dict:
@@ -247,12 +262,17 @@ def main(argv=None) -> int:
     if returns.empty:
         print("価格が無い（先に python src/fetch_market.py）")
     else:
-        bets = daily_bets(inside, returns, context)
-        print("1日あたり平均: 注文 %.1f 行 → %.1f 本ぶん（取引する資産だけ: %.1f 行 → %.1f 本ぶん）" % (
-            bets["orders"].mean(), bets["bets"].mean(), bets["orders_tradable"].mean(), bets["bets_tradable"].mean()))
-        show = bets.copy()
-        show["date"] = show["date"].dt.strftime("%m/%d")
-        print(show.to_string(index=False, float_format=lambda v: "%.1f" % v))
+        ledger_days = sorted(ledger[(ledger["date"] >= start) & (ledger["date"] <= end)]["date"].unique())
+        bets = daily_bets(inside, returns, context, days=ledger_days)
+        if bets.empty:
+            print("期間の中に台帳の日が無い")
+        else:
+            print("1日あたり平均（台帳 %d 日で割る。注文の無い日 %d 日を含む）: 注文 %.1f 行 → %.1f 本ぶん（取引する資産だけ: %.1f 行 → %.1f 本ぶん）" % (
+                len(bets), int((bets["orders"] == 0).sum()),
+                bets["orders"].mean(), bets["bets"].mean(), bets["orders_tradable"].mean(), bets["bets_tradable"].mean()))
+            show = bets.copy()
+            show["date"] = show["date"].dt.strftime("%m/%d")
+            print(show.to_string(index=False, float_format=lambda v: "%.1f" % v))
     return 0
 
 
