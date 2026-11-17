@@ -94,7 +94,27 @@ def test_effective_bets_is_one_for_identical_moves_and_n_for_unrelated_ones():
     assert ir.effective_bets({"A": "BUY", "B": "SELL"}, returns) == 2.0
     assert ir.effective_bets({"A": "BUY"}, returns) == 1.0
     assert np.isnan(ir.effective_bets({}, returns))
-    assert np.isnan(ir.effective_bets({"Z": "BUY"}, returns))                              # 価格の無い資産だけ
+
+
+def test_effective_bets_is_unknown_without_enough_price_history():
+    """測れない日を「全部が無関係 = 行数ぶん」と数えない（#219 Codex P2）。"""
+    rng = np.random.RandomState(3)
+    returns = pd.DataFrame({"A": rng.normal(size=100), "B": rng.normal(size=100), "FLAT": np.zeros(100)})
+    two = {"A": "BUY", "B": "BUY"}
+    assert np.isnan(ir.effective_bets(two, returns.iloc[0:0]))                 # 判断日が価格の履歴より前
+    assert np.isnan(ir.effective_bets(two, returns.head(ir.MIN_HISTORY - 1)))  # 履歴が足りない
+    assert not np.isnan(ir.effective_bets(two, returns.head(ir.MIN_HISTORY)))
+    assert np.isnan(ir.effective_bets({"A": "BUY", "Z": "BUY"}, returns))      # 価格の無い資産が混じる
+    assert np.isnan(ir.effective_bets({"A": "BUY", "FLAT": "BUY"}, returns))   # 相関が出ない
+    assert ir.effective_bets({"Z": "BUY"}, returns.iloc[0:0]) == 1.0           # 1行の日は相関が要らない
+    # 日ごとの表でも NaN のまま残り、0 や行数に化けない
+    idx = pd.bdate_range("2026-07-01", periods=100)
+    dated = pd.DataFrame({"GOLD": rng.normal(size=100), "WTI": rng.normal(size=100)}, index=idx)
+    early = idx[5]
+    orders = ir.attach_runs(tm.mark_runs(_ledger([(early.strftime("%Y-%m-%d"), "GOLD", "BUY", "B"),
+                                                  (early.strftime("%Y-%m-%d"), "WTI", "BUY", "B")])))
+    got = ir.daily_bets(orders, dated, set(), days=[early]).iloc[0]
+    assert got["orders"] == 2 and np.isnan(got["bets"]) and np.isnan(got["bets_tradable"])
 
 
 def test_daily_bets_uses_only_returns_before_the_decision_day_and_splits_context_assets():

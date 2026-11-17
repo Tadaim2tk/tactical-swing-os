@@ -24,6 +24,9 @@ changelog (20) は「貼った日の14日後に、頻度・SL幅・成績を見�
   超えるので、n で頭打ちにする。全部が同じ動きなら 1、無関係なら n。
   1日あたりの平均は、**期間の中の台帳の日すべて**で割る。注文が無い日は 0 行・0 本として数える
   （注文のある日だけで割ると、14日のうち2日しか注文が無い期間が「1日 1.0 行」に見える。#219 Codex P2）。
+  判断日より前の価格が 30 日ぶんに満たない日は**測れない**として本数を出さない（価格は直近240日ぶんしか
+  取らないので、古い介入を読み直すと起きる）。測れない日を「全部が無関係 = 行数ぶん」と数えない。
+  本数の平均は測れた日だけで出し、測れなかった日数を並べて書く（#219 Codex P2）。
 * SL の後で戻ったか = SL になった注文のうち、判断後5本目の終値が予測方向の側にあった件数
   （tools/analysis/sl_width_vs_atr.py の close5_R > 0）。5本目がまだ無い注文は分母に入れない。
 
@@ -47,6 +50,7 @@ SETTLED = ("filled_sl", "filled_tp1", "filled_time_exit")
 DEFAULT_CONTEXT = ("DXY", "US10Y")
 ASSETS = ["GOLD", "BTC", "ETH", "WTI", "USDJPY", "SPX", "NASDAQ", "DXY", "US10Y", "VIX"]
 LOOKBACK = 60
+MIN_HISTORY = 30   # 相関を出すのに要る、判断日より前の日数。これに満たなければ「測れない」
 
 
 def attach_runs(orders: pd.DataFrame) -> pd.DataFrame:
@@ -123,17 +127,27 @@ def count_flips(ledger: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) ->
     return out
 
 
-def effective_bets(sides: dict, returns: pd.DataFrame) -> float:
-    """その日の注文（資産→BUY/SELL）が、連動を差し引いて何本ぶんか。returns は日次リターンの表。"""
-    assets = [a for a in sides if a in returns.columns]
-    n = len(assets)
+def effective_bets(sides: dict, returns: pd.DataFrame, min_history: int = MIN_HISTORY) -> float:
+    """その日の注文（資産→BUY/SELL）が、連動を差し引いて何本ぶんか。returns は判断日より前の日次リターン。
+
+    測れないときは NaN を返す: 価格の列が無い資産がある、履歴が min_history 日に満たない、相関が出ない
+    （値動きの無い系列）。測れないものを「無関係」として行数ぶんに数えない。1行だけの日は相関が要らないので 1。"""
+    n = len(sides)
     if n == 0:
         return float("nan")
     if n == 1:
         return 1.0
+    assets = list(sides)
+    if any(a not in returns.columns for a in assets):
+        return float("nan")
+    hist = returns[assets].dropna()
+    if len(hist) < min_history:
+        return float("nan")
+    corr = hist.corr().values
+    if np.isnan(corr).any():
+        return float("nan")
     sign = np.array([1.0 if sides[a] == "BUY" else -1.0 for a in assets])
-    corr = returns[assets].corr().values * np.outer(sign, sign)
-    total = float(np.nansum(corr))
+    total = float((corr * np.outer(sign, sign)).sum())
     if total <= 0:
         return float(n)                  # 打ち消し合いが勝っている。行数で頭打ち
     return float(min(n, n * n / total))
@@ -267,9 +281,14 @@ def main(argv=None) -> int:
         if bets.empty:
             print("期間の中に台帳の日が無い")
         else:
-            print("1日あたり平均（台帳 %d 日で割る。注文の無い日 %d 日を含む）: 注文 %.1f 行 → %.1f 本ぶん（取引する資産だけ: %.1f 行 → %.1f 本ぶん）" % (
-                len(bets), int((bets["orders"] == 0).sum()),
-                bets["orders"].mean(), bets["bets"].mean(), bets["orders_tradable"].mean(), bets["bets_tradable"].mean()))
+            unknown = int(bets["bets"].isna().sum())
+            print("1日あたりの注文（台帳 %d 日で割る。注文の無い日 %d 日を含む）: %.1f 行（取引する資産だけ: %.1f 行）" % (
+                len(bets), int((bets["orders"] == 0).sum()), bets["orders"].mean(), bets["orders_tradable"].mean()))
+            if unknown == len(bets):
+                print("連動を差し引いた本数: 測れない（判断日より前の価格が %d 日ぶんに満たない）" % MIN_HISTORY)
+            else:
+                print("連動を差し引いた本数（測れた %d 日の平均。測れなかった日 %d 日）: %.1f 本ぶん（取引する資産だけ: %.1f 本ぶん）" % (
+                    len(bets) - unknown, unknown, bets["bets"].mean(), bets["bets_tradable"].mean()))
             show = bets.copy()
             show["date"] = show["date"].dt.strftime("%m/%d")
             print(show.to_string(index=False, float_format=lambda v: "%.1f" % v))
