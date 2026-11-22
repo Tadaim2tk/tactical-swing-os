@@ -477,7 +477,7 @@ Dashboard を開いて、**この順番**で見る。上ほど「土台の健全
 | validation suite が赤 | いずれかのスクリプトが例外 | Step Summary の missing 項目を特定し、該当スクリプトをローカル実行 |
 | daily_cycle が赤、ログに `ledger freshness ALERT` | 取込の経路が止まった（Codex が本文を読めない／予備の定期タスクが止めてある・承認待ち／ChatGPT 側が出力していない）。または台帳が読めない | §1g の順で確認。欠けた日は `tools/ingest_from_export.py` でまとめて入る |
 | daily_cycle が赤、ログに `ledger freshness could not run` | 鮮度を確認するスクリプトが異常終了した | Ledger freshness ステップのログを読む。手元で `python tools/ledger_freshness.py` |
-| Dashboard workflow が `Deploy GitHub Pages` で失敗（`No artifacts named "github-pages"`） | GitHub 側の一覧が、直前に上げた成果物をまだ返さなかった（2026-11-12 に1回。直近80回で初めて） | **同じ run を再実行しない**（同じ名前の成果物が2つになり `Multiple artifacts named "github-pages"` で必ず落ちる）。`gh workflow run dashboard.yml` で新しい run を起こす |
+| Dashboard workflow が `Deploy GitHub Pages` で失敗（`No artifacts named "github-pages"`） | GitHub 側の一覧が、直前に上げた成果物をまだ返さなかった（2026-11-12 と 2026-11-22 の2回。2026-11-22 以降は同じジョブの中で30秒置いて1回やり直すので、赤になるのは2回続けて落ちたとき） | **同じ run を再実行しない**（同じ名前の成果物が2つになり `Multiple artifacts named "github-pages"` で必ず落ちる）。`gh workflow run dashboard.yml` で新しい run を起こす |
 
 > 共通原則: **「赤い＝壊れた」ではなく「赤い＝正直に異常を表示できている」**。
 > 偽の緑（false healthy / false passed / false fresh）の方が危険。
