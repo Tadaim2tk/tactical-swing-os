@@ -284,6 +284,34 @@ def test_sidecars_for_backfills_declarations_without_touching_the_ledger(repo):
     assert {p.name: p.read_text(encoding="utf-8") for p in (repo / "data").glob("*.csv")} == snap
 
 
+def test_sidecars_for_a_day_ingested_in_this_same_run_is_not_a_failure(repo):
+    """--sidecars-for に、この回で取り込む日を書いても失敗にしない。
+
+    取込も後段も済むのに「台帳にその日の行が無い（先に取込が必要）」と言って終了コード 3 を返していた
+    （台帳を、取込前の状態で見ていた）。取り込めなかった日を指定したときは、いままでどおり失敗にする。"""
+    r = _run(repo, "--apply", "--sidecars-for", "2026-11-10,2026-11-11")
+    assert "--sidecars-for 2026-11-10" not in r.stdout, r.stdout                  # この回で取り込んだ日
+    assert "[FAILED] --sidecars-for 2026-11-11: 台帳にその日の行が無い" in r.stdout   # 9行しか無く、取り込めなかった日
+    assert r.returncode == 3, r.stdout + r.stderr
+    led = _rows(repo / "data" / "signal_log.csv")
+    assert len([x for x in led if x["date"] == "2026-11-10"]) == 10
+    # 後段は1回だけ記録される（同じ日を二重に回さない）
+    assert len(_rows(repo / "data" / "leader_observations.csv")) == 1
+    assert len(_rows(repo / "data" / "invalidation_checks.csv")) == 2
+    assert len(_rows(repo / "data" / "crypto_grounds_observations.csv")) == 1
+    assert len(_rows(repo / "data" / "expected_r_basis.csv")) == 1
+
+
+def test_sidecars_for_only_the_day_ingested_in_this_run_exits_clean(repo):
+    data = json.loads((repo / "export.json").read_text(encoding="utf-8"))
+    data[0]["mapping"] = {k: v for k, v in data[0]["mapping"].items() if "2026年11月11日" not in v["message"]["content"]["parts"][0]}
+    (repo / "export.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    r = _run(repo, "--apply", "--sidecars-for", "2026-11-10")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "[FAILED]" not in r.stdout and "[ingest] 2026-11-10" in r.stdout
+    assert len(_rows(repo / "data" / "leader_observations.csv")) == 1
+
+
 def test_failed_later_stage_is_reported_and_can_be_retried(repo):
     """後段(ここでは invalidation の記録)が失敗したら終了コード 3。--sidecars-for でやり直せる(#210 Codex P2)。"""
     inv_path = repo / "data" / "invalidation_checks.csv"
