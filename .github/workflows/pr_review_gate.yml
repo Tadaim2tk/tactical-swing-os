@@ -31,17 +31,23 @@ name: Codex review gate
 # - 要約が読めない・別のコミットを指している・実行中のまま → 従来どおり待ち、timeout で fail-open（黄色）。
 #   読めないものを「レビュー済み」にはしない。
 #
-# 2026-11-24 改定(2): 修正を push したあとの head を、ゲートが自分で読んでもらう。
-# Codex が動くのは「PR を開いた」「draft を外した」「@codex review と書いた」の3つだけで、push では動かない。
+# 2026-11-24 改定(2): push されたあとの head が未レビューのまま通るとき、そう書く。古い実行は畳む。
+# Codex が動くのは「PR を開いた」「draft を外した」「レビュー依頼のコメントが書かれた」の3つだけで、push では動かない。
 # 待つだけだと、指摘を直して push した head は誰にも読まれず、20分後に fail-open で通る。上の「本当に未レビュー
 # だった10本」のうち8本がこの形だった（#188・#189・#200・#201・#202・#204・#206・#210。残り2本はレビューが
 # 20分で終わらなかった）。
-# - synchronize（push）のとき、draft でなければ、ゲートが `@codex review` と書いてから待つ（ERS の ERS-ADR-0082 と同じ）。
-#   いまの head を既に読んでもらっている・読んでいる最中なら頼まない（同じ head を二度読ませない）。
-# - 頼む直前に、PR の head がこの実行の head と同じかを確かめる（古い実行が最新の head へ頼むのを防ぐ）。
-# - 頼めなかった（POST が失敗した）回は、時間切れで fail-open にしない。「レビューが来なかった」ではなく
-#   「レビューを求めていない」ので赤にする。
-# - 同じ PR の古い実行は畳む（concurrency）。古い head を待ち続けて、あとから黄色い通知を書くのを防ぐ。
+# - **ゲートが自分で依頼を書く方式は、働かない。** PR #230 で実際に試した: ゲート（github-actions[bot]）が依頼の
+#   コメントを書くと、Codex は「Codex のアカウントを作って GitHub に接続してください」と返すだけで、読まない。
+#   依頼は Codex に接続した人のアカウントからでないと通らない。だからこの手順は入れていない。
+#   ERS の ERS-ADR-0082（2026-09-07）は同じ方式だが、ERS の PR #82 でも Codex は4回とも同じ返事をしている。
+# - 時間切れで通すときの通知を、理由ごとに分ける（fail-open の方針は変えていない。どれも通す）。
+#   (a) push された head で、push のあとに人の依頼が無く、Codex が読み始めた跡も無い
+#       → 「🟠 push されたあとの head を、誰もレビューに出していません」
+#   (b) Codex がいまの head を読み始めたが、20分で終わらなかった → 「🟡 レビュー未着…読み始めたが終わらなかった」
+#   (c) それ以外（PR を開いた・draft を外した・人が頼んだ。Codex が動くはずなのに無反応） → 従来の「🟡 レビュー未着」
+#   依頼の有無を読めなかったときは (a) にしない（「誰も頼んでいない」と言い切れないので (c)）。
+# - 同じ PR の古い実行は畳む（concurrency）。古い head を待ち続けて、あとから通知を書くのを防ぐ。
+# - tools/codex_review_state.py（2026-09 の判定器）は、このゲートからは呼ばれていない。いま効いている判定はこのファイルだけ。
 
 on:
   pull_request:
@@ -67,7 +73,6 @@ jobs:
       # issue comments（配列の並び）を読み、Codex の要約コメントが **いまの head** について何と言っているかを
       # 1語で返す: clean（completed・指摘なし）/ findings（completed・指摘あり）/ running（まだ）/ none（要約が無い・
       # 読めない・別のコミット）。投稿者は Codex の Bot に限る。JSON が壊れていれば none（緑にしない）。
-      # 頼む手順と待つ手順が同じ式を使う（片方だけ変えると、頼むかどうかと通すかどうかが食い違う）。
       # 試験は src/test_pr_review_gate_workflow.py がこの文字列をそのまま jq に渡して行う。
       SUMMARY_FILTER: |
         add // []
@@ -86,60 +91,22 @@ jobs:
           elif any($s[]; .status == "completed" and .has_any_findings == false) then "clean"
           else "running" end
     steps:
-      - id: ask
-        name: Ask Codex to review this head
-        # push では Codex は動かない。synchronize のときだけ、draft でなければ頼む。opened / reopened /
-        # ready_for_review は Codex 自身が動く場面なので、重ねて頼むと同じ head を二度読ませて枠を余計に使う。
-        if: >-
-          github.event.action == 'synchronize' &&
-          github.event.pull_request.draft == false
-        # 頼めなくても待つ側は動かす。ただし頼めなかったことは待つ側へ渡し、時間切れで fail-open にしない。
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          # 依頼のコメントはコミットを名指さない。古い実行が頼むと最新の head が読まれ、その実行は自分の
-          # head を待ち続ける。頼む前に、PR の head がこの実行の head と同じかを確かめる。
-          live=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
-          if [ "$live" != "$HEAD_SHA" ]; then
-            echo "head moved from $HEAD_SHA to $live; the newer run owns the request."
-            exit 0
-          fi
-          # いまの head を既に読んでもらった・読んでいる最中なら頼まない。数え方は待つ側と同じ
-          # （この head へのレビューがある、または要約コメントがこの head について clean / findings / running）。
-          seen=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
-            --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\" and .commit_id==\"$HEAD_SHA\")] | length" \
-            2>/dev/null | awk '{s+=$1} END {print s+0}')
-          summary_state=$( (gh api --paginate "repos/$REPO/issues/$PR/comments" 2>/dev/null \
-            | jq -rs --arg head "$HEAD_SHA" "$SUMMARY_FILTER" 2>/dev/null) || true)
-          case "$summary_state" in clean|findings|running) seen=$((seen + 1)) ;; esac
-          if [ "$seen" -gt 0 ]; then
-            echo "Codex already reviewed (or is reviewing) $HEAD_SHA; not asking again."
-            exit 0
-          fi
-          # 上の確認には時間がかかる。その間に新しい push が入りうるので、頼む直前にもう一度確かめる。
-          live=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
-          if [ "$live" != "$HEAD_SHA" ]; then
-            echo "head moved to $live while checking; the newer run owns the request."
-            exit 0
-          fi
-          gh api "repos/$REPO/issues/$PR/comments" -f body='@codex review' --silent
-          echo "asked Codex to review $HEAD_SHA"
       - name: Wait for Codex review with zero unresolved findings (max 20 min)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          ASK_OUTCOME: ${{ steps.ask.outcome }}
+          EVENT_ACTION: ${{ github.event.action }}
+          # push の時刻（synchronize のとき PR の updated_at がそれに当たる）。これより後に人が書いた依頼を数える。
+          PUSHED_AT: ${{ github.event.pull_request.updated_at }}
         run: |
           owner="${REPO%%/*}"
           name="${REPO##*/}"
           arrived=0
           summary_findings=0
+          summary_running=0
+          echo "event=${EVENT_ACTION:-} head=$HEAD_SHA pushed_at=${PUSHED_AT:-}"
           for i in $(seq 1 40); do
             # レビューは現在のhead SHAに対するものだけを数える(Codex P1対応:
             # synchronize時に旧コミットへの古いレビューで即グリーンになるのを防ぐ)。
@@ -155,6 +122,10 @@ jobs:
             # 「レビュー未着」で通していた。取り消せるのは、指摘なしを確かめて通る場合（下で exit 0）だけ。
             if [ "$summary_state" = "findings" ]; then
               summary_findings=1
+            fi
+            # Codex がいまの head を読み始めた跡。時間切れのとき「誰も頼んでいない」と書かないために覚えておく。
+            if [ "$summary_state" = "running" ]; then
+              summary_running=1
             fi
             if [ "$n" -gt 0 ] || [ "$summary_state" = "clean" ]; then
               arrived=1
@@ -218,13 +189,46 @@ jobs:
             echo "::error::Codex の要約コメントは、いまの head に指摘があると報告しているが、レビュー（指摘スレッド）を確認できない。PR の Codex のコメントを読み、修正を push するか、指摘が届いてから再実行する。"
             exit 1
           fi
-          if [ "${ASK_OUTCOME:-}" = "failure" ]; then
-            # 一度も頼めていない。push では Codex は動かないので、これは「レビューが来なかった」ではなく
-            # 「レビューを求めていない」。fail-open は Codex 側が止まったときのための道で、こちらの手が
-            # 届かなかった回に使うものではない。
-            echo "::error::Codex にレビューを頼めなかった（頼む手順が失敗した）。push では Codex は動かない。PR に「@codex review」と書いてから、このチェックを再実行する。"
-            exit 1
+          # ここから先は、いまの head を誰も読み終えていないまま通す道（fail-open。方針は変えていない）。
+          # 同じ通過でも理由が違えば打つ手が違うので、通知を分ける。
+          if [ "$summary_running" -gt 0 ]; then
+            # (b) Codex はいまの head を読み始めたが、20分で終わらなかった（#190・#191 の形）。
+            echo "Codex started reviewing this head but did not finish within 20 min — gate passes as a no-review PR."
+            {
+              echo "### ゲート: **Codexレビュー未着のまま通過(fail-open)** — 読み始めたが20分で終わらなかった"
+              echo ""
+              echo "Codex はこの head (${HEAD_SHA:0:7}) のレビューを始めたが、20分待っても結果が出なかった。"
+              echo "この緑は「レビュー済み・指摘なし」を意味しない。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            gh pr comment "$PR" --repo "$REPO" --body \
+              "🟡 **Codexレビュー未着のまま通過しました(fail-open)**。Codex はこの head (${HEAD_SHA:0:7}) を読み始めましたが、20分待っても結果が出ませんでした。この緑は「レビュー済み・指摘なし」ではありません。あとから指摘が付くことがあるので、PR の Codex のコメントを確認してください。" \
+              || echo "warning: could not post the unfinished-review notice comment"
+            exit 0
           fi
+          if [ "${EVENT_ACTION:-}" = "synchronize" ]; then
+            # (a) push された head。Codex は push では動かないので、push のあとに人が依頼を書いたかを見る。
+            # 依頼を読めなかったとき（取得の失敗）は「誰も頼んでいない」と言い切れないので、(c) に回す。
+            requested="unknown"
+            if comments_json=$(gh api --paginate "repos/$REPO/issues/$PR/comments" 2>/dev/null) && [ -n "$comments_json" ]; then
+              requested=$(printf '%s' "$comments_json" \
+                | jq -rs --arg since "${PUSHED_AT:-}" 'add // [] | [ .[] | select((.user.type // "") == "User") | select((.body // "") | test("^\\s*@codex\\s+review"; "i")) | select((.created_at // "") >= $since) ] | length' 2>/dev/null) || requested="unknown"
+            fi
+            if [ "$requested" = "0" ]; then
+              echo "No one asked Codex to review this pushed head — gate passes as an unreviewed head."
+              {
+                echo "### ゲート: **push されたあとの head が、誰にもレビューに出されないまま通過(fail-open)**"
+                echo ""
+                echo "Codex は push では動かない。この head (${HEAD_SHA:0:7}) は、push (${PUSHED_AT:-時刻不明}) のあと誰も依頼していないので、読まれていない。"
+                echo "この緑は「レビュー済み・指摘なし」を意味しない。"
+              } >> "$GITHUB_STEP_SUMMARY"
+              gh pr comment "$PR" --repo "$REPO" --body \
+                "🟠 **push されたあとの head (${HEAD_SHA:0:7}) を、誰もレビューに出していません（未レビューのまま通過）**。Codex が読むのは、PR を開いたとき・draft を外したとき・レビュー依頼のコメントが書かれたときだけで、push では動きません。push (${PUSHED_AT:-時刻不明}) より後に人が書いた依頼は 0 件で、この head は誰にも読まれていません。評価・選別の定義やコードに触る変更なら、後追いでレビューを依頼してください（依頼のコメントは、Codex に接続した人のアカウントから書きます）。" \
+                || echo "warning: could not post the unreviewed-push notice comment"
+              exit 0
+            fi
+            echo "review requests by people since the push: $requested"
+          fi
+          # (c) Codex が動くはずの場面（PR を開いた・draft を外した・人が頼んだ）で、20分たっても何も来なかった。
           # 2026-09-06: この経路で #145/#148/#149/#150 の4本が「未レビューのまま」マージされた。
           # check の結果は success なので、緑を見ただけでは「レビュー済み・指摘なし」と
           # 区別がつかない。**同じ緑が2つの意味を持つ**のは監査T1と同じ構図なので、
