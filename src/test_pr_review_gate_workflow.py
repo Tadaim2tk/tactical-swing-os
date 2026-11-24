@@ -100,9 +100,22 @@ args="$*"
 case "$args" in
   "pr comment"*) printf '%s\n' "$args" >> "$GATE_FIXTURES/posted.txt"; exit 0 ;;
   "api graphql"*) cat "$GATE_FIXTURES/unresolved.txt" 2>/dev/null || exit 1; exit 0 ;;
-  *"/pulls/"*"/reviews"*) cat "$GATE_FIXTURES/reviews_count.txt"; exit 0 ;;
+  *"/pulls/"*"/reviews"*)
+    calls=$(( $(cat "$GATE_FIXTURES/review_calls.txt" 2>/dev/null || echo 0) + 1 ))
+    echo "$calls" > "$GATE_FIXTURES/review_calls.txt"
+    # N 回目以降は reviews の取得が失敗する場面（本物の gh は何も出さずに終わる。手順側の awk が 0 にする）
+    if [ -f "$GATE_FIXTURES/reviews_fail_from.txt" ] && [ "$calls" -ge "$(cat "$GATE_FIXTURES/reviews_fail_from.txt")" ]; then exit 1; fi
+    cat "$GATE_FIXTURES/reviews_count.txt"; exit 0 ;;
   *"/issues/"*"/comments"*)
-    if [[ "$args" == *"--jq"* ]]; then cat "$GATE_FIXTURES/quota_count.txt"; else cat "$GATE_FIXTURES/comments.json"; fi
+    if [[ "$args" == *"--jq"* ]]; then cat "$GATE_FIXTURES/quota_count.txt"; exit 0; fi
+    # 要約を読む呼び出し。何回目かを数え、場面によって途中から失敗させたり、中身を差し替えたりする。
+    calls=$(( $(cat "$GATE_FIXTURES/comment_calls.txt" 2>/dev/null || echo 0) + 1 ))
+    echo "$calls" > "$GATE_FIXTURES/comment_calls.txt"
+    if [ -f "$GATE_FIXTURES/fail_from.txt" ] && [ "$calls" -ge "$(cat "$GATE_FIXTURES/fail_from.txt")" ]; then exit 1; fi
+    if [ -f "$GATE_FIXTURES/late_from.txt" ] && [ "$calls" -ge "$(cat "$GATE_FIXTURES/late_from.txt")" ]; then
+      cat "$GATE_FIXTURES/comments_late.json"; exit 0
+    fi
+    cat "$GATE_FIXTURES/comments.json"
     exit 0 ;;
 esac
 echo "unexpected gh call: $args" >&2
@@ -110,8 +123,13 @@ exit 9
 """
 
 
-def _run_gate(tmp_path: Path, *, reviews: int = 0, comments=(), unresolved="0", quota: int = 0, head: str = HEAD):
-    """ゲートの手順を走らせる。unresolved=None は GraphQL の失敗。"""
+def _run_gate(tmp_path: Path, *, reviews: int = 0, comments=(), unresolved="0", quota: int = 0, head: str = HEAD,
+              fail_comments_from: int = 0, late_comments=None, late_from: int = 0, fail_reviews_from: int = 0):
+    """ゲートの手順を走らせる。unresolved=None は GraphQL の失敗。
+
+    fail_comments_from=N: 要約を読む N 回目以降の呼び出しを失敗させる。
+    late_comments, late_from=N: N 回目以降は late_comments を返す（Codex が読み直した場面）。
+    fail_reviews_from=N: レビューを数える N 回目以降の呼び出しを失敗させる。"""
     step = _step()
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
@@ -120,6 +138,13 @@ def _run_gate(tmp_path: Path, *, reviews: int = 0, comments=(), unresolved="0", 
     (fixtures / "comments.json").write_text(json.dumps(list(comments)), encoding="utf-8")
     if unresolved is not None:
         (fixtures / "unresolved.txt").write_text("%s\n" % unresolved, encoding="utf-8")
+    if fail_comments_from:
+        (fixtures / "fail_from.txt").write_text("%d\n" % fail_comments_from, encoding="utf-8")
+    if fail_reviews_from:
+        (fixtures / "reviews_fail_from.txt").write_text("%d\n" % fail_reviews_from, encoding="utf-8")
+    if late_from:
+        (fixtures / "late_from.txt").write_text("%d\n" % late_from, encoding="utf-8")
+        (fixtures / "comments_late.json").write_text(json.dumps(list(late_comments or [])), encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name, body in (("gh", GH_STUB), ("sleep", "#!/usr/bin/env bash\nexit 0\n")):
@@ -168,6 +193,45 @@ def test_a_summary_reporting_findings_without_a_visible_review_fails_closed(tmp_
     assert out.returncode == 1, out.stdout + out.stderr
     assert posted == ""
     assert "指摘があると報告" in out.stdout
+
+
+def test_findings_seen_once_are_not_forgotten_when_a_later_poll_cannot_read_the_summary(tmp_path):
+    """39回は「指摘あり」と読め、最後の1回だけ取得に失敗する。指摘を見たあとで fail-open にしない（#229 Codex P2）。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=0, comments=[_summary(HEAD, "completed", True)], fail_comments_from=40)
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert posted == ""                                             # 「未着のまま通過」を書かない
+    assert "指摘があると報告" in out.stdout
+    assert "cannot be read now" in out.stdout                       # 最後の周は読めなかった
+
+
+def test_findings_seen_once_do_not_open_the_quota_door_either(tmp_path):
+    """指摘を見たあとで要約が読めなくなり、枠切れの通知だけが残っている場面。枠切れの文面で通さない。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=0, comments=[_summary(HEAD, "completed", True)],
+                               fail_comments_from=2, quota=1)
+    assert out.returncode == 1 and posted == ""
+
+
+def test_a_review_seen_once_keeps_the_quota_door_shut_when_later_polls_fail(tmp_path):
+    """1周目にレビュー（未解決2件）を見た。2周目からレビューの取得が失敗し、枠切れの通知だけが読める場面。
+
+    修正前は、レビューが数えられない周に枠切れの道へ入り、未解決の指摘を残したまま緑で通った。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=1, unresolved="2", quota=1, fail_reviews_from=2)
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert posted == ""                                             # 枠切れの文面でも、未着の文面でも通さない
+    assert "still unresolved after 20 min" in out.stdout
+    assert "cannot be read now" in out.stdout
+
+
+def test_findings_are_superseded_only_by_a_verified_clean_result(tmp_path):
+    """Codex が同じ head を読み直して指摘なしになった場面。確かめられたら通る。"""
+    out, posted, summary = _run_gate(tmp_path, reviews=0, comments=[_summary(HEAD, "completed", True)],
+                                     late_comments=[_summary(HEAD, "completed", False)], late_from=3)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert posted == "" and "レビュー済み・指摘なし" in summary
+    # 読み直しの途中（running）のまま時間切れなら、赤のまま
+    out2, posted2, _ = _run_gate(tmp_path / "ok", reviews=0, comments=[_summary(HEAD, "completed", True)],
+                                 late_comments=[_summary(HEAD, "running", None)], late_from=3)
+    assert out2.returncode == 1 and posted2 == ""
 
 
 def test_a_review_object_keeps_the_existing_rule_of_zero_unresolved_threads(tmp_path):

@@ -84,7 +84,12 @@ jobs:
             summary_state=$( (gh api --paginate "repos/$REPO/issues/$PR/comments" 2>/dev/null \
               | jq -rs --arg head "$HEAD_SHA" "$SUMMARY_FILTER" 2>/dev/null) || true)
             case "$summary_state" in clean|findings|running) ;; *) summary_state="none" ;; esac
-            summary_findings=0
+            # 一度でも「いまの head に指摘あり」を見たら、その後の周回で読めなくなっても忘れない（#229 Codex P2）。
+            # 毎周 0 に戻していた初版は、最後の周だけコメントの取得に失敗すると、指摘を見たあとなのに
+            # 「レビュー未着」で通していた。取り消せるのは、指摘なしを確かめて通る場合（下で exit 0）だけ。
+            if [ "$summary_state" = "findings" ]; then
+              summary_findings=1
+            fi
             if [ "$n" -gt 0 ] || [ "$summary_state" = "clean" ]; then
               arrived=1
               # 未解決のCodex指摘スレッド数。コミットを跨いで数える(古い未処理指摘も塞ぐ)。
@@ -108,8 +113,12 @@ jobs:
             elif [ "$summary_state" = "findings" ]; then
               # 要約は「いまの head に指摘あり」と言っているが、レビュー（指摘スレッド）がまだ見えない。
               # 数十秒遅れて届くことがあるので待つ。最後まで見えなければ赤にする（fail-open で通さない）。
-              summary_findings=1
               echo "Codex summary reports findings for this head, but no review is visible yet. ($i/40)"
+            elif [ "$summary_findings" -gt 0 ] || [ "$arrived" -gt 0 ]; then
+              # 前の周では、いまの head へのレビュー（または指摘ありの要約）が読めていた。今回は読めない
+              # （取得の失敗か、読み直しの途中）。枠切れの通知で通す道にも入らない。
+              # **一度レビューを見たあとで fail-open にしない。**
+              echo "Codex reviewed this head earlier in this run; it cannot be read now. Still waiting. ($i/40)"
             else
               # Codexが「レビュー枠を使い切った」とコメントしている場合、待っても永久に来ない
               # (2026-09-06に実際に発生: 一晩で10本出して枠が尽き、6本が未レビューでマージ)。
