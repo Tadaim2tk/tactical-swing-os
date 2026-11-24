@@ -747,3 +747,22 @@ def test_a_full_window_rerun_may_still_replace_a_settled_result():
     now = pd.DataFrame([{"signal_id": "S", "status": "filled_tp1", "r_result": 1.5}])
     out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS)).set_index("signal_id").loc["S"]
     assert out["status"] == "filled_tp1" and abs(out["r_result"] - 1.5) < 1e-9
+
+
+def test_a_blank_track_status_in_the_previous_file_is_not_read_as_settled():
+    """前回の CSV では、空欄の状態は欠損(NaN)として読まれる。それを「決着済み」と読んで、今回の open を消さない。
+
+    pandas 3 の astype(str) は欠損を欠損のまま返すので、isin(["", "open", "nan"]) をすり抜ける。
+    """
+    prev = pd.DataFrame([{"signal_id": "S", "status": "filled_sl", "r_result": -1.0,
+                          "half_exit_status": float("nan"), "chase_status": float("nan")}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "filled_sl", "r_result": -1.0,
+                         "half_exit_status": "open", "chase_status": "open"}])
+    for short in (frozenset(), {"S"}):
+        out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS),
+                                      short_history=short).set_index("signal_id").loc["S"]
+        if short:      # 窓が足りない行は行ごと前回のまま。前回が空欄なら空欄で、決着を捏造しない
+            assert pd.isna(out["half_exit_status"]) or out["half_exit_status"] in ("", "open")
+        else:
+            assert out["half_exit_status"] == "open" and out["chase_status"] == "open"
+        assert out["status"] == "filled_sl"

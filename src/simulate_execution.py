@@ -471,6 +471,15 @@ def history_short(ohlcv: pd.DataFrame, signal_date) -> bool:
     return anchor_idx < ATR_FLOOR_BARS
 
 
+def _text(values: pd.Series) -> pd.Series:
+    """状態の列を、欠損は空文字にして文字列で返す。
+
+    pandas 3 の astype(str) は欠損を欠損のまま返すので、そのまま isin に渡すと「空欄・open ではない」= 決着、と
+    読んでしまう。前回の CSV から読んだ列は、空欄が欠損(NaN)になっている。
+    """
+    return values.astype(object).where(values.notna(), "").astype(str)
+
+
 def _keep_finalized_rows(sim: pd.DataFrame, previous: pd.DataFrame | None,
                          short_history=frozenset()) -> pd.DataFrame:
     """前回の結果のうち、今回の実行が「知らないだけ」で消してしまうものを残す。
@@ -488,32 +497,37 @@ def _keep_finalized_rows(sim: pd.DataFrame, previous: pd.DataFrame | None,
     out = sim.set_index("signal_id")
     common = out.index.intersection(prev.index)
     new = out.loc[common].copy()                       # 今回測ったままの値(下で前回へ戻す前)
-    p_status = prev.loc[common, "status"].astype(str)
-    n_status = new["status"].astype(str)
+    p_status = _text(prev.loc[common, "status"])
+    n_status = _text(new["status"])
     short = pd.Series(common.isin(list(short_history)), index=common)
     open_regress = n_status.eq("open") & p_status.isin(_FINAL_STATUSES)
     short_regress = short & p_status.isin(_SETTLED_STATUSES)
     regress = common[(open_regress | short_regress).values]
     if len(regress):
         keep_cols = [c for c in COLUMNS if c in prev.columns and c != "signal_id"]
-        out.loc[regress, keep_cols] = prev.loc[regress, keep_cols].values
+        # 型を object にしてから入れる。今回の列が bool や float だけのとき、前回の空欄(NaN)や文字列を入れると
+        # pandas 3 は拒否する(TypeError)。行が少ない晩や、全行が測れなかった晩に当たる。最後に型を戻す。
+        out[keep_cols] = out[keep_cols].astype(object)
+        out.loc[regress, keep_cols] = prev.loc[regress, keep_cols].astype(object).values
     for st_col, val_cols in _TRACKS.items():
         if st_col not in prev.columns or st_col not in out.columns:
             continue
         cols = [st_col] + [c for c in val_cols if c in prev.columns]
-        p_final = ~prev.loc[common, st_col].astype(str).isin(_TRACK_UNKNOWN)
-        n_st = new[st_col].astype(str)
+        p_final = ~_text(prev.loc[common, st_col]).isin(_TRACK_UNKNOWN)
+        n_st = _text(new[st_col])
         back = common[(n_st.eq("open") & p_final).values]
         if len(back):
-            out.loc[back, cols] = prev.loc[back, cols].values
+            out[cols] = out[cols].astype(object)
+            out.loc[back, cols] = prev.loc[back, cols].astype(object).values
         # 3 で行ごと残した行でも、前回まだ決着していなかった併走側が今回決着していれば、そちらを使う。
         # 系列そのものが短い資産では、本体が確定したあとも窓は足りないままなので、行ごと残すだけだと
         # 併走側が open で固まる。本体が同じ確定状態で測り直せた行に限る(検査なしで測った除外行の値は使わない)。
         forward = common[(short_regress & p_status.isin(_FINAL_STATUSES) & n_status.eq(p_status)
                           & ~p_final & ~n_st.isin(_TRACK_UNKNOWN)).values]
         if len(forward):
-            out.loc[forward, cols] = new.loc[forward, cols].values
-    return out.reset_index().reindex(columns=COLUMNS)
+            out[cols] = out[cols].astype(object)
+            out.loc[forward, cols] = new.loc[forward, cols].astype(object).values
+    return out.reset_index().reindex(columns=COLUMNS).infer_objects()
 
 
 def atr_at_decision(ohlcv: pd.DataFrame, anchor_idx: int, bars: int = ATR_FLOOR_BARS) -> float:
