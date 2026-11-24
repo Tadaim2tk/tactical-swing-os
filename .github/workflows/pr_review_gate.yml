@@ -47,7 +47,8 @@ name: Codex review gate
 #   (c) それ以外（PR を開いた・draft を外した・人が頼んだ。Codex が動くはずなのに無反応） → 従来の「🟡 レビュー未着」
 #   依頼の有無を読めなかったときは (a) にしない（「誰も頼んでいない」と言い切れないので (c)）。
 # - 同じ PR の古い実行は畳む（concurrency）。古い head を待ち続けて、あとから通知を書くのを防ぐ。
-# - tools/codex_review_state.py（2026-09 の判定器）は、このゲートからは呼ばれていない。いま効いている判定はこのファイルだけ。
+# - 判定はこのファイルの中だけにある。2026-09 に書いた別の判定器（tools/codex_review_state.py）と承認スクリプト
+#   （tools/resolve_gate_ack.sh）は、一度もこのゲートにつながれないまま main に残っていたので、2026-11-24 に外した。
 
 on:
   pull_request:
