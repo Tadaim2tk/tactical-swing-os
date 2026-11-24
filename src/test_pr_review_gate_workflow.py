@@ -9,6 +9,10 @@
 読まない）ので入れていない。時間切れで通すときの通知を「誰も頼んでいない」「読み始めたが終わらなかった」
 「動くはずなのに来なかった」の3つに分けた。
 
+2026-11-25: 同じ head に前の回のレビュー（指摘は解決済み）が残っていると、Codex が読み直している最中でも
+「レビュー到着・未解決ゼロ」でその場で通っていた。読み直しの結果はマージの後に届く。読んでいる最中は通さず、
+未解決は数えて覚えておくようにした（末尾の「同じ head の読み直し」）。
+
 ここでは YAML から手順（run）と jq の式（SUMMARY_FILTER）を取り出し、`gh` と `sleep` だけを偽物に差し替えて
 そのまま bash で走らせる。文字列を眺める試験ではなく、終了コードと PR に書く文面を見る。
 """
@@ -124,7 +128,14 @@ case "$args" in
   *"/issues/"*"/comments -f body="*)
     # ゲートは PR に依頼のコメントを書かない（Codex は github-actions[bot] の依頼を読まない）。書こうとしたら落とす。
     echo "the gate must not post review requests: $args" >&2; exit 9 ;;
-  "api graphql"*) cat "$GATE_FIXTURES/unresolved.txt" 2>/dev/null || exit 1; exit 0 ;;
+  "api graphql"*)
+    # 未解決スレッドを数える呼び出し。何回目かを数え、場面によって途中から数を差し替える（新しい指摘が届いた場面）。
+    calls=$(( $(cat "$GATE_FIXTURES/thread_calls.txt" 2>/dev/null || echo 0) + 1 ))
+    echo "$calls" > "$GATE_FIXTURES/thread_calls.txt"
+    if [ -f "$GATE_FIXTURES/unresolved_late_from.txt" ] && [ "$calls" -ge "$(cat "$GATE_FIXTURES/unresolved_late_from.txt")" ]; then
+      cat "$GATE_FIXTURES/unresolved_late.txt"; exit 0
+    fi
+    cat "$GATE_FIXTURES/unresolved.txt" 2>/dev/null || exit 1; exit 0 ;;
   *"/pulls/"*"/reviews"*)
     calls=$(( $(cat "$GATE_FIXTURES/review_calls.txt" 2>/dev/null || echo 0) + 1 ))
     echo "$calls" > "$GATE_FIXTURES/review_calls.txt"
@@ -150,13 +161,16 @@ exit 9
 
 def _run_gate(tmp_path: Path, *, reviews: int = 0, comments=(), unresolved="0", quota: int = 0, head: str = HEAD,
               fail_comments_from: int = 0, late_comments=None, late_from: int = 0, fail_reviews_from: int = 0,
-              event_action: str = "opened", pushed_at: str = PUSHED_AT):
+              event_action: str = "opened", pushed_at: str = PUSHED_AT,
+              late_unresolved=None, unresolved_late_from: int = 0):
     """ゲートの手順を走らせる。unresolved=None は GraphQL の失敗。
 
     fail_comments_from=N: 要約を読む N 回目以降の呼び出しを失敗させる。
     late_comments, late_from=N: N 回目以降は late_comments を返す（Codex が読み直した場面）。
     fail_reviews_from=N: レビューを数える N 回目以降の呼び出しを失敗させる。
-    event_action: この実行を起こした出来事（opened / synchronize など）。pushed_at: push の時刻。"""
+    event_action: この実行を起こした出来事（opened / synchronize など）。pushed_at: push の時刻。
+    late_unresolved, unresolved_late_from=N: 未解決スレッドを数える N 回目以降は late_unresolved を返す
+    （新しい指摘スレッドが届いた場面）。"""
     step = _step()
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
@@ -169,6 +183,9 @@ def _run_gate(tmp_path: Path, *, reviews: int = 0, comments=(), unresolved="0", 
         (fixtures / "fail_from.txt").write_text("%d\n" % fail_comments_from, encoding="utf-8")
     if fail_reviews_from:
         (fixtures / "reviews_fail_from.txt").write_text("%d\n" % fail_reviews_from, encoding="utf-8")
+    if unresolved_late_from:
+        (fixtures / "unresolved_late_from.txt").write_text("%d\n" % unresolved_late_from, encoding="utf-8")
+        (fixtures / "unresolved_late.txt").write_text("%s\n" % late_unresolved, encoding="utf-8")
     if late_from:
         (fixtures / "late_from.txt").write_text("%d\n" % late_from, encoding="utf-8")
         (fixtures / "comments_late.json").write_text(json.dumps(list(late_comments or [])), encoding="utf-8")
@@ -193,7 +210,7 @@ def _run_gate(tmp_path: Path, *, reviews: int = 0, comments=(), unresolved="0", 
 
 
 def test_a_review_with_no_findings_passes_at_once_and_is_not_called_unreviewed(tmp_path):
-    """11/15〜11/23 の12本の形: レビューは無いが、要約がいまの head を completed・指摘なしと言っている。"""
+    """誤表示だった 33本の形: レビューは無いが、要約がいまの head を completed・指摘なしと言っている。"""
     out, posted, summary = _run_gate(tmp_path, reviews=0, comments=[_summary(HEAD, "completed", False)])
     assert out.returncode == 0, out.stdout + out.stderr
     assert posted == ""                                             # 「未着のまま通過」を書かない
@@ -380,3 +397,106 @@ def test_a_pushed_head_with_a_clean_review_passes_without_any_notice(tmp_path):
     out, posted, summary = _run_gate(tmp_path, reviews=0, comments=[_summary(HEAD, "completed", False)],
                                      event_action="synchronize")
     assert out.returncode == 0 and posted == "" and "レビュー済み・指摘なし" in summary
+
+
+# --------------------------------------------------------------------------- 同じ head の読み直し
+REREADING = "reviewing this head again"
+
+
+def test_a_reread_in_progress_is_not_overtaken_by_the_earlier_review_of_the_same_head(tmp_path):
+    """同じ head に前の回のレビュー（指摘は解決済み）があり、Codex が読み直している最中。前のレビューで先に通さない。
+
+    直す前は1周目で「レビュー到着・未解決ゼロ」として通った。--auto の予約があればそこでマージされ、
+    読み直しの結果はマージの後に届く。"""
+    out, posted, summary = _run_gate(tmp_path, reviews=1, unresolved="0", comments=[_summary(HEAD, "running", None)],
+                                     late_comments=[_summary(HEAD, "completed", False)], late_from=3)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert out.stdout.count(REREADING) == 2                         # 1・2周目は待った
+    assert posted == "" and "未解決指摘なし (1 review(s))" in summary  # 読み直しが指摘なしで終わってから通る
+
+
+def test_a_reread_that_never_finishes_passes_as_unfinished_not_as_reviewed(tmp_path):
+    """読み直しが20分で終わらない。未解決はゼロなので赤にはしないが、「レビュー済み」とも書かない。"""
+    out, posted, summary = _run_gate(tmp_path, reviews=1, unresolved="0", comments=[_summary(HEAD, "running", None)])
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert out.stdout.count(REREADING) == 40
+    assert "読み始めましたが" in posted and "🟠" not in posted
+    assert "still unresolved" not in out.stdout                     # 未解決は無い。赤の文面を出さない
+    assert "未解決指摘なし" not in summary and "読み始めたが20分で終わらなかった" in summary
+
+
+def test_unresolved_threads_stay_red_while_a_reread_is_in_progress(tmp_path):
+    """前の回の指摘が未解決のまま読み直しを頼み、読み直しが終わらない。fail-open で通さない。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=1, unresolved="2", comments=[_summary(HEAD, "running", None)])
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert posted == "" and "still unresolved after 20 min" in out.stdout
+    # 数えられなかった場合（GraphQL の失敗）も同じ
+    out2, posted2, _ = _run_gate(tmp_path / "bad", reviews=1, unresolved=None, comments=[_summary(HEAD, "running", None)])
+    assert out2.returncode == 1 and posted2 == ""
+
+
+def test_threads_resolved_during_a_reread_that_never_finishes_are_not_called_unresolved(tmp_path):
+    """読み直しの最中に、残っていた指摘を resolve した（3周目から未解決ゼロ）。読み直しは終わらない。
+
+    最後に数えた結果は未解決ゼロなので、「未解決が残っている」の赤にはしない。読み終えていないので緑の文面にもしない。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=1, unresolved="2", comments=[_summary(HEAD, "running", None)],
+                               late_unresolved="0", unresolved_late_from=3)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "still unresolved" not in out.stdout and "読み始めましたが" in posted
+    assert out.stdout.count("unresolved finding threads: 2") == 2 and out.stdout.count(REREADING) == 38
+
+
+def test_a_poll_that_cannot_read_the_summary_does_not_end_the_reread(tmp_path):
+    """1周目は「読んでいる最中」と読め、2周目から要約の取得が失敗する。読めなかったことを「読み終えた」と読まない。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=1, unresolved="0", comments=[_summary(HEAD, "running", None)],
+                               fail_comments_from=2)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "no unresolved finding threads remain" not in out.stdout  # 前のレビューでは通していない
+    assert out.stdout.count(REREADING) == 40 and "読み始めましたが" in posted
+
+
+def test_a_reread_that_ends_with_new_findings_is_red_until_they_are_resolved(tmp_path):
+    """読み直しが新しい指摘を出した。指摘スレッドが見え、要約が「指摘あり」に変わる。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=1, unresolved="0", comments=[_summary(HEAD, "running", None)],
+                               late_comments=[_summary(HEAD, "completed", True)], late_from=3,
+                               late_unresolved="1", unresolved_late_from=3)
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert posted == "" and "still unresolved after 20 min" in out.stdout
+    assert out.stdout.count(REREADING) == 2
+    # その指摘を resolve して再実行すれば通る（要約は「指摘あり」のまま。前からの手順）
+    ok, posted_ok, summary_ok = _run_gate(tmp_path / "ok", reviews=2, unresolved="0",
+                                          comments=[_summary(HEAD, "completed", True)])
+    assert ok.returncode == 0 and posted_ok == "" and "未解決指摘なし (2 review(s))" in summary_ok
+    assert REREADING not in ok.stdout                               # 読み直しの最中ではないので、待たない
+
+
+def test_findings_from_a_reread_that_are_resolved_pass_within_the_same_run(tmp_path):
+    """読み直しが「指摘あり」で終わり（3周目）、その指摘が同じ周回までに resolve されていた。再実行を待たせずに通る。
+
+    結論が「指摘あり」に変わっても「読んでいる最中」のままにしていると、未解決ゼロでも待ち続け、時間切れで赤になる。"""
+    out, posted, summary = _run_gate(tmp_path, reviews=1, unresolved="1", comments=[_summary(HEAD, "running", None)],
+                                     late_comments=[_summary(HEAD, "completed", True)], late_from=3,
+                                     late_unresolved="0", unresolved_late_from=3)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert out.stdout.count("unresolved finding threads: 1") == 2   # 1・2周目は未解決が残っていた
+    assert posted == "" and "未解決指摘なし (1 review(s))" in summary and REREADING not in out.stdout
+
+
+def test_new_threads_that_show_before_the_summary_changes_are_not_missed(tmp_path):
+    """実際に見た順番: Codex は結果（レビュー）を先に置き、2〜3秒あとで要約を書き換える。
+
+    3周目に新しい指摘スレッドが見え、要約は4周目に「指摘あり」へ変わる。その隙間の周回でも通さない。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=1, unresolved="0", comments=[_summary(HEAD, "running", None)],
+                               late_comments=[_summary(HEAD, "completed", True)], late_from=4,
+                               late_unresolved="1", unresolved_late_from=3)
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert posted == "" and "still unresolved after 20 min" in out.stdout
+
+
+def test_a_first_review_in_progress_still_waits_and_then_passes_when_it_ends_clean(tmp_path):
+    """読み直しではなく最初のレビュー（前の回のレビューは無い）。動きは変わらない: 待って、指摘なしで終われば通る。"""
+    out, posted, summary = _run_gate(tmp_path, reviews=0, comments=[_summary(HEAD, "running", None)],
+                                     late_comments=[_summary(HEAD, "completed", False)], late_from=3)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert posted == "" and "レビュー済み・指摘なし" in summary
+    assert REREADING not in out.stdout and out.stdout.count("waiting for Codex review") == 2
