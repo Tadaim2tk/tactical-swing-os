@@ -107,43 +107,77 @@ def test_effective_bets_is_unknown_without_enough_price_history():
     assert np.isnan(ir.effective_bets({"A": "BUY", "Z": "BUY"}, returns))      # 価格の無い資産が混じる
     assert np.isnan(ir.effective_bets({"A": "BUY", "FLAT": "BUY"}, returns))   # 相関が出ない
     assert ir.effective_bets({"Z": "BUY"}, returns.iloc[0:0]) == 1.0           # 1行の日は相関が要らない
-    # 日ごとの表でも NaN のまま残り、0 や行数に化けない
-    idx = pd.bdate_range("2026-07-01", periods=100)
-    dated = pd.DataFrame({"GOLD": rng.normal(size=100), "WTI": rng.normal(size=100)}, index=idx)
-    early = idx[5]
-    orders = ir.attach_runs(tm.mark_runs(_ledger([(early.strftime("%Y-%m-%d"), "GOLD", "BUY", "B"),
-                                                  (early.strftime("%Y-%m-%d"), "WTI", "BUY", "B")])))
-    got = ir.daily_bets(orders, dated, set(), days=[early]).iloc[0]
-    assert got["orders"] == 2 and np.isnan(got["bets"]) and np.isnan(got["bets_tradable"])
 
 
-def test_daily_bets_uses_only_returns_before_the_decision_day_and_splits_context_assets():
+def _frame(dates, returns):
+    """日次リターンの列から日足を作る（open/high/low は close と同じ。ここでは終値しか使わない）。"""
+    close = 100.0 * np.cumprod(1.0 + 0.01 * np.asarray(returns, dtype=float))
+    return pd.DataFrame({"date": pd.DatetimeIndex(dates), "open": close, "high": close, "low": close, "close": close})
+
+
+def _orders_on(day, sides):
+    return ir.attach_runs(tm.mark_runs(_ledger([(day.strftime("%Y-%m-%d"), a, s, "B") for a, s in sides])))
+
+
+def test_daily_bets_uses_only_bars_closed_at_decision_time_and_splits_context_assets():
     idx = pd.bdate_range("2026-07-01", periods=100)
     rng = np.random.RandomState(1)
     base = rng.normal(size=100)
-    returns = pd.DataFrame({"GOLD": base, "DXY": -base, "WTI": rng.normal(size=100)}, index=idx)
+    frames = {"GOLD": _frame(idx, base), "DXY": _frame(idx, -base), "WTI": _frame(idx, rng.normal(size=100))}
     day = idx[80]
-    orders = ir.attach_runs(tm.mark_runs(_ledger([(day.strftime("%Y-%m-%d"), "GOLD", "BUY", "B"),
-                                                  (day.strftime("%Y-%m-%d"), "DXY", "SELL", "B"),
-                                                  (day.strftime("%Y-%m-%d"), "WTI", "BUY", "B")])))
-    got = ir.daily_bets(orders, returns, {"DXY"}).iloc[0]
+    orders = _orders_on(day, [("GOLD", "BUY"), ("DXY", "SELL"), ("WTI", "BUY")])
+    got = ir.daily_bets(orders, frames, {"DXY"}).iloc[0]
     assert (got["orders"], got["orders_tradable"]) == (3, 2)
     assert got["bets"] < 2.4                     # GOLD 買いと DXY 売りは同じ賭け。3行でも2本ぶんに近い
-    # 判断日より後のリターンを壊しても結果は変わらない（先を見ていない）
-    broken = returns.copy()
-    broken.iloc[80:] = 99.0
+    # 判断日以降の足を壊しても結果は変わらない（先を見ていない）
+    broken = {a: df.copy() for a, df in frames.items()}
+    for df in broken.values():
+        df.loc[df["date"] >= day, "close"] = 1e9
     assert ir.daily_bets(orders, broken, {"DXY"}).iloc[0]["bets"] == pytest.approx(got["bets"])
+    # 週5日の資産は、前日ラベルの足が判断時に閉まっているので使う（壊すと結果が変わる）
+    assert ir.history_cutoff(day, ["GOLD", "WTI"], frames) == idx[79]
+    used = {a: df.copy() for a, df in frames.items()}
+    used["WTI"].loc[used["WTI"]["date"] == idx[79], "close"] *= 3.0
+    assert ir.daily_bets(orders, used, {"DXY"}).iloc[0]["bets"] != pytest.approx(got["bets"])
+
+
+def test_a_crypto_order_moves_the_cutoff_one_bar_earlier_for_the_whole_day():
+    """暗号資産の日足は判断の2時間後（09:00 JST）に閉まる。前日ラベルの足は使わない（#219 Codex P2）。
+
+    切る日は src/score_prediction_log.py の decision_time_anchor で決める。その日の注文に暗号資産があれば、
+    いちばん早く切れる資産に全体をそろえる。"""
+    all_days = pd.date_range("2026-07-01", periods=140)                       # 暗号資産は土日も足がある
+    weekdays = all_days[all_days.dayofweek < 5]
+    rng = np.random.RandomState(4)
+    frames = {"BTC": _frame(all_days, rng.normal(size=len(all_days))),
+              "GOLD": _frame(weekdays, rng.normal(size=len(weekdays))),
+              "WTI": _frame(weekdays, rng.normal(size=len(weekdays)))}
+    day = pd.Timestamp("2026-11-10")                                          # 火曜
+    assert ir.history_cutoff(day, ["GOLD", "WTI"], frames) == pd.Timestamp("2026-11-09")
+    assert ir.history_cutoff(day, ["BTC"], frames) == pd.Timestamp("2026-11-08")
+    assert ir.history_cutoff(day, ["BTC", "GOLD"], frames) == pd.Timestamp("2026-11-08")
+    orders = _orders_on(day, [("BTC", "SELL"), ("GOLD", "BUY")])
+    got = ir.daily_bets(orders, frames, set()).iloc[0]["bets"]
+    assert not np.isnan(got)
+    # 11/9 ラベルの足（BTC は判断時にまだ閉まっていない）を壊しても、結果は変わらない
+    broken = {a: df.copy() for a, df in frames.items()}
+    for df in broken.values():
+        df.loc[df["date"] >= pd.Timestamp("2026-11-09"), "close"] *= 5.0
+    assert ir.daily_bets(orders, broken, set()).iloc[0]["bets"] == pytest.approx(got)
+    # 価格の無い資産が混じる日、判断日より前の足が無い日は、切る日を決められない
+    assert ir.history_cutoff(day, ["BTC", "ZZZ"], frames) is None
+    assert ir.history_cutoff(pd.Timestamp("2026-07-01"), ["BTC"], frames) is None
 
 
 def test_days_without_orders_count_as_zero_in_the_daily_average():
     """14日のうち2日しか注文が無い期間を「1日 1.0 行」と読まない（#219 Codex P2）。"""
     idx = pd.bdate_range("2026-07-01", periods=100)
     rng = np.random.RandomState(2)
-    returns = pd.DataFrame({"GOLD": rng.normal(size=100), "WTI": rng.normal(size=100), "DXY": rng.normal(size=100)}, index=idx)
+    frames = {a: _frame(idx, rng.normal(size=100)) for a in ("GOLD", "WTI", "DXY")}
     days = list(idx[80:94])                                            # 台帳の14日
     orders = ir.attach_runs(tm.mark_runs(_ledger([(days[0].strftime("%Y-%m-%d"), "GOLD", "BUY", "B"),
                                                   (days[5].strftime("%Y-%m-%d"), "DXY", "BUY", "B")])))
-    bets = ir.daily_bets(orders, returns, {"DXY"}, days=days)
+    bets = ir.daily_bets(orders, frames, {"DXY"}, days=days)
     assert len(bets) == 14 and int((bets["orders"] == 0).sum()) == 12
     assert bets["orders"].mean() == pytest.approx(2 / 14)
     assert bets["bets"].mean() == pytest.approx(2 / 14)               # 1行の日は 1 本
@@ -151,6 +185,20 @@ def test_days_without_orders_count_as_zero_in_the_daily_average():
     assert bets["orders_tradable"].sum() == 1 and bets["bets_tradable"].mean() == pytest.approx(1 / 14)
     assert not bets[["bets", "bets_tradable"]].isna().any().any()
     # 注文が1つも無い期間でも落ちない
-    none = ir.daily_bets(orders.iloc[0:0], returns, {"DXY"}, days=days)
+    none = ir.daily_bets(orders.iloc[0:0], frames, {"DXY"}, days=days)
     assert len(none) == 14 and none["orders"].sum() == 0 and none["bets"].mean() == 0.0
-    assert list(ir.daily_bets(orders.iloc[0:0], returns, {"DXY"}).columns) == ["date", "orders", "bets", "orders_tradable", "bets_tradable"]
+    assert list(ir.daily_bets(orders.iloc[0:0], frames, {"DXY"}).columns) == ["date", "orders", "bets", "orders_tradable", "bets_tradable"]
+
+
+def test_a_day_without_enough_history_stays_unknown_in_the_daily_table():
+    """日ごとの表でも NaN のまま残り、0 や行数に化けない（#219 Codex P2）。"""
+    idx = pd.bdate_range("2026-07-01", periods=100)
+    rng = np.random.RandomState(5)
+    frames = {"GOLD": _frame(idx, rng.normal(size=100)), "WTI": _frame(idx, rng.normal(size=100))}
+    early = idx[5]
+    got = ir.daily_bets(_orders_on(early, [("GOLD", "BUY"), ("WTI", "BUY")]), frames, set(), days=[early]).iloc[0]
+    assert got["orders"] == 2 and np.isnan(got["bets"]) and np.isnan(got["bets_tradable"])
+    # 価格が1つも無いときも測れない（1行の日だけは 1）
+    none = ir.daily_bets(_orders_on(early, [("GOLD", "BUY"), ("WTI", "BUY")]), {}, set(), days=[early]).iloc[0]
+    assert np.isnan(none["bets"])
+    assert ir.daily_bets(_orders_on(early, [("GOLD", "BUY")]), {}, set(), days=[early]).iloc[0]["bets"] == 1.0

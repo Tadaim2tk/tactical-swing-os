@@ -20,7 +20,10 @@ changelog (20) は「貼った日の14日後に、頻度・SL幅・成績を見�
 * 向きの入れ替わり = 資産ごとに、期間の中の向きのある判断を日付順に並べて BUY⇔SELL が変わった回数。
   見送りの日は飛ばす。期間より前の判断とは比べない（何週間も前の見立てとの違いは「入れ替わり」ではない）。
 * 連動を差し引いた賭けの本数 = n² ÷ Σρ。ρ は、その日の注文どうしの、向きをそろえた日次終値リターンの
-  相関（判断日より前の60営業日。全資産に値がある日だけ）。互いに打ち消す組が多い日は式の値が行数 n を
+  相関（判断時に閉まっていた足までの60営業日。全資産に値がある日だけ）。「判断時に閉まっていた足」は
+  src/score_prediction_log.py の decision_time_anchor で決める（写しを持たない）。暗号資産の日足は判断の2時間後
+  （09:00 JST）に閉まるので、前日ラベルの足は使えない。その日の注文の資産のうち、いちばん早く切れる資産に
+  全体をそろえる（暗号資産の注文がある日は、どの資産も前々日までを使う。#219 Codex P2）。互いに打ち消す組が多い日は式の値が行数 n を
   超えるので、n で頭打ちにする。全部が同じ動きなら 1、無関係なら n。
   1日あたりの平均は、**期間の中の台帳の日すべて**で割る。注文が無い日は 0 行・0 本として数える
   （注文のある日だけで割ると、14日のうち2日しか注文が無い期間が「1日 1.0 行」に見える。#219 Codex P2）。
@@ -45,6 +48,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import throughput_metrics as tm  # noqa: E402
+from score_prediction_log import decision_time_anchor, load_ohlcv_frame  # noqa: E402
 
 SETTLED = ("filled_sl", "filled_tp1", "filled_time_exit")
 DEFAULT_CONTEXT = ("DXY", "US10Y")
@@ -153,24 +157,51 @@ def effective_bets(sides: dict, returns: pd.DataFrame, min_history: int = MIN_HI
     return float(min(n, n * n / total))
 
 
-def load_returns(raw_dir: Path = Path("data/raw")) -> pd.DataFrame:
-    closes = {}
+def load_frames(raw_dir: Path = Path("data/raw")) -> dict:
+    """資産ごとの日足。採点・執行シミュレーションと同じ読み方（load_ohlcv_frame）で読む。"""
+    frames = {}
     for asset in ASSETS:
-        path = raw_dir / f"{asset}.csv"
-        if not path.exists():
-            continue
-        df = pd.read_csv(path)
-        df.columns = [c.lower() for c in df.columns]
-        closes[asset] = pd.Series(pd.to_numeric(df["close"], errors="coerce").values, index=pd.to_datetime(df["date"]))
+        df = load_ohlcv_frame(asset, raw_dir)
+        if not df.empty:
+            frames[asset] = df
+    return frames
+
+
+def returns_table(frames: dict) -> pd.DataFrame:
+    """全資産に終値がある日だけを並べた日次リターンの表。"""
+    closes = {a: pd.Series(df["close"].values, index=df["date"]) for a, df in frames.items()}
+    if not closes:
+        return pd.DataFrame()
     return pd.DataFrame(closes).dropna().pct_change().dropna()
 
 
-def daily_bets(orders: pd.DataFrame, returns: pd.DataFrame, context: set, lookback: int = LOOKBACK,
-               days=None) -> pd.DataFrame:
-    """日ごとの注文の行数と、連動を差し引いた本数。days は期間の中の台帳の日（注文が無い日も含む）。
+def history_cutoff(day: pd.Timestamp, assets, frames: dict):
+    """その日の注文の資産について、判断時に閉まっていた最後の足の日付のうち、いちばん早いもの。
 
-    days を渡すと、注文が無い日は 0 行・0 本の行として入る。渡さなければ注文のある日だけ（従来の形）。
-    注文はあるが取引する資産が1つも無い日は、取引する資産の側を 0 行・0 本にする。"""
+    1つでも決められない資産（価格が無い、判断日より前の足が無い）があれば None。"""
+    cutoff = None
+    for asset in assets:
+        df = frames.get(asset)
+        if df is None or df.empty:
+            return None
+        _, anchor = decision_time_anchor(df, day)
+        if anchor < 0 or anchor >= len(df):
+            return None
+        closed = df["date"].iloc[anchor]
+        if cutoff is None or closed < cutoff:
+            cutoff = closed
+    return cutoff
+
+
+def daily_bets(orders: pd.DataFrame, frames: dict, context: set, lookback: int = LOOKBACK,
+               days=None) -> pd.DataFrame:
+    """日ごとの注文の行数と、連動を差し引いた本数。frames は資産ごとの日足（load_frames）。
+
+    days は期間の中の台帳の日（注文が無い日も含む）。渡すと、注文が無い日は 0 行・0 本の行として入る。
+    注文はあるが取引する資産が1つも無い日は、取引する資産の側を 0 行・0 本にする。
+    相関に使うのは、その日の注文の資産すべてで「判断時に閉まっていた」足まで（history_cutoff）。
+    切る日を決められない日は測れない（NaN）。"""
+    returns = returns_table(frames)
     cols = ["date", "orders", "bets", "orders_tradable", "bets_tradable"]
     by_day = {day: x for day, x in orders.groupby("date")}
     all_days = sorted(set(by_day) | {pd.Timestamp(d) for d in (days if days is not None else [])})
@@ -180,12 +211,20 @@ def daily_bets(orders: pd.DataFrame, returns: pd.DataFrame, context: set, lookba
         if x is None:
             out.append({"date": day, "orders": 0, "bets": 0.0, "orders_tradable": 0, "bets_tradable": 0.0})
             continue
-        hist = returns[returns.index < day].tail(lookback)
         sides = dict(zip(x["asset"], x["side_n"]))
         tradable = {a: s for a, s in sides.items() if a not in context}
-        out.append({"date": day, "orders": len(sides), "bets": effective_bets(sides, hist),
+
+        def bets_of(group: dict) -> float:
+            if len(group) == 1:
+                return 1.0                       # 1行の日は相関が要らない
+            cutoff = history_cutoff(day, group, frames)
+            if cutoff is None or returns.empty:
+                return float("nan")
+            return effective_bets(group, returns[returns.index <= cutoff].tail(lookback))
+
+        out.append({"date": day, "orders": len(sides), "bets": bets_of(sides),
                     "orders_tradable": len(tradable),
-                    "bets_tradable": effective_bets(tradable, hist) if tradable else 0.0})
+                    "bets_tradable": bets_of(tradable) if tradable else 0.0})
     return pd.DataFrame(out, columns=cols)
 
 
@@ -272,12 +311,12 @@ def main(argv=None) -> int:
     print("合計 %d 回: " % sum(flips.values()) + "、".join(f"{a} {n}" for a, n in sorted(flips.items(), key=lambda kv: -kv[1]) if n))
 
     print("\n## 5. 1日の注文は、連動を差し引いて何本ぶんか")
-    returns = load_returns()
-    if returns.empty:
+    frames = load_frames()
+    if not frames:
         print("価格が無い（先に python src/fetch_market.py）")
     else:
         ledger_days = sorted(ledger[(ledger["date"] >= start) & (ledger["date"] <= end)]["date"].unique())
-        bets = daily_bets(inside, returns, context, days=ledger_days)
+        bets = daily_bets(inside, frames, context, days=ledger_days)
         if bets.empty:
             print("期間の中に台帳の日が無い")
         else:
