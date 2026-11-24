@@ -7,10 +7,11 @@
 出すもの（節番号は 2026-10 の文書と同じ並び）:
   0 売買頻度（月別の注文・見立て、ALERT 区間）
   1 SL: 月別の SL率と合計R、申告SL幅÷ATR10 の月別中央値、併走 atr_floor の差
+    （ATR10 は執行シミュレーションと同じ関数で、判断時に閉まっていた足までの10本）
   2 regime 6語の遵守率と月別分布
   3 主役の申告 vs 機械判定 LEADER_V1、申告主役への判断の成績
   4 週次 crypto 予測の検算（期日終値、予測時の価格は実行前に閉じた土曜終値）
-  5 invalidation fired の時系列（手遅れ / 降りられた / 未約定）
+  5 invalidation fired の時系列（手遅れ / 降りられた / 未約定 / 発動日が幅でしか分からない）
   6 併走観測 chase / half_exit / forgone（2026-09-09 以降）
   7 win_prob の較正（月別）
   8 対象月の介入の前後14日
@@ -31,6 +32,8 @@ import pandas as pd
 HERE = Path(__file__).resolve()
 sys.path.insert(0, str(HERE.parents[2] / "src"))
 import throughput_metrics as tm  # noqa: E402
+from score_prediction_log import decision_time_anchor, load_ohlcv_frame  # noqa: E402
+from simulate_execution import atr_at_decision  # noqa: E402
 
 ASSETS = ["GOLD", "BTC", "ETH", "WTI", "USDJPY", "SPX", "NASDAQ", "DXY", "US10Y", "VIX"]
 FINAL = {"filled_sl", "filled_tp1", "filled_time_exit"}
@@ -78,6 +81,7 @@ class Prices:
     def __init__(self, root: Path):
         self.root = root
         self.cache: dict[str, pd.DataFrame | None] = {}
+        self.ohlcv: dict[str, pd.DataFrame] = {}
 
     def get(self, asset: str) -> pd.DataFrame | None:
         if asset in self.cache:
@@ -99,17 +103,33 @@ class Prices:
         self.cache[asset] = df.set_index("date")[["open", "high", "low", "close"]]
         return self.cache[asset]
 
-    def atr10_before(self, asset: str, day: pd.Timestamp) -> float:
-        p = self.get(asset)
-        if p is None:
+    def atr10_at_decision(self, asset: str, day: pd.Timestamp) -> float:
+        """判断時(07:00 JST)に閉まっていた足までの10本の ATR。執行シミュレーションの atr_floor と同じ関数で出す。
+
+        初版(atr10_before)は「日付が判断日より前の足」で切っていた。週5日の資産はそれで判断時に閉まっている足と一致するが、
+        暗号資産の UTC 日足は、前日のラベルの足が 09:00 JST に閉じるので、判断の2時間後までの値動きを含む。
+        執行シミュレーション・採点・sl_width_vs_atr.py は decision_time_anchor(暗号資産は1本手前)で切っており、
+        月次だけが別の10本を見ていた(2026-11-25。暗号資産の 54 注文で ATR が −22%〜+19% 違った)。
+        写しを持つと片方だけずれるので、ここでは測り方を持たず、同じ関数を呼ぶ。
+        """
+        if asset not in self.ohlcv:
+            self.ohlcv[asset] = load_ohlcv_frame(asset, raw_dir=self.root / "data" / "raw")
+        o = self.ohlcv[asset]
+        if o.empty or pd.isna(day):
             return np.nan
-        d = p[p.index < day]
-        if len(d) < 11:
-            return np.nan
-        h, l, c = d["high"], d["low"], d["close"]
-        pc = c.shift(1)
-        tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
-        return float(tr.tail(10).mean())
+        _k, anchor_idx = decision_time_anchor(o, day)
+        return atr_at_decision(o, anchor_idx)
+
+
+def fire_window_start(checks: pd.DataFrame, signal_id: str, check_date: pd.Timestamp, signal_date: pd.Timestamp) -> pd.Timestamp:
+    """fired と答えた確認について、「これより後に発動した」と言える日を返す。
+
+    同じ判断への、これより前の確認のうち、最後に not_fired と答えた日。無ければ判断日。
+    unknown は「まだ発動していない」の証拠にならないので、幅を縮めない。
+    """
+    prior = checks[(checks["signal_id"] == signal_id) & (checks["check_date"] < check_date)
+                   & (checks["invalidation_fired"] == "not_fired")]
+    return prior["check_date"].max() if len(prior) else signal_date
 
 
 def build(root: Path, month: str) -> tuple[str, dict]:
@@ -190,14 +210,19 @@ def build(root: Path, month: str) -> tuple[str, dict]:
         b = led[led["order"] & (led["risk_pct"] > 0)].copy()
         b["mid"] = (b["entry_low"] + b["entry_high"]) / 2
         b["sl_w"] = (b["mid"] - b["sl"]).abs()
-        b["atr10"] = [prices.atr10_before(a, d) for a, d in zip(b["asset"], b["date"])]
+        b["atr10"] = [prices.atr10_at_decision(a, d) for a, d in zip(b["asset"], b["date"])]
         b["sl_atr"] = b["sl_w"] / b["atr10"]
         if b["atr10"].notna().any():
-            t2 = b.groupby("month").agg(n=("sl_atr", "size"), sl_atr_med=("sl_atr", "median"),
+            # rows = 注文の行数、measured = SL幅と ATR10 の両方が取れて、中央値と below_1atr に入った行数。
+            # 初版は rows を n と書いていた。水準の欠けた行や価格系列の無い資産があると、n は中央値の母数より大きい
+            # (2026-06 は n=29、中央値に入っていたのは 23)。
+            t2 = b.groupby("month").agg(rows=("sl_atr", "size"), measured=("sl_atr", "count"), sl_atr_med=("sl_atr", "median"),
                                         below_1atr=("sl_atr", lambda s: int((s < 1.0).sum()))).round(2)
             t2.index = t2.index.astype(str)
             out.append("")
-            out.append("申告SL幅÷ATR10（判断日の前日までの10本）の月別中央値と、1.0 未満の件数:")
+            out.append("申告SL幅÷ATR10 の月別中央値と、1.0 未満の件数。ATR10 は判断時に閉まっていた足までの10本"
+                       "（週5日の資産は前日まで、暗号資産は前々日まで。執行シミュレーションの atr_floor と同じ切り方）。"
+                       "rows は注文の行数、measured はそのうち比率を測れた行数（中央値と 1.0 未満の件数は measured の中で数える）:")
             out.append("")
             out.append(_md(t2))
             R["sl_atr_by_month"] = t2.reset_index().astype(str).to_dict("records")
@@ -307,43 +332,70 @@ def build(root: Path, month: str) -> tuple[str, dict]:
         if ic.empty:
             out.append("_invalidation_check が記録されていない_")
             return
-        ic["check_date"] = pd.to_datetime(ic["check_date"])
+        ic["check_date"] = pd.to_datetime(ic["check_date"], errors="coerce")
+        ic = ic.dropna(subset=["check_date"]).sort_values("check_date", kind="stable")
         out.append(f"verdicts: {ic['invalidation_fired'].value_counts().to_dict()}")
+        fired_all = ic[ic["invalidation_fired"] == "fired"]
+        # 同じ判断が翌日も fired と答えるのは、同じ1回の発動の再確認。「報告」は最初の1行だけ。
+        fired = fired_all.drop_duplicates("signal_id", keep="first")
         rows = []
-        for _, fr in ic[ic["invalidation_fired"] == "fired"].iterrows():
-            sid = fr["signal_id"]
+        for _, fr in fired.iterrows():
+            sid, check = fr["signal_id"], fr["check_date"]
             L = led[led["signal_id"] == sid]
             S = sim[sim["signal_id"] == sid] if not sim.empty else pd.DataFrame()
             if L.empty:
-                rows.append({"signal_id": sid, "check": fr["check_date"].date(), "kind": "台帳に無い"})
+                rows.append({"signal_id": sid, "check": check.date(), "kind": "台帳に無い"})
                 continue
             L = L.iloc[0]
             S = S.iloc[0] if len(S) else None
             p = prices.get(L["asset"])
             if p is None or S is None:
-                rows.append({"signal_id": sid, "check": fr["check_date"].date(), "kind": "価格かsimが無い"})
+                rows.append({"signal_id": sid, "check": check.date(), "kind": "価格かsimが無い"})
                 continue
             sign = 1 if L["side_n"] == "BUY" else -1
-            before = p[p.index < fr["check_date"]]
-            after = p[p.index >= fr["check_date"]]
-            obs_bar = before.index[-1] if len(before) else pd.NaT
-            exit_px = float(after["open"].iloc[0]) if len(after) else np.nan
             fill_date = pd.to_datetime(S["fill_date"]) if isinstance(S["fill_date"], str) and S["fill_date"] else pd.NaT
             exit_date = pd.to_datetime(S["exit_date"]) if isinstance(S["exit_date"], str) and S["exit_date"] else pd.NaT
             sim_r = float(S["r_result"]) if pd.notna(S["r_result"]) else np.nan
-            if S["status"] == "no_fill" or pd.isna(fill_date) or (pd.notna(obs_bar) and fill_date > obs_bar):
-                kind, r_on = "未約定(注文取消で済む)", 0.0
-            elif pd.notna(exit_date) and pd.notna(obs_bar) and exit_date <= obs_bar:
-                kind, r_on = f"手遅れ(既に {S['status']})", sim_r
-            else:
-                kind = "降りられた"
-                r_on = sign * (exit_px - float(S["fill_price"])) / float(S["risk_unit"]) if not np.isnan(exit_px) else np.nan
-            rows.append({"signal_id": sid, "check": fr["check_date"].date(), "sim_status": S["status"],
+
+            def judge(report_day, S=S, p=p, sign=sign, fill_date=fill_date, exit_date=exit_date, sim_r=sim_r):
+                """report_day の朝に発動を知らされたとして、そのときこの注文がどうなっていたか。"""
+                before = p[p.index < report_day]
+                after = p[p.index >= report_day]
+                obs_bar = before.index[-1] if len(before) else pd.NaT
+                exit_px = float(after["open"].iloc[0]) if len(after) else np.nan
+                if S["status"] == "no_fill" or pd.isna(fill_date) or (pd.notna(obs_bar) and fill_date > obs_bar):
+                    return "未約定(注文取消で済む)", 0.0
+                if pd.notna(exit_date) and pd.notna(obs_bar) and exit_date <= obs_bar:
+                    return f"手遅れ(既に {S['status']})", sim_r
+                return "降りられた", (sign * (exit_px - float(S["fill_price"])) / float(S["risk_unit"]) if not np.isnan(exit_px) else np.nan)
+
+            kind, r_on = judge(check)
+            # この fired が起きえた取引の幅: 前の確認(not_fired)か判断日から、fired の確認の前日まで。
+            # check_date は「聞いた日」であって「発動した日」ではない(2026-09-09 は5営業日ぶんをまとめて聞き直した)。
+            start = fire_window_start(ic, sid, check, L["date"])
+            window = p.index[(p.index >= start) & (p.index < check)]
+            width: object = len(window)
+            if len(p) == 0 or start < p.index[0]:
+                # 価格の窓(直近240日ぶん)が幅の始まりに届かない。窓の先頭の足で降りたことにしない。
+                kind, r_on, width = "価格の窓の外(測り直せない)", np.nan, ""
+            elif len(window) > 1:
+                # 幅が2本以上。最も早い報告(幅の最初の取引で発動し、次の朝に知らされた)でも結論が同じなら、そのまま数える。
+                earliest, _ = judge(window[1])
+                same = kind.startswith("未約定") or (kind.startswith("手遅れ") and earliest.startswith("手遅れ"))
+                if not same:
+                    kind = f"発動日が幅でしか分からない({len(window)}本。最も早い報告なら{earliest.split('(')[0]})"
+                    r_on = np.nan
+            rows.append({"signal_id": sid, "check": check.date(), "window_bars": width, "sim_status": S["status"],
                          "sim_r": round(sim_r, 2) if not np.isnan(sim_r) else "", "kind": kind,
                          "r_if_exit_on_fired": round(r_on, 2) if not (isinstance(r_on, float) and np.isnan(r_on)) else ""})
         t = pd.DataFrame(rows)
         out.append("")
         out.append(_md(t))
+        out.append("")
+        out.append("window_bars は、前の確認(not_fired。無ければ判断日)から fired の確認までにあった取引の本数。"
+                   "1本なら、発動はその1本の中で起き、翌朝に知らされている。")
+        if len(fired_all) > len(fired):
+            out.append(f"同じ判断への fired の再確認 {len(fired_all) - len(fired)} 行は数えていない（最初の報告だけを数える）。")
         if len(t) and "kind" in t:
             kinds = t["kind"].str.split("(").str[0].value_counts().to_dict()
             out.append("")
@@ -351,7 +403,12 @@ def build(root: Path, month: str) -> tuple[str, dict]:
             ok = t[t["kind"] == "降りられた"]
             if len(ok):
                 out.append(f"降りられた {len(ok)} 件: 既定 {pd.to_numeric(ok['sim_r'], errors='coerce').sum():.2f}R vs 発動で降りる {pd.to_numeric(ok['r_if_exit_on_fired'], errors='coerce').sum():.2f}R")
+            wide = t[t["kind"].str.startswith("発動日が幅でしか分からない")]
+            if len(wide):
+                out.append(f"発動日が幅でしか分からない {len(wide)} 件は、降りられた・手遅れ・未約定のどれにも数えていない。"
+                           "確認と確認の間に取引が2本以上あり、最も早く知らされた場合と、実際に知らされた日とで結論が変わる。")
             R["fired_kinds"] = kinds
+            R["fired"] = t.astype(str).to_dict("records")
     section("5. invalidation が fired になった判断 — 報告は決着の前か後か", s5)
 
     # ---------------------------------------------------------------- 6
@@ -398,7 +455,8 @@ def build(root: Path, month: str) -> tuple[str, dict]:
             lo, hi = target.start_time - pd.Timedelta(days=14), target.end_time.normalize()
             t = t[(t["date"] >= lo) & (t["date"] <= hi)]
             t["date"] = t["date"].dt.date
-        out.append(_md(t, "_対象月に介入なし（config/interventions.json）_"))
+        # 行を絞ったあとの行番号を表に出さない(pandas 2 は「index | 13」の列が付き、pandas 3 は付かなかった)
+        out.append(_md(t.reset_index(drop=True), "_対象月に介入なし（config/interventions.json）_"))
     section("8. 対象月とその直前の介入の前後14日（注文・見立ての実数）", s8)
 
     out += ["## 決定待ち（人間が書く）", "", "- （数値の採否・プロンプト変更・観察継続の判断をここに。空のまま提出してよい）", "",
