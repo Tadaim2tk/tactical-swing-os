@@ -39,7 +39,8 @@ name: Codex review gate
 # - **ゲートが自分で依頼を書く方式は、働かない。** PR #230 で実際に試した: ゲート（github-actions[bot]）が依頼の
 #   コメントを書くと、Codex は「Codex のアカウントを作って GitHub に接続してください」と返すだけで、読まない。
 #   依頼は Codex に接続した人のアカウントからでないと通らない。だからこの手順は入れていない。
-#   ERS の ERS-ADR-0082（2026-09-07）は同じ方式だが、ERS の PR #82 でも Codex は4回とも同じ返事をしている。
+#   ERS の ERS-ADR-0082（2026-09-07）は同じ方式だが、ERS の PR #82 でも Codex は8回とも同じ返事をしている
+#   （初版は「4回」と書いたが、一覧が途中で切れていた数字。2026-11-25 に全件を数え直した）。
 # - 時間切れで通すときの通知を、理由ごとに分ける（fail-open の方針は変えていない。どれも通す）。
 #   (a) push された head で、push のあとに人の依頼が無く、Codex が読み始めた跡も無い
 #       → 「🟠 push されたあとの head を、誰もレビューに出していません」
@@ -49,6 +50,17 @@ name: Codex review gate
 # - 同じ PR の古い実行は畳む（concurrency）。古い head を待ち続けて、あとから通知を書くのを防ぐ。
 # - 判定はこのファイルの中だけにある。2026-09 に書いた別の判定器（tools/codex_review_state.py）と承認スクリプト
 #   （tools/resolve_gate_ack.sh）は、一度もこのゲートにつながれないまま main に残っていたので、2026-11-24 に外した。
+#
+# 2026-11-25 改定: Codex が同じ head を読み直している最中は、前の回のレビューで先に通さない。
+# 同じ head に前の回のレビュー（指摘は解決済み）が残っていると、読み直しを頼んだ直後でも「レビュー到着・未解決ゼロ」で
+# その場で通っていた。--auto の予約があればそこでマージされ、読み直しの結果はマージの後に届く（このゲートが防ぐために
+# 在る #115-#117 の形）。ERS の同型のゲートを直したとき（ERS の PR 92）に Codex が指摘した穴で、こちらにも残っていた。
+# - 要約が「いまの head を読んでいる最中」と言うあいだは通さない。読めなかった周回では、最後に読めた内容に従う
+#   （読めなかったことを「読み終えた」と読まない）。
+# - そのあいだも未解決スレッドは数えて覚えておく。時間切れのとき、最後に数えた結果が未解決（または数えられなかった）
+#   なら赤。未解決ゼロのまま読み直しが終わらなければ、(b) の通知つきで通す（Codex 側の停止。方針は変えていない）。
+# - 入れていないもの: 要約が先に「指摘あり」へ変わり、新しい指摘スレッドが遅れて見える順番への備え。ERS の PR 92 で
+#   見た3回は、どれも結果（レビュー）が先で、要約の書き換えが2〜3秒あとだった。その順番ならこの改定で足りる。
 
 on:
   pull_request:
@@ -107,6 +119,10 @@ jobs:
           arrived=0
           summary_findings=0
           summary_running=0
+          # 最後に読めた要約が「いまの head を読んでいる最中」だった（読めなかった周回では前の値を持ち越す）。
+          rereading=0
+          # 最後に未解決スレッドを数えたとき、残っていた（または数えられなかった）。
+          open_findings=0
           echo "event=${EVENT_ACTION:-} head=$HEAD_SHA pushed_at=${PUSHED_AT:-}"
           for i in $(seq 1 40); do
             # レビューは現在のhead SHAに対するものだけを数える(Codex P1対応:
@@ -128,16 +144,34 @@ jobs:
             if [ "$summary_state" = "running" ]; then
               summary_running=1
             fi
+            # Codex がいまの head を読んでいる最中かどうか。要約がこの head について結論（指摘なし・指摘あり）を
+            # 言ったら 0 に戻す。**読めなかった周回（none）では変えない。** 読めなかったことを「読み終えた」と
+            # 読むと、取得が1回失敗しただけで、下の「前の回のレビューで先に通さない」が外れる。
+            case "$summary_state" in
+              running) rereading=1 ;;
+              clean|findings) rereading=0 ;;
+            esac
             if [ "$n" -gt 0 ] || [ "$summary_state" = "clean" ]; then
               arrived=1
               # 未解決のCodex指摘スレッド数。コミットを跨いで数える(古い未処理指摘も塞ぐ)。
               # GraphQL失敗時は unknown のまま待ち続け、最終的に赤に倒す(安全側)。
+              # 読み直しの最中でも数えて覚えておく（数えるのまでやめると、未解決が残ったまま読み直しが
+              # 終わらなかったときに (b) の fail-open で通ってしまう）。
               unresolved=$(gh api graphql \
                 -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{author{login}}}}}}}}' \
                 -f owner="$owner" -f name="$name" -F number="$PR" \
                 --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not) | select((.comments.nodes[0].author.login // "") | startswith("chatgpt-codex-connector"))] | length' \
                 2>/dev/null || echo "unknown")
-              if [ "$unresolved" = "0" ]; then
+              if [ "$unresolved" != "0" ]; then
+                open_findings=1
+                echo "Codex review arrived; unresolved finding threads: $unresolved — address them in this PR. ($i/40)"
+              elif [ "$rereading" -gt 0 ]; then
+                # **Codex はいまこの head を読み直している。** 同じ head への前の回のレビュー（指摘は解決済み）で
+                # 先に通さない。先に通すと、--auto の予約がここでマージし、読み直しの結果はマージの後に届く。
+                # 読み終われば、次の周回で結論（指摘なしなら通る・指摘ありなら未解決スレッドを待つ）に進む。
+                open_findings=0
+                echo "Codex is reviewing this head again; the earlier review has no unresolved threads, but the gate waits for the new result. ($i/40)"
+              else
                 if [ "$n" -gt 0 ]; then
                   echo "Codex review arrived ($n review(s)) and no unresolved finding threads remain."
                   echo "### ゲート: Codexレビュー済み・未解決指摘なし ($n review(s))" >> "$GITHUB_STEP_SUMMARY"
@@ -147,7 +181,6 @@ jobs:
                 fi
                 exit 0
               fi
-              echo "Codex review arrived; unresolved finding threads: $unresolved — address them in this PR. ($i/40)"
             elif [ "$summary_state" = "findings" ]; then
               # 要約は「いまの head に指摘あり」と言っているが、レビュー（指摘スレッド）がまだ見えない。
               # 数十秒遅れて届くことがあるので待つ。最後まで見えなければ赤にする（fail-open で通さない）。
@@ -182,7 +215,10 @@ jobs:
             fi
             sleep 30
           done
-          if [ "$arrived" -gt 0 ]; then
+          # 最後に数えたとき未解決が残っていた（または数えられなかった）なら赤。「レビューを見たかどうか」（arrived）
+          # ではなく、数えた結果で決める。読み直しの最中は未解決ゼロでも通さずに待つので、レビューを見たことと
+          # 未解決が残っていることは、もう同じではない。
+          if [ "$open_findings" -gt 0 ]; then
             echo "::error::Codex findings are still unresolved after 20 min. Push a fix and/or resolve the threads, then re-run this check."
             exit 1
           fi
