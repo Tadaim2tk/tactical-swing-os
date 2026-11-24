@@ -356,13 +356,19 @@ def main(argv=None) -> int:
     ledger_dates = {r["signal_id"]: r["date"] for r in (_ledger_rows() if args.apply else ledger)}
     redo = [d.strip() for d in args.sidecars_for.split(",") if d.strip()]
     by_day = {d: t for d, _n, t in entries}
+    # この回で取り込んだ日は、下の流れでそのまま後段も記録される。`counts` は取込前の台帳なので、そこに無いことを
+    # 理由に「先に取込が必要」と言わない（取込も後段も済むのに、[FAILED] と終了コード 3 を出していた）。
+    ingested_days = {x for x, _ in ingested}
     for d in redo:
         if d not in by_day:
             failures.append(f"--sidecars-for {d}: エクスポートにその日の本文が無い")
+        elif d in ingested_days:
+            continue
         elif d not in counts:
             failures.append(f"--sidecars-for {d}: 台帳にその日の行が無い（先に取込が必要）")
-        elif d not in [x for x, _ in ingested]:
+        else:
             ingested.append((d, by_day[d]))
+            ingested_days.add(d)
     for day, text in ingested:
         leader = find_leader(text)
         if leader and args.apply:
