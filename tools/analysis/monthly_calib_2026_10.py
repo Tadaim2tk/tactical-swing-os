@@ -27,6 +27,8 @@ pd.set_option("display.max_columns", 60)
 
 ASSETS = ["GOLD", "BTC", "ETH", "WTI", "USDJPY", "SPX", "NASDAQ", "DXY", "US10Y", "VIX"]
 FINAL = {"filled_sl", "filled_tp1", "filled_time_exit"}
+# SL 2倍の指示(changelog (4))が最初に効いた定時実行の日。保存は 7/17、最初の実行は 7/18 07:00。
+SL_X2_FIRST_RUN = "2026-07-18"
 R: dict = {}
 
 
@@ -98,11 +100,14 @@ def main() -> int:
 
     # ------------------------------------------------------------------ 1. SL幅
     say("1. (13) SL幅を通常へ戻した後の SL率・実損 — 執行シミュレーション（確定行のみ）")
-    # 左閉右開 [a, b) にする(#201 Codex P2: 既定の右閉だと 7/16 当日の3件が「~7/15」に入り、
-    # 1b の日付条件(date < 2026-07-16 等)と食い違っていた)。境界は介入日そのもの。
-    bins = [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-07-16"), pd.Timestamp("2026-09-01"),
+    # 左閉右開 [a, b) にする(#201 Codex P2: 既定の右閉だと境界の日の行が前の期間に入り、1b の日付条件と食い違っていた)。
+    # 境界は、その指示が最初に効いた定時実行の日(SL_X2_FIRST_RUN ほか)。
+    # 訂正 2026-11-24: 初版は 7/16 で区切っていた。7/16 は (1)〜(3) が最初に効いた日で、SL 2倍((4))は 7/17 に保存、
+    # 最初に効いたのは 7/18 07:00 の実行(docs/gpt_prompt_changelog.md (4))。7/16・7/17 の決着5件(SL幅は 0.32〜0.75 ATR で
+    # 2倍になっていない)を「SL2倍」に数えていた。
+    bins = [pd.Timestamp("2026-01-01"), pd.Timestamp(SL_X2_FIRST_RUN), pd.Timestamp("2026-09-01"),
             pd.Timestamp("2026-09-16"), pd.Timestamp("2027-01-01")]
-    labels = ["~7/15", "7/16-8/31(SL2倍)", "9/1-9/15", "9/16-"]
+    labels = ["~7/17", "7/18-8/31(SL2倍)", "9/1-9/15", "9/16-"]
     sim["period"] = pd.cut(sim["date"], bins, labels=labels, right=False)
     f = sim[sim["status"].isin(FINAL)]
     t1 = f.groupby("period").agg(n=("r_result", "size"), sl=("status", lambda s: (s == "filled_sl").sum()),
@@ -120,8 +125,9 @@ def main() -> int:
     b["sl_w"] = (b["mid"] - b["sl"]).abs()
     b["atr10"] = [atr10_before(prices[a], d) if a in prices else np.nan for a, d in zip(b["asset"], b["date"])]
     b["sl_atr"] = b["sl_w"] / b["atr10"]
-    b["period"] = np.where(b["date"] < "2026-07-16", "~7/15", np.where(b["date"] < "2026-09-01", "7/16-8/31", np.where(b["date"] < "2026-09-16", "9/1-9/15", "9/16-")))
-    t1b = b.groupby(["period"]).agg(n=("sl_atr", "size"), sl_atr_med=("sl_atr", "median")).round(2)
+    b["period"] = np.where(b["date"] < SL_X2_FIRST_RUN, "~7/17", np.where(b["date"] < "2026-09-01", "7/18-8/31", np.where(b["date"] < "2026-09-16", "9/1-9/15", "9/16-")))
+    # rows は注文の行数、measured は ATR10 が測れて中央値に入った行数(初版は rows を n と書いていた)。
+    t1b = b.groupby(["period"]).agg(rows=("sl_atr", "size"), measured=("sl_atr", "count"), sl_atr_med=("sl_atr", "median")).round(2)
     print(t1b.to_string())
     t1c = b[b["date"] >= "2026-09-16"].groupby("asset").agg(n=("sl_atr", "size"), sl_atr_med=("sl_atr", "median")).round(2)
     print("\n9/16以降 資産別:\n" + t1c.to_string())
