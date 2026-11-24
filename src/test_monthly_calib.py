@@ -300,4 +300,5 @@ def test_intervention_table_is_bounded_by_the_target_month(tmp_path):
     sec = md.split("## 8.")[1].split("## 決定待ち")[0]
     assert "in_month" in sec and "14d_before" in sec
     assert "too_early" not in sec and "later_month" not in sec
+    assert "| index |" not in sec          # 絞ったあとの行番号を列として出さない(pandas の版で出たり出なかったりした)
 

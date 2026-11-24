@@ -455,7 +455,8 @@ def build(root: Path, month: str) -> tuple[str, dict]:
             lo, hi = target.start_time - pd.Timedelta(days=14), target.end_time.normalize()
             t = t[(t["date"] >= lo) & (t["date"] <= hi)]
             t["date"] = t["date"].dt.date
-        out.append(_md(t, "_対象月に介入なし（config/interventions.json）_"))
+        # 行を絞ったあとの行番号を表に出さない(pandas 2 は「index | 13」の列が付き、pandas 3 は付かなかった)
+        out.append(_md(t.reset_index(drop=True), "_対象月に介入なし（config/interventions.json）_"))
     section("8. 対象月とその直前の介入の前後14日（注文・見立ての実数）", s8)
 
     out += ["## 決定待ち（人間が書く）", "", "- （数値の採否・プロンプト変更・観察継続の判断をここに。空のまま提出してよい）", "",
