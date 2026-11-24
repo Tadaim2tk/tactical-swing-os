@@ -115,6 +115,20 @@ def test_atr_is_cut_at_the_bars_closed_at_decision_time_like_the_simulation(tmp_
     assert int(float(row["below_1atr"])) == 4          # 月曜の WTI 4件(0.83)だけ。BTC は 1.5 で入らない
 
 
+def test_rows_and_measured_rows_are_reported_separately(tmp_path):
+    """比率を測れなかった行（SL が欠けている・価格系列が無い資産）を、中央値の母数のように見せない。"""
+    root = _root(tmp_path, with_raw=True)
+    _add_orders(root, [_order("2026-10-14", "WTI", 90, 91, "", 95),             # SL が欠けている
+                       _order("2026-10-15", "QQQ", 700, 702, 690, 720)])        # 価格系列が無い資産
+    md, R = mc.build(root, "2026-10")
+    row = [r for r in R["sl_atr_by_month"] if r["month"] == "2026-10"][0]
+    assert "n" not in row
+    assert (int(float(row["rows"])), int(float(row["measured"]))) == (6, 4)     # 月曜の WTI 4件 + 測れない2件
+    assert abs(float(row["sl_atr_med"]) - 0.83) < 0.02 and int(float(row["below_1atr"])) == 4
+    sec = md.split("## 1.")[1].split("## 2.")[0]
+    assert "| month | rows | measured | sl_atr_med | below_1atr |" in sec
+
+
 def test_runner_writes_report_and_docs_without_overwriting(tmp_path):
     root = _root(tmp_path)
     (root / "docs").mkdir()

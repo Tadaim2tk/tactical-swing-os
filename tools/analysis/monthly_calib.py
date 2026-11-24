@@ -202,12 +202,16 @@ def build(root: Path, month: str) -> tuple[str, dict]:
         b["atr10"] = [prices.atr10_at_decision(a, d) for a, d in zip(b["asset"], b["date"])]
         b["sl_atr"] = b["sl_w"] / b["atr10"]
         if b["atr10"].notna().any():
-            t2 = b.groupby("month").agg(n=("sl_atr", "size"), sl_atr_med=("sl_atr", "median"),
+            # rows = 注文の行数、measured = SL幅と ATR10 の両方が取れて、中央値と below_1atr に入った行数。
+            # 初版は rows を n と書いていた。水準の欠けた行や価格系列の無い資産があると、n は中央値の母数より大きい
+            # (2026-06 は n=29、中央値に入っていたのは 23)。
+            t2 = b.groupby("month").agg(rows=("sl_atr", "size"), measured=("sl_atr", "count"), sl_atr_med=("sl_atr", "median"),
                                         below_1atr=("sl_atr", lambda s: int((s < 1.0).sum()))).round(2)
             t2.index = t2.index.astype(str)
             out.append("")
             out.append("申告SL幅÷ATR10 の月別中央値と、1.0 未満の件数。ATR10 は判断時に閉まっていた足までの10本"
-                       "（週5日の資産は前日まで、暗号資産は前々日まで。執行シミュレーションの atr_floor と同じ切り方）:")
+                       "（週5日の資産は前日まで、暗号資産は前々日まで。執行シミュレーションの atr_floor と同じ切り方）。"
+                       "rows は注文の行数、measured はそのうち比率を測れた行数（中央値と 1.0 未満の件数は measured の中で数える）:")
             out.append("")
             out.append(_md(t2))
             R["sl_atr_by_month"] = t2.reset_index().astype(str).to_dict("records")
