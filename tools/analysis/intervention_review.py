@@ -20,7 +20,8 @@ changelog (20) は「貼った日の14日後に、頻度・SL幅・成績を見�
 * 向きの入れ替わり = 資産ごとに、期間の中の向きのある判断を日付順に並べて BUY⇔SELL が変わった回数。
   見送りの日は飛ばす。期間より前の判断とは比べない（何週間も前の見立てとの違いは「入れ替わり」ではない）。
 * 連動を差し引いた賭けの本数 = n² ÷ Σρ。ρ は、その日の注文どうしの、向きをそろえた日次終値リターンの
-  相関（判断時に閉まっていた足までの60営業日。全資産に値がある日だけ）。「判断時に閉まっていた足」は
+  相関（判断時に閉まっていた足までの60本。**その日の注文の資産すべてに終値がある日だけ**を並べる。注文に無い資産の
+  欠損で日付を削らない。#219 Codex P2）。「判断時に閉まっていた足」は
   src/score_prediction_log.py の decision_time_anchor で決める（写しを持たない）。暗号資産の日足は判断の2時間後
   （09:00 JST）に閉まるので、前日ラベルの足は使えない。その日の注文の資産のうち、いちばん早く切れる資産に
   全体をそろえる（暗号資産の注文がある日は、どの資産も前々日までを使う。#219 Codex P2）。互いに打ち消す組が多い日は式の値が行数 n を
@@ -167,12 +168,22 @@ def load_frames(raw_dir: Path = Path("data/raw")) -> dict:
     return frames
 
 
-def returns_table(frames: dict) -> pd.DataFrame:
-    """全資産に終値がある日だけを並べた日次リターンの表。"""
-    closes = {a: pd.Series(df["close"].values, index=df["date"]) for a, df in frames.items()}
-    if not closes:
-        return pd.DataFrame()
-    return pd.DataFrame(closes).dropna().pct_change().dropna()
+def group_returns(frames: dict, assets, cutoff: pd.Timestamp, lookback: int = LOOKBACK) -> pd.DataFrame:
+    """測る注文の資産だけで日付をそろえた日次リターン（cutoff までの直近 lookback 行）。
+
+    そろえるのは、その組の資産すべてに終値がある日だけ。組に入っていない資産（たとえば履歴の短い VIX）の欠損で
+    日付を削らない。リターンは、そろえた日付の並びで前の行から計算する（暗号資産と週5日の資産を組むと、
+    月曜の行はどちらも金曜の終値からの変化になる。同じ区間どうしを比べる）。"""
+    closes = {}
+    for asset in assets:
+        df = frames.get(asset)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        df = df.drop_duplicates("date", keep="last")
+        closes[asset] = pd.Series(df["close"].values, index=df["date"])
+    table = pd.DataFrame(closes).dropna()
+    table = table[table.index <= cutoff]
+    return table.pct_change().dropna().tail(lookback)
 
 
 def history_cutoff(day: pd.Timestamp, assets, frames: dict):
@@ -201,7 +212,6 @@ def daily_bets(orders: pd.DataFrame, frames: dict, context: set, lookback: int =
     注文はあるが取引する資産が1つも無い日は、取引する資産の側を 0 行・0 本にする。
     相関に使うのは、その日の注文の資産すべてで「判断時に閉まっていた」足まで（history_cutoff）。
     切る日を決められない日は測れない（NaN）。"""
-    returns = returns_table(frames)
     cols = ["date", "orders", "bets", "orders_tradable", "bets_tradable"]
     by_day = {day: x for day, x in orders.groupby("date")}
     all_days = sorted(set(by_day) | {pd.Timestamp(d) for d in (days if days is not None else [])})
@@ -218,9 +228,9 @@ def daily_bets(orders: pd.DataFrame, frames: dict, context: set, lookback: int =
             if len(group) == 1:
                 return 1.0                       # 1行の日は相関が要らない
             cutoff = history_cutoff(day, group, frames)
-            if cutoff is None or returns.empty:
+            if cutoff is None:
                 return float("nan")
-            return effective_bets(group, returns[returns.index <= cutoff].tail(lookback))
+            return effective_bets(group, group_returns(frames, list(group), cutoff, lookback))
 
         out.append({"date": day, "orders": len(sides), "bets": bets_of(sides),
                     "orders_tradable": len(tradable),

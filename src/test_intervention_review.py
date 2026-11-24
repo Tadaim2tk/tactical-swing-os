@@ -169,6 +169,30 @@ def test_a_crypto_order_moves_the_cutoff_one_bar_earlier_for_the_whole_day():
     assert ir.history_cutoff(pd.Timestamp("2026-07-01"), ["BTC"], frames) is None
 
 
+def test_an_asset_outside_the_order_group_cannot_remove_history_from_it():
+    """GOLD と WTI の日を測るのに、VIX の履歴の短さは関係ない（#219 Codex P2）。"""
+    idx = pd.bdate_range("2026-07-01", periods=100)
+    rng = np.random.RandomState(6)
+    frames = {"GOLD": _frame(idx, rng.normal(size=100)), "WTI": _frame(idx, rng.normal(size=100))}
+    day = idx[80]
+    orders = _orders_on(day, [("GOLD", "BUY"), ("WTI", "BUY")])
+    alone = ir.daily_bets(orders, frames, set()).iloc[0]["bets"]
+    assert not np.isnan(alone)
+    # 履歴が20日しかない VIX、途中の日が抜けた DXY を足しても、GOLD と WTI の結果は同じ
+    with_others = dict(frames)
+    with_others["VIX"] = _frame(idx[60:80], rng.normal(size=20))
+    with_others["DXY"] = _frame(idx[::3], rng.normal(size=len(idx[::3])))
+    assert ir.daily_bets(orders, with_others, set()).iloc[0]["bets"] == pytest.approx(alone)
+    # 組に入っている資産の履歴が短ければ、その組は測れない
+    short = dict(frames)
+    short["WTI"] = _frame(idx[60:80], rng.normal(size=20))
+    assert np.isnan(ir.daily_bets(orders, short, set()).iloc[0]["bets"])
+    # そろえるのは組の資産に終値がある日だけ。行は cutoff までの直近 lookback 本
+    got = ir.group_returns(with_others, ["GOLD", "WTI"], idx[79], lookback=60)
+    assert list(got.columns) == ["GOLD", "WTI"] and len(got) == 60 and got.index.max() == idx[79]
+    assert ir.group_returns(with_others, ["GOLD", "ZZZ"], idx[79]).empty
+
+
 def test_days_without_orders_count_as_zero_in_the_daily_average():
     """14日のうち2日しか注文が無い期間を「1日 1.0 行」と読まない（#219 Codex P2）。"""
     idx = pd.bdate_range("2026-07-01", periods=100)
