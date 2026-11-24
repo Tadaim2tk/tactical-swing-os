@@ -2,7 +2,12 @@
 
 2026-11-24: ゲートは「指摘なし」のレビューを「レビュー未着」と取り違えていた。Codex は指摘が無いとき
 レビューを作らず、要約コメントを completed・指摘なしに書き換えるだけなので、reviews API しか見ない
-ゲートは20分待って「未着のまま通過(fail-open)」と書いた。11/15〜11/23 にマージされた12本がこの形だった。
+ゲートは20分待って「未着のまま通過(fail-open)」と書いた。9/6〜11/24 にマージされた73本のうち68本に黄色が付き、
+要約の状態が残っている範囲では 33本が実際はレビュー済み・指摘なしだった。
+逆に、修正を push したあとの head は誰にも読まれないまま通っていた（push では Codex は動かない）。
+ゲートが自分で依頼を書く方式は PR #230 で実際に試して働かないと分かった（Codex は github-actions[bot] の依頼を
+読まない）ので入れていない。時間切れで通すときの通知を「誰も頼んでいない」「読み始めたが終わらなかった」
+「動くはずなのに来なかった」の3つに分けた。
 
 ここでは YAML から手順（run）と jq の式（SUMMARY_FILTER）を取り出し、`gh` と `sleep` だけを偽物に差し替えて
 そのまま bash で走らせる。文字列を眺める試験ではなく、終了コードと PR に書く文面を見る。
@@ -23,15 +28,32 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "pr_review_gate.yml"
 HEAD = "7a69789738397e2bd6f6fb7383c47319c4fe4dc3"
 OTHER = "f" * 40
+PUSHED_AT = "2026-11-24T13:15:34Z"
 BOT = {"login": "chatgpt-codex-connector[bot]", "type": "Bot"}
 
 pytestmark = pytest.mark.skipif(shutil.which("jq") is None or shutil.which("bash") is None,
                                 reason="jq と bash が要る")
 
 
+def _workflow() -> dict:
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _job() -> dict:
+    return _workflow()["jobs"]["wait-for-codex-review"]
+
+
+def _filter() -> str:
+    return _job()["env"]["SUMMARY_FILTER"]
+
+
 def _step() -> dict:
-    parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return parsed["jobs"]["wait-for-codex-review"]["steps"][0]
+    """待つ手順。"""
+    steps = [st for st in _job()["steps"] if st["name"].startswith("Wait for Codex review")]
+    assert len(steps) == 1
+    return steps[0]
+
+
 
 
 def _summary(sha: str, status, findings, user: dict = BOT) -> dict:
@@ -51,7 +73,7 @@ def _summary(sha: str, status, findings, user: dict = BOT) -> dict:
 def _state(pages, head: str = HEAD) -> str:
     """SUMMARY_FILTER を実物の文字列のまま jq に渡す。pages はページごとのコメント配列。"""
     stdin = "\n".join(json.dumps(page) for page in pages)
-    out = subprocess.run(["jq", "-rs", "--arg", "head", head, _step()["env"]["SUMMARY_FILTER"]],
+    out = subprocess.run(["jq", "-rs", "--arg", "head", head, _filter()],
                          input=stdin, capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     return out.stdout.strip()
@@ -99,6 +121,9 @@ GH_STUB = r"""#!/usr/bin/env bash
 args="$*"
 case "$args" in
   "pr comment"*) printf '%s\n' "$args" >> "$GATE_FIXTURES/posted.txt"; exit 0 ;;
+  *"/issues/"*"/comments -f body="*)
+    # ゲートは PR に依頼のコメントを書かない（Codex は github-actions[bot] の依頼を読まない）。書こうとしたら落とす。
+    echo "the gate must not post review requests: $args" >&2; exit 9 ;;
   "api graphql"*) cat "$GATE_FIXTURES/unresolved.txt" 2>/dev/null || exit 1; exit 0 ;;
   *"/pulls/"*"/reviews"*)
     calls=$(( $(cat "$GATE_FIXTURES/review_calls.txt" 2>/dev/null || echo 0) + 1 ))
@@ -124,12 +149,14 @@ exit 9
 
 
 def _run_gate(tmp_path: Path, *, reviews: int = 0, comments=(), unresolved="0", quota: int = 0, head: str = HEAD,
-              fail_comments_from: int = 0, late_comments=None, late_from: int = 0, fail_reviews_from: int = 0):
+              fail_comments_from: int = 0, late_comments=None, late_from: int = 0, fail_reviews_from: int = 0,
+              event_action: str = "opened", pushed_at: str = PUSHED_AT):
     """ゲートの手順を走らせる。unresolved=None は GraphQL の失敗。
 
     fail_comments_from=N: 要約を読む N 回目以降の呼び出しを失敗させる。
     late_comments, late_from=N: N 回目以降は late_comments を返す（Codex が読み直した場面）。
-    fail_reviews_from=N: レビューを数える N 回目以降の呼び出しを失敗させる。"""
+    fail_reviews_from=N: レビューを数える N 回目以降の呼び出しを失敗させる。
+    event_action: この実行を起こした出来事（opened / synchronize など）。pushed_at: push の時刻。"""
     step = _step()
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
@@ -156,11 +183,12 @@ def _run_gate(tmp_path: Path, *, reviews: int = 0, comments=(), unresolved="0", 
     summary = tmp_path / "step_summary.md"
     env = dict(os.environ, PATH="%s%s%s" % (bin_dir, os.pathsep, os.environ["PATH"]),
                GH_TOKEN="x", PR="228", REPO="owner/repo", HEAD_SHA=head,
-               SUMMARY_FILTER=step["env"]["SUMMARY_FILTER"], GATE_FIXTURES=str(fixtures),
+               SUMMARY_FILTER=_filter(), GATE_FIXTURES=str(fixtures), EVENT_ACTION=event_action, PUSHED_AT=pushed_at,
                GITHUB_STEP_SUMMARY=str(summary))
     # GitHub は run の手順を `bash -e` で走らせる
     out = subprocess.run(["bash", "-e", str(script)], env=env, capture_output=True, text=True, timeout=120)
-    posted = (fixtures / "posted.txt").read_text(encoding="utf-8") if (fixtures / "posted.txt").exists() else ""
+    record = fixtures / "posted.txt"
+    posted = record.read_text(encoding="utf-8") if record.exists() else ""
     return out, posted, (summary.read_text(encoding="utf-8") if summary.exists() else "")
 
 
@@ -264,3 +292,91 @@ def test_quota_notice_still_passes_at_once_with_its_own_wording(tmp_path):
 def _each_case_gets_its_own_directory(tmp_path):
     for name in ("ok", "bad"):
         (tmp_path / name).mkdir()
+
+
+# --------------------------------------------------------------------------- push されたあとの head
+def _request(created_at: str, user_type: str = "User", login: str = "Tadaim2tk", body: str = "@codex review") -> dict:
+    return {"user": {"login": login, "type": user_type}, "body": body, "created_at": created_at}
+
+
+def test_old_runs_of_the_same_pull_request_are_folded_and_the_gate_writes_no_requests():
+    concurrency = _workflow()["concurrency"]
+    assert concurrency["cancel-in-progress"] is True
+    assert concurrency["group"] == "codex-review-gate-${{ github.event.pull_request.number }}"
+    # ゲートが自分で依頼を書く手順は置かない。PR #230 で試したところ、Codex は github-actions[bot] の依頼に
+    # 「Codex のアカウントを作って接続してください」と返すだけで、読まなかった。
+    steps = _job()["steps"]
+    assert len(steps) == 1 and "-f body=" not in steps[0]["run"]
+
+
+def test_a_pushed_head_that_nobody_asked_about_passes_with_a_notice_that_says_so(tmp_path):
+    """push では Codex は動かない。誰も頼んでいない head を「Codex が来なかった」と書かない。"""
+    out, posted, summary = _run_gate(tmp_path, reviews=0, comments=[], event_action="synchronize")
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "🟠" in posted and "誰もレビューに出していません" in posted and HEAD[:7] in posted
+    assert "push (%s) より後に人が書いた依頼は 0 件" % PUSHED_AT in posted   # いつの push を基準にしたかを書く
+    assert "レビュー未着のまま通過しました" not in posted
+    assert "event=synchronize head=%s pushed_at=%s" % (HEAD, PUSHED_AT) in out.stdout
+    assert "@codex" not in posted                                   # 通知の文面が Codex を呼び出さない
+    assert "誰にもレビューに出されないまま通過" in summary
+
+
+def test_a_pushed_head_that_someone_asked_about_keeps_the_no_show_notice(tmp_path):
+    """人が頼んだのに来なかった。こちらは Codex 側の問題なので、従来の文面で通す。"""
+    asked = [_request("2026-11-24T13:15:40Z")]
+    out, posted, _ = _run_gate(tmp_path, reviews=0, comments=asked, event_action="synchronize")
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "レビュー未着のまま通過しました(fail-open)" in posted and "🟠" not in posted
+    assert "@codex" not in posted
+
+
+def test_requests_from_before_the_push_or_from_a_bot_do_not_count(tmp_path):
+    cases = {
+        "earlier": [_request("2026-11-24T13:10:00Z")],                                   # 前の head への依頼
+        "bot": [_request("2026-11-24T13:16:00Z", user_type="Bot", login="github-actions[bot]")],
+        "mention": [_request("2026-11-24T13:16:00Z", body="説明の中で @codex review に触れただけ")],
+    }
+    for name, comments in cases.items():
+        (tmp_path / name).mkdir()
+        out, posted, _ = _run_gate(tmp_path / name, reviews=0, comments=comments, event_action="synchronize")
+        assert out.returncode == 0 and "🟠" in posted, name
+
+
+def test_when_the_requests_cannot_be_read_the_gate_does_not_claim_that_nobody_asked(tmp_path):
+    """依頼の有無を読めなかった（41回目＝時間切れのあとの取得が失敗）。「0 件」と言い切らず、従来の文面で通す。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=0, comments=[], event_action="synchronize", fail_comments_from=41)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "レビュー未着のまま通過しました(fail-open)" in posted and "🟠" not in posted
+    assert "review requests by people since the push: unknown" in out.stdout
+
+
+def test_a_review_that_started_but_never_finished_is_not_called_unrequested(tmp_path):
+    """#190・#191 の形。Codex はいまの head を読み始めている。push された head でも「誰も頼んでいない」とは書かない。"""
+    reading = [_summary(HEAD, "running", None)]
+    for name, action in (("pushed", "synchronize"), ("opened", "opened")):
+        (tmp_path / name).mkdir()
+        out, posted, summary = _run_gate(tmp_path / name, reviews=0, comments=reading, event_action=action)
+        assert out.returncode == 0, name + out.stdout + out.stderr
+        assert "レビュー未着のまま通過しました(fail-open)" in posted and "読み始めましたが" in posted, name
+        assert "🟠" not in posted and "@codex" not in posted, name
+        assert "読み始めたが20分で終わらなかった" in summary, name
+
+
+def test_a_review_that_was_running_and_then_became_unreadable_is_still_not_called_unrequested(tmp_path):
+    """読み始めた跡を一度見たら、その後コメントが読めなくなっても覚えている。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=0, comments=[_summary(HEAD, "running", None)],
+                               event_action="synchronize", fail_comments_from=3)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "読み始めましたが" in posted and "🟠" not in posted
+
+
+def test_an_opened_pull_request_that_codex_never_reviewed_keeps_the_no_show_notice(tmp_path):
+    """PR を開いたときは Codex が自分で動く場面。来なければ「未着」。"""
+    out, posted, _ = _run_gate(tmp_path, reviews=0, comments=[], event_action="opened")
+    assert out.returncode == 0 and "レビュー未着のまま通過しました(fail-open)" in posted and "🟠" not in posted
+
+
+def test_a_pushed_head_with_a_clean_review_passes_without_any_notice(tmp_path):
+    out, posted, summary = _run_gate(tmp_path, reviews=0, comments=[_summary(HEAD, "completed", False)],
+                                     event_action="synchronize")
+    assert out.returncode == 0 and posted == "" and "レビュー済み・指摘なし" in summary
