@@ -8,6 +8,7 @@ Google Sheetsは読み込みのみ。書き込みは一切行わない。Secrets
 import json
 import math
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -228,6 +229,52 @@ def latest_file_date(pattern: str) -> str:
     stem = latest.stem
     text = stem[:10]
     return text if len(text) == 10 else latest.name
+
+
+# 週次レビューと月次較正の「確定した記録」。成果物の results/weekly_review.csv・reports/weekly/*.md・
+# results/monthly_calibration.csv・reports/monthly/*.md は git 管理外で、それぞれの job の中にしか無い。
+# dashboard の job からは見えないので、この2つの層は 2026-09 から毎日 missing と出続けていた
+# （週次の job は毎週動き、月次の文書も作られていた）。確かめる先を、コミットされている記録にする。
+WEEKLY_REVIEW_LOG = Path("data/weekly_review_log.csv")
+MONTHLY_CALIBRATION_DOC_GLOB = "docs/monthly_calibration_????-??.md"
+
+
+def committed_weekly_review(path: Path = WEEKLY_REVIEW_LOG) -> tuple[int, str]:
+    """週次レビューの追記型の記録の行数と、最後の週の終わりの日（YYYY-MM-DD）。無ければ (0, "")。
+
+    週次の job（土曜）が1週1行を追記する（2026-09-05〜、PR #143）。次の週の行が来なければ、
+    最後の週の終わりの日から 204 時間（8.5日）で stale になる。"""
+    df = read_csv(path)
+    if df.empty or "week_end" not in df.columns:
+        return 0, ""
+    ends = pd.to_datetime(df["week_end"], errors="coerce").dropna()
+    if ends.empty:
+        return 0, ""
+    return int(len(ends)), ends.max().strftime("%Y-%m-%d")
+
+
+def committed_monthly_calibration(pattern: str = MONTHLY_CALIBRATION_DOC_GLOB) -> tuple[int, str]:
+    """月次較正の文書（docs/monthly_calibration_YYYY-MM.md）の本数と、最後の対象月の末日。無ければ (0, "")。
+
+    返す日付は文書を作った日ではなく**対象月の末日**。翌月の文書が出なければ、そこから 840 時間（35日）で
+    stale になる（10月分なら 12/5 ごろ）。下書きの .draft.md や月の無い monthly_calibration.md は数えない。"""
+    months = []
+    for path in Path().glob(pattern):
+        m = re.fullmatch(r"monthly_calibration_(\d{4})-(\d{2})", path.stem)
+        if m and 1 <= int(m.group(2)) <= 12:
+            months.append((int(m.group(1)), int(m.group(2))))
+    if not months:
+        return 0, ""
+    year, month = max(months)
+    last_day = pd.Timestamp(year=year, month=month, day=1) + pd.offsets.MonthEnd(0)
+    return len(months), last_day.strftime("%Y-%m-%d")
+
+
+def review_evidence(job_rows: int, job_date: str, committed: tuple[int, str]) -> tuple[int, str]:
+    """層の行数と日付を決める。job の中に成果物があればそれを使い、無ければコミットされた記録を使う。"""
+    if job_rows > 0 or job_date:
+        return job_rows, job_date
+    return committed
 
 
 def fmt_num(value) -> str:

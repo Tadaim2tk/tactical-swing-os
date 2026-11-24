@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
 
     steps:
       - name: Checkout
@@ -241,6 +241,21 @@ jobs:
         with:
           path: reports/dashboard
 
+      # 直前に上げた github-pages が、GitHub 側の成果物一覧にまだ出ないことがある
+      # (2026-11-12・2026-11-22。上げ終わりから 0.3〜0.6 秒後に一覧を引いて
+      # `No artifacts named "github-pages"` で落ちた)。同じ run の再実行は成果物が
+      # 2つになって必ず落ちるので、同じジョブの中で間を置いて1回だけやり直す。
+      # 2回目も落ちたらジョブは赤のまま。
       - name: Deploy GitHub Pages
         id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      - name: Wait before retrying the Pages deploy
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+
+      - name: Deploy GitHub Pages (retry)
+        id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
