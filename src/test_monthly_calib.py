@@ -12,6 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "analysis"))
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "src"))
 import monthly_calib as mc  # noqa: E402
 import monthly_calibration_run as run  # noqa: E402
 
@@ -68,6 +69,50 @@ def test_sl_atr_uses_raw_prices_when_present(tmp_path):
     # WTI: SL幅 = |90.5-88| = 2.5、ATR10 = 3.0（高値-安値=3、前日終値の差は 1.5/1.5） → 0.83
     row = [r for r in R["sl_atr_by_month"] if r["month"] == "2026-10"][0]
     assert abs(float(row["sl_atr_med"]) - 0.83) < 0.02 and int(float(row["below_1atr"])) > 0
+
+
+def _order(ds: str, asset: str, entry_low, entry_high, sl, tp1, side: str = "BUY") -> list:
+    """rank B の注文1行（LED_COLS の並び）。"""
+    return [ds, f"{ds.replace('-', '')}_{asset}_{side}_PULLBACK", asset, side, "B", "PULLBACK", entry_low, entry_high, sl, tp1, "", 1.6, 0.55, 0.3,
+            60, 60, 40, 0.25, "MIXED", 70, 70, 70, 70, 75, 60, "x", "y", "verified", "chatgpt_app"]
+
+
+def _add_orders(root: Path, rows: list) -> None:
+    led = pd.read_csv(root / "data" / "signal_log.csv")
+    pd.concat([led, pd.DataFrame(rows, columns=LED_COLS)], ignore_index=True).to_csv(root / "data" / "signal_log.csv", index=False)
+
+
+def _write_bars(root: Path, asset: str, days, base: float, rng: float = 100.0, ranges: dict | None = None, opens: dict | None = None) -> None:
+    """終値は base で一定、値幅は rng（日付ごとに ranges で差し替え）。真の値幅 = 高値 − 安値 になる。"""
+    rows = []
+    for d in days:
+        ds = d.strftime("%Y-%m-%d")
+        r = (ranges or {}).get(ds, rng)
+        rows.append({"date": ds, "open": (opens or {}).get(ds, base), "high": base + r / 2, "low": base - r / 2, "close": base, "volume": 1})
+    pd.DataFrame(rows).to_csv(root / "data" / "raw" / f"{asset}.csv", index=False)
+
+
+def test_atr_is_cut_at_the_bars_closed_at_decision_time_like_the_simulation(tmp_path):
+    """暗号資産の前日の足は、判断(07:00 JST)の2時間後に閉じる。月次の ATR10 も、執行シミュレーションと同じく1本手前で切る。
+
+    10/15 の BTC の注文。前日(10/14)だけ値幅が 1100、ほかは 100。SL幅は 150。
+    日付が判断日より前の足で切る（初版）: ATR10 = (9×100 + 1100)/10 = 200 → 0.75（1.0 未満）
+    判断時に閉まっていた足で切る:          ATR10 = 100                  → 1.5
+    """
+    root = _root(tmp_path, with_raw=True)
+    _add_orders(root, [_order("2026-10-15", "BTC", 49950, 50050, 49850, 50400)])
+    _write_bars(root, "BTC", pd.date_range("2026-09-01", "2026-10-31", freq="D"), base=50000.0, ranges={"2026-10-14": 1100.0})
+    prices = mc.Prices(root)
+    assert abs(prices.atr10_at_decision("BTC", pd.Timestamp("2026-10-15")) - 100.0) < 1e-9
+    assert abs(prices.atr10_at_decision("WTI", pd.Timestamp("2026-10-12")) - 3.0) < 1e-9   # 週5日の資産は前日までで変わらない
+    # 執行シミュレーションが atr_floor に使う値と同じであること（同じ関数を呼んでいる）
+    import simulate_execution as se
+    from score_prediction_log import decision_time_anchor, load_ohlcv_frame
+    o = load_ohlcv_frame("BTC", raw_dir=root / "data" / "raw")
+    assert prices.atr10_at_decision("BTC", pd.Timestamp("2026-10-15")) == se.atr_at_decision(o, decision_time_anchor(o, "2026-10-15")[1])
+    _, R = mc.build(root, "2026-10")
+    row = [r for r in R["sl_atr_by_month"] if r["month"] == "2026-10"][0]
+    assert int(float(row["below_1atr"])) == 4          # 月曜の WTI 4件(0.83)だけ。BTC は 1.5 で入らない
 
 
 def test_runner_writes_report_and_docs_without_overwriting(tmp_path):

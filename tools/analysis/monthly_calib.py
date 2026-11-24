@@ -7,6 +7,7 @@
 出すもの（節番号は 2026-10 の文書と同じ並び）:
   0 売買頻度（月別の注文・見立て、ALERT 区間）
   1 SL: 月別の SL率と合計R、申告SL幅÷ATR10 の月別中央値、併走 atr_floor の差
+    （ATR10 は執行シミュレーションと同じ関数で、判断時に閉まっていた足までの10本）
   2 regime 6語の遵守率と月別分布
   3 主役の申告 vs 機械判定 LEADER_V1、申告主役への判断の成績
   4 週次 crypto 予測の検算（期日終値、予測時の価格は実行前に閉じた土曜終値）
@@ -31,6 +32,8 @@ import pandas as pd
 HERE = Path(__file__).resolve()
 sys.path.insert(0, str(HERE.parents[2] / "src"))
 import throughput_metrics as tm  # noqa: E402
+from score_prediction_log import decision_time_anchor, load_ohlcv_frame  # noqa: E402
+from simulate_execution import atr_at_decision  # noqa: E402
 
 ASSETS = ["GOLD", "BTC", "ETH", "WTI", "USDJPY", "SPX", "NASDAQ", "DXY", "US10Y", "VIX"]
 FINAL = {"filled_sl", "filled_tp1", "filled_time_exit"}
@@ -78,6 +81,7 @@ class Prices:
     def __init__(self, root: Path):
         self.root = root
         self.cache: dict[str, pd.DataFrame | None] = {}
+        self.ohlcv: dict[str, pd.DataFrame] = {}
 
     def get(self, asset: str) -> pd.DataFrame | None:
         if asset in self.cache:
@@ -99,17 +103,22 @@ class Prices:
         self.cache[asset] = df.set_index("date")[["open", "high", "low", "close"]]
         return self.cache[asset]
 
-    def atr10_before(self, asset: str, day: pd.Timestamp) -> float:
-        p = self.get(asset)
-        if p is None:
+    def atr10_at_decision(self, asset: str, day: pd.Timestamp) -> float:
+        """判断時(07:00 JST)に閉まっていた足までの10本の ATR。執行シミュレーションの atr_floor と同じ関数で出す。
+
+        初版(atr10_before)は「日付が判断日より前の足」で切っていた。週5日の資産はそれで判断時に閉まっている足と一致するが、
+        暗号資産の UTC 日足は、前日のラベルの足が 09:00 JST に閉じるので、判断の2時間後までの値動きを含む。
+        執行シミュレーション・採点・sl_width_vs_atr.py は decision_time_anchor(暗号資産は1本手前)で切っており、
+        月次だけが別の10本を見ていた(2026-11-25。暗号資産の 54 注文で ATR が −22%〜+19% 違った)。
+        写しを持つと片方だけずれるので、ここでは測り方を持たず、同じ関数を呼ぶ。
+        """
+        if asset not in self.ohlcv:
+            self.ohlcv[asset] = load_ohlcv_frame(asset, raw_dir=self.root / "data" / "raw")
+        o = self.ohlcv[asset]
+        if o.empty or pd.isna(day):
             return np.nan
-        d = p[p.index < day]
-        if len(d) < 11:
-            return np.nan
-        h, l, c = d["high"], d["low"], d["close"]
-        pc = c.shift(1)
-        tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
-        return float(tr.tail(10).mean())
+        _k, anchor_idx = decision_time_anchor(o, day)
+        return atr_at_decision(o, anchor_idx)
 
 
 def build(root: Path, month: str) -> tuple[str, dict]:
@@ -190,14 +199,15 @@ def build(root: Path, month: str) -> tuple[str, dict]:
         b = led[led["order"] & (led["risk_pct"] > 0)].copy()
         b["mid"] = (b["entry_low"] + b["entry_high"]) / 2
         b["sl_w"] = (b["mid"] - b["sl"]).abs()
-        b["atr10"] = [prices.atr10_before(a, d) for a, d in zip(b["asset"], b["date"])]
+        b["atr10"] = [prices.atr10_at_decision(a, d) for a, d in zip(b["asset"], b["date"])]
         b["sl_atr"] = b["sl_w"] / b["atr10"]
         if b["atr10"].notna().any():
             t2 = b.groupby("month").agg(n=("sl_atr", "size"), sl_atr_med=("sl_atr", "median"),
                                         below_1atr=("sl_atr", lambda s: int((s < 1.0).sum()))).round(2)
             t2.index = t2.index.astype(str)
             out.append("")
-            out.append("申告SL幅÷ATR10（判断日の前日までの10本）の月別中央値と、1.0 未満の件数:")
+            out.append("申告SL幅÷ATR10 の月別中央値と、1.0 未満の件数。ATR10 は判断時に閉まっていた足までの10本"
+                       "（週5日の資産は前日まで、暗号資産は前々日まで。執行シミュレーションの atr_floor と同じ切り方）:")
             out.append("")
             out.append(_md(t2))
             R["sl_atr_by_month"] = t2.reset_index().astype(str).to_dict("records")
