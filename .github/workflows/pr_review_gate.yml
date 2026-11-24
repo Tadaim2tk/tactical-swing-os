@@ -15,6 +15,19 @@ name: Codex review gate
 #   fail-openで通した場合はPRにコメントを残して区別できるようにした。
 # - レビュー到着済みで未解決スレッドが残ったままtimeout → 失敗(赤)。修正をpushするか
 #   スレッドをresolveすれば、synchronize/再実行で緑になる。
+#
+# 2026-11-24 改定: 「指摘なし」のレビューを、レビュー未着と取り違えていた。
+# Codex は指摘が無いときレビューを作らない。要約コメントを「completed・指摘なし」に書き換えて 👍 を付けるだけで、
+# reviews API には何も出ない。ゲートは reviews API しか見ていなかったので、Codex が2分で読み終えた PR を20分待ち、
+# 「レビュー未着のまま通過(fail-open)」と書いていた。2026-11-15〜11-23 にマージされた12本（#217〜#228 のうち
+# マージ済みのもの全部）がこの形で、どれも実際はレビュー済み・指摘なしだった。**同じ黄色が「未レビュー」と
+# 「レビュー済み」の両方に付いていた**ので、黄色を見ても何も分からなかった。
+# - 要約コメントの機械可読な状態（`codex-review-state:v1` の JSON）が、**いまの head** について
+#   completed・指摘なしと言っていれば、レビュー到着として扱う（未解決スレッドの確認は同じように行う）。
+# - 要約が「いまの head に指摘あり」と言っているのにレビュー（指摘スレッド）が見えないまま timeout → 失敗(赤)。
+#   指摘があると分かっている PR を fail-open で通さない（#162 で起きた形）。
+# - 要約が読めない・別のコミットを指している・実行中のまま → 従来どおり待ち、timeout で fail-open（黄色）。
+#   読めないものを「レビュー済み」にはしない。
 
 on:
   pull_request:
@@ -36,17 +49,48 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # issue comments（配列の並び）を読み、Codex の要約コメントが **いまの head** について何と言っているかを
+          # 1語で返す: clean（completed・指摘なし）/ findings（completed・指摘あり）/ running（まだ）/ none（要約が無い・
+          # 読めない・別のコミット）。投稿者は Codex の Bot に限る。JSON が壊れていれば none（緑にしない）。
+          # 試験は src/test_pr_review_gate_workflow.py がこの文字列をそのまま jq に渡して行う。
+          SUMMARY_FILTER: |
+            add // []
+            | [ .[]
+                | select((.user.login // "") == "chatgpt-codex-connector[bot]" and (.user.type // "") == "Bot")
+                | (.body // "")
+                | select(contains("codex-pull-request-review-summary"))
+                | capture("codex-review-state:v1 (?<j>\\{.*\\}) -->")
+                | (.j | try fromjson catch null)
+                | select(type == "object")
+                | .code_review
+                | select(type == "object" and .commit_sha == $head)
+              ] as $s
+            | if ($s | length) == 0 then "none"
+              elif any($s[]; .status == "completed" and .has_any_findings == true) then "findings"
+              elif any($s[]; .status == "completed" and .has_any_findings == false) then "clean"
+              else "running" end
         run: |
           owner="${REPO%%/*}"
           name="${REPO##*/}"
           arrived=0
+          summary_findings=0
           for i in $(seq 1 40); do
             # レビューは現在のhead SHAに対するものだけを数える(Codex P1対応:
             # synchronize時に旧コミットへの古いレビューで即グリーンになるのを防ぐ)。
             n=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
               --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\" and .commit_id==\"$HEAD_SHA\")] | length" \
               2>/dev/null | awk '{s+=$1} END {print s+0}')
-            if [ "$n" -gt 0 ]; then
+            # 指摘が無いとき Codex はレビューを作らず、要約コメントだけを更新する。そちらも読む。
+            summary_state=$( (gh api --paginate "repos/$REPO/issues/$PR/comments" 2>/dev/null \
+              | jq -rs --arg head "$HEAD_SHA" "$SUMMARY_FILTER" 2>/dev/null) || true)
+            case "$summary_state" in clean|findings|running) ;; *) summary_state="none" ;; esac
+            # 一度でも「いまの head に指摘あり」を見たら、その後の周回で読めなくなっても忘れない（#229 Codex P2）。
+            # 毎周 0 に戻していた初版は、最後の周だけコメントの取得に失敗すると、指摘を見たあとなのに
+            # 「レビュー未着」で通していた。取り消せるのは、指摘なしを確かめて通る場合（下で exit 0）だけ。
+            if [ "$summary_state" = "findings" ]; then
+              summary_findings=1
+            fi
+            if [ "$n" -gt 0 ] || [ "$summary_state" = "clean" ]; then
               arrived=1
               # 未解決のCodex指摘スレッド数。コミットを跨いで数える(古い未処理指摘も塞ぐ)。
               # GraphQL失敗時は unknown のまま待ち続け、最終的に赤に倒す(安全側)。
@@ -56,11 +100,25 @@ jobs:
                 --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not) | select((.comments.nodes[0].author.login // "") | startswith("chatgpt-codex-connector"))] | length' \
                 2>/dev/null || echo "unknown")
               if [ "$unresolved" = "0" ]; then
-                echo "Codex review arrived ($n review(s)) and no unresolved finding threads remain."
-                echo "### ゲート: Codexレビュー済み・未解決指摘なし ($n review(s))" >> "$GITHUB_STEP_SUMMARY"
+                if [ "$n" -gt 0 ]; then
+                  echo "Codex review arrived ($n review(s)) and no unresolved finding threads remain."
+                  echo "### ゲート: Codexレビュー済み・未解決指摘なし ($n review(s))" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "Codex reviewed this head and reported no findings (summary comment); no unresolved finding threads remain."
+                  echo "### ゲート: Codexレビュー済み・指摘なし（要約コメントが、いまの head を completed・指摘なしと報告）" >> "$GITHUB_STEP_SUMMARY"
+                fi
                 exit 0
               fi
               echo "Codex review arrived; unresolved finding threads: $unresolved — address them in this PR. ($i/40)"
+            elif [ "$summary_state" = "findings" ]; then
+              # 要約は「いまの head に指摘あり」と言っているが、レビュー（指摘スレッド）がまだ見えない。
+              # 数十秒遅れて届くことがあるので待つ。最後まで見えなければ赤にする（fail-open で通さない）。
+              echo "Codex summary reports findings for this head, but no review is visible yet. ($i/40)"
+            elif [ "$summary_findings" -gt 0 ] || [ "$arrived" -gt 0 ]; then
+              # 前の周では、いまの head へのレビュー（または指摘ありの要約）が読めていた。今回は読めない
+              # （取得の失敗か、読み直しの途中）。枠切れの通知で通す道にも入らない。
+              # **一度レビューを見たあとで fail-open にしない。**
+              echo "Codex reviewed this head earlier in this run; it cannot be read now. Still waiting. ($i/40)"
             else
               # Codexが「レビュー枠を使い切った」とコメントしている場合、待っても永久に来ない
               # (2026-09-06に実際に発生: 一晩で10本出して枠が尽き、6本が未レビューでマージ)。
@@ -88,6 +146,10 @@ jobs:
           done
           if [ "$arrived" -gt 0 ]; then
             echo "::error::Codex findings are still unresolved after 20 min. Push a fix and/or resolve the threads, then re-run this check."
+            exit 1
+          fi
+          if [ "$summary_findings" -gt 0 ]; then
+            echo "::error::Codex の要約コメントは、いまの head に指摘があると報告しているが、レビュー（指摘スレッド）を確認できない。PR の Codex のコメントを読み、修正を push するか、指摘が届いてから再実行する。"
             exit 1
           fi
           # 2026-09-06: この経路で #145/#148/#149/#150 の4本が「未レビューのまま」マージされた。
