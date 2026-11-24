@@ -608,3 +608,142 @@ def test_parallel_track_results_are_kept_independently():
     assert out["atr_floor_status"] == "atr_tp1" and abs(out["atr_floor_r"] - 1.5) < 1e-9
     assert out["chase_status"] == "chase_tp1" and abs(out["chase_r"] - 0.4) < 1e-9
     assert out["status"] == "filled_sl"
+
+
+# --- 価格窓が進んで測り直せなくなった行の結果を消さない(2026-11-24) ---
+# raw は直近 240 日ぶんで毎晩上書きされる。古い判断は、窓の先頭が近づくと (1) ATR10 が出なくなり、
+# (2) 系列取り違えの検査ができなくなり、(3) 判断日が窓の外へ出る。直す前は、そのたびに確定済みの結果が
+# 空欄や data_window_expired で上書きされていた(最初に起きるのは 2027-01 下旬の見込みだった)。
+
+WATCHED = ["status", "r_result", "fill_date", "exit_date", "scale_check", "reference_deviation",
+           "half_exit_status", "half_exit_r", "atr_floor_status", "atr_floor_r", "atr_floor_widened",
+           "chase_status", "chase_r"]
+
+
+def _long_series():
+    """判断日(7/01)の前に営業日30本、後ろに決着まで十分な足。"""
+    days = pd.bdate_range(end="2026-06-30", periods=30).strftime("%Y-%m-%d")
+    hist = [(d, 72.5, 73.0, 72.0, 72.5) for d in days]
+    after = [("2026-07-01", 74, 74.5, 72.5, 74.0), ("2026-07-02", 74, 76.5, 73.5, 76.0)]
+    later = [(d, 76.0, 76.4, 75.6, 76.0) for d in pd.bdate_range("2026-07-03", periods=15).strftime("%Y-%m-%d")]
+    return hist + after + later
+
+
+def _write_prices(raw, bars, asset="WTI"):
+    _ohlcv(bars).assign(date=lambda d: d["date"].dt.strftime("%Y-%m-%d")).to_csv(raw / f"{asset}.csv", index=False)
+
+
+def _nightly(led, raw, out_csv, monkeypatch=None, stamp="night"):
+    """夜間の実行と同じ形: 前回の CSV を読み、測り、CSV に書く。stamp はその晩の simulated_at_utc。"""
+    if monkeypatch is not None:
+        monkeypatch.setattr(se, "format_utc", lambda _dt: stamp)
+    prev = pd.read_csv(out_csv) if out_csv.exists() else None
+    sim = se.simulate_ledger(led, raw_dir=raw, previous=prev)
+    sim.to_csv(out_csv, index=False)
+    return pd.read_csv(out_csv).set_index("signal_id")
+
+
+def _same(a, b):
+    return (pd.isna(a) and pd.isna(b)) or str(a) == str(b)
+
+
+def test_history_short_is_exactly_when_atr10_cannot_be_measured():
+    bars = _long_series()
+    assert not se.history_short(_ohlcv(bars), "2026-07-01")
+    for drop in range(0, 34):
+        o = _ohlcv(bars[drop:])
+        _k, anchor = se.decision_time_anchor(o, "2026-07-01")
+        measurable = anchor >= 1 and not pd.isna(se.atr_at_decision(o, anchor))
+        assert se.history_short(o, "2026-07-01") == (not measurable), drop
+    assert se.history_short(_ohlcv(bars[31:]), "2026-07-01")          # 判断日が窓より前
+    assert se.history_short(pd.DataFrame(), "2026-07-01")             # 価格が1本も無い
+    assert not se.history_short(_ohlcv(bars), "not a date")           # 日付が読めないのは窓の問題ではない
+
+
+def test_settled_results_survive_as_the_price_window_moves_past_the_decision(tmp_path, monkeypatch):
+    """窓の先頭を1本ずつ進めて毎晩回す。確定済みの結果が、1列も変わらない。"""
+    raw, out_csv = tmp_path / "raw", tmp_path / "execution_simulation.csv"
+    raw.mkdir()
+    led = pd.DataFrame([
+        _row(signal_id="WIDE", sl="72.5").to_dict(),                       # 本体は SL、ATR10 に広げた側は TP1
+        _row(signal_id="PLAIN").to_dict(),                                 # 本体が TP1
+        _row(signal_id="SCALE", entry_low="36.0", entry_high="36.5", sl="35.0", tp1="38.0").to_dict(),  # 桁違い
+        _row(signal_id="NOFILL", entry_low="60.0", entry_high="60.5", sl="59.0", tp1="62.0", side="SELL").to_dict(),
+    ])
+    bars = _long_series()
+    _write_prices(raw, bars)
+    base = _nightly(led, raw, out_csv, monkeypatch, "night-0")
+    assert base.loc["WIDE", "status"] == "filled_sl" and base.loc["WIDE", "atr_floor_status"] == "atr_tp1"
+    assert abs(base.loc["WIDE", "atr_floor_r"] - 3.0) < 1e-9 and str(base.loc["WIDE", "atr_floor_widened"]) == "True"
+    assert base.loc["PLAIN", "status"] == "filled_tp1"
+    assert base.loc["SCALE", "status"] == "excluded_scale"
+    for drop in range(1, 36):                                              # 30本目で判断日が窓の先頭、その先は窓の外
+        _write_prices(raw, bars[drop:])
+        now = _nightly(led, raw, out_csv, monkeypatch, "night-%d" % drop)
+        for sid in base.index:
+            for col in WATCHED:
+                assert _same(now.loc[sid, col], base.loc[sid, col]), (drop, sid, col, now.loc[sid, col], base.loc[sid, col])
+    assert se.summarize(now.reset_index())["atr_floor"]["orders"] == se.summarize(base.reset_index())["atr_floor"]["orders"]
+    # 残した行の時刻は、最後に実際に測れた晩のもの(判断前の足が11本あった最後の晩 = 19本落とした晩)
+    assert set(now["simulated_at_utc"]) == {"night-19"}
+
+
+def test_a_night_without_prices_does_not_erase_settled_results(tmp_path):
+    """価格の取得に失敗した晩(ファイルが無い)。invalid_data で上書きしない。"""
+    raw, out_csv = tmp_path / "raw", tmp_path / "execution_simulation.csv"
+    raw.mkdir()
+    led = pd.DataFrame([_row(signal_id="WIDE", sl="72.5").to_dict()])
+    _write_prices(raw, _long_series())
+    base = _nightly(led, raw, out_csv)
+    (raw / "WTI.csv").unlink()
+    now = _nightly(led, raw, out_csv)
+    for col in WATCHED:
+        assert _same(now.loc["WIDE", col], base.loc["WIDE", col]), col
+
+
+def test_a_short_window_does_not_block_a_row_that_is_still_being_decided(tmp_path):
+    """系列そのものが短い資産。open → 確定の前進は、窓が足りなくても止めない。"""
+    raw, out_csv = tmp_path / "raw", tmp_path / "execution_simulation.csv"
+    raw.mkdir()
+    led = pd.DataFrame([_row(signal_id="NEW").to_dict()])
+    hist = [(d, 72.5, 73.0, 72.0, 72.5) for d in pd.bdate_range(end="2026-06-30", periods=4).strftime("%Y-%m-%d")]
+    _write_prices(raw, hist + [("2026-07-01", 74, 74.5, 73.5, 74.0)])     # 帯(72〜73)に届かない。まだ1本目
+    first = _nightly(led, raw, out_csv)
+    assert first.loc["NEW", "status"] == "open"
+    _write_prices(raw, hist + [("2026-07-01", 74, 74.5, 72.5, 74.0), ("2026-07-02", 74, 76.5, 73.5, 76.0)]
+                  + [(d, 76.0, 76.4, 75.6, 76.0) for d in pd.bdate_range("2026-07-03", periods=12).strftime("%Y-%m-%d")])
+    later = _nightly(led, raw, out_csv)
+    assert later.loc["NEW", "status"] == "filled_tp1", "窓が短くても、新しい決着は入る"
+
+
+def test_a_parallel_track_that_settles_later_is_not_frozen_open_on_a_short_window():
+    """本体は前回のまま残すが、前回 open だった併走側が今回決着していれば、そちらを使う。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "filled_tp1", "r_result": 1.0, "simulated_at_utc": "old",
+                          "half_exit_status": "open", "half_exit_r": float("nan"), "half_exit_be_r": float("nan")}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "filled_tp1", "r_result": 1.0, "simulated_at_utc": "new",
+                         "half_exit_status": "half_tp1_then_time_exit", "half_exit_r": 0.8, "half_exit_be_r": 0.8}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS),
+                                  short_history={"S"}).set_index("signal_id").loc["S"]
+    assert out["status"] == "filled_tp1" and out["simulated_at_utc"] == "old"
+    assert out["half_exit_status"] == "half_tp1_then_time_exit" and abs(out["half_exit_r"] - 0.8) < 1e-9
+
+
+def test_values_measured_without_the_scale_check_do_not_leak_into_an_excluded_row():
+    """桁違いで除外していた行。窓の先頭では検査ができず測れてしまうが、その結果も併走側の値も採らない。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "excluded_scale", "scale_check": "excluded",
+                          "half_exit_status": "", "chase_status": ""}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "no_fill", "scale_check": "not_checked", "forgone_r": 9.9,
+                         "half_exit_status": "no_fill", "half_exit_r": 0.0, "chase_status": "chase_tp1", "chase_r": 2.0}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS),
+                                  short_history={"S"}).set_index("signal_id").loc["S"]
+    assert out["status"] == "excluded_scale" and out["scale_check"] == "excluded"
+    assert pd.isna(out["forgone_r"]) and pd.isna(out["chase_r"]) and str(out["chase_status"]) in ("", "nan")
+    assert str(out["half_exit_status"]) in ("", "nan")
+
+
+def test_a_full_window_rerun_may_still_replace_a_settled_result():
+    """窓が足りている行は、測り直した結果を採る(規則を直したあとの再計算を止めない)。"""
+    prev = pd.DataFrame([{"signal_id": "S", "status": "filled_sl", "r_result": -1.0}])
+    now = pd.DataFrame([{"signal_id": "S", "status": "filled_tp1", "r_result": 1.5}])
+    out = se._keep_finalized_rows(now.reindex(columns=se.COLUMNS), prev.reindex(columns=se.COLUMNS)).set_index("signal_id").loc["S"]
+    assert out["status"] == "filled_tp1" and abs(out["r_result"] - 1.5) < 1e-9

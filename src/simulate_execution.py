@@ -447,27 +447,72 @@ _TRACKS = {
 }
 
 
-def _keep_finalized_rows(sim: pd.DataFrame, previous: pd.DataFrame | None) -> pd.DataFrame:
+# 価格窓が足りない行で、前回の結果を残す対象になる本体の状態(2026-11-24)。確定(_FINAL_STATUSES)に加えて、
+# 判断前の足を使って決めた除外(excluded_scale)と、行の水準で決めた除外(excluded_bad_levels)。
+_SETTLED_STATUSES = _FINAL_STATUSES | {"excluded_scale", "excluded_bad_levels"}
+_TRACK_UNKNOWN = ["", "open", "nan", "None"]
+
+
+def history_short(ohlcv: pd.DataFrame, signal_date) -> bool:
+    """いまの価格窓が、この判断を測り直すのに足りないか。
+
+    足りない = 価格が1本も無い / 判断日が窓より前 / 判断時に閉まっていた足が ATR_FLOOR_BARS+1 本に満たない。
+    raw は直近 240 日ぶんで毎晩上書きされるので、古い判断から順に足りなくなる。足りない窓で測り直した結果は、
+    足りていた頃の結果より情報が少ない。窓の先頭が近づくと、ATR10 が出なくなり(併走の atr_floor が空欄になる)、
+    次に系列取り違えの検査ができなくなり(excluded_scale だった行が検査なしで測られる)、最後に判断日が窓の外へ出る
+    (data_window_expired)。日付が読めない行は窓の問題ではないので False(invalid_data のまま)。
+    """
+    if ohlcv is None or ohlcv.empty:
+        return True
+    sig_date = pd.to_datetime(signal_date, errors="coerce")
+    if pd.isna(sig_date):
+        return False
+    _idx0, anchor_idx = decision_time_anchor(ohlcv, sig_date)
+    return anchor_idx < ATR_FLOOR_BARS
+
+
+def _keep_finalized_rows(sim: pd.DataFrame, previous: pd.DataFrame | None,
+                         short_history=frozenset()) -> pd.DataFrame:
+    """前回の結果のうち、今回の実行が「知らないだけ」で消してしまうものを残す。
+
+    情報の少ない実行が、情報の多かった実行の結果を上書きしない、が規約。場面は3つ:
+    1. 手元の古い価格で回して、確定していた本体が open に戻る(#173)。
+    2. 同じく、確定していた併走側だけが open に戻る(#189)。
+    3. 価格窓が進んで、古い判断を測り直せなくなる(short_history。2026-11-24)。本体が settled なら行ごと残す。
+       残した行は simulated_at_utc も前回のままなので、最後に実際に測った時刻が分かる。
+    short_history: 今回の価格窓では測り直せない行の signal_id(history_short が True の行)。
+    """
     if previous is None or previous.empty or "signal_id" not in previous.columns or sim.empty:
         return sim
     prev = previous.drop_duplicates("signal_id", keep="last").set_index("signal_id")
     out = sim.set_index("signal_id")
     common = out.index.intersection(prev.index)
-    regress = common[(out.loc[common, "status"] == "open").values
-                     & prev.loc[common, "status"].isin(_FINAL_STATUSES).values]
+    new = out.loc[common].copy()                       # 今回測ったままの値(下で前回へ戻す前)
+    p_status = prev.loc[common, "status"].astype(str)
+    n_status = new["status"].astype(str)
+    short = pd.Series(common.isin(list(short_history)), index=common)
+    open_regress = n_status.eq("open") & p_status.isin(_FINAL_STATUSES)
+    short_regress = short & p_status.isin(_SETTLED_STATUSES)
+    regress = common[(open_regress | short_regress).values]
     if len(regress):
         keep_cols = [c for c in COLUMNS if c in prev.columns and c != "signal_id"]
         out.loc[regress, keep_cols] = prev.loc[regress, keep_cols].values
     for st_col, val_cols in _TRACKS.items():
         if st_col not in prev.columns or st_col not in out.columns:
             continue
-        p_st = prev.loc[common, st_col].astype(str)
-        p_final = p_st.notna() & ~p_st.isin(["", "open", "nan", "None"])
-        n_open = out.loc[common, st_col].astype(str).eq("open")
-        back = common[(n_open & p_final).values]
+        cols = [st_col] + [c for c in val_cols if c in prev.columns]
+        p_final = ~prev.loc[common, st_col].astype(str).isin(_TRACK_UNKNOWN)
+        n_st = new[st_col].astype(str)
+        back = common[(n_st.eq("open") & p_final).values]
         if len(back):
-            cols = [st_col] + [c for c in val_cols if c in prev.columns]
             out.loc[back, cols] = prev.loc[back, cols].values
+        # 3 で行ごと残した行でも、前回まだ決着していなかった併走側が今回決着していれば、そちらを使う。
+        # 系列そのものが短い資産では、本体が確定したあとも窓は足りないままなので、行ごと残すだけだと
+        # 併走側が open で固まる。本体が同じ確定状態で測り直せた行に限る(検査なしで測った除外行の値は使わない)。
+        forward = common[(short_regress & p_status.isin(_FINAL_STATUSES) & n_status.eq(p_status)
+                          & ~p_final & ~n_st.isin(_TRACK_UNKNOWN)).values]
+        if len(forward):
+            out.loc[forward, cols] = new.loc[forward, cols].values
     return out.reset_index().reindex(columns=COLUMNS)
 
 
@@ -559,6 +604,7 @@ def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None,
     kwargs = {"raw_dir": raw_dir} if raw_dir is not None else {}
     cache: dict[str, pd.DataFrame] = {}
     rows = []
+    short_history = set()
     for _, row in ledger.iterrows():
         side = normalize_side(row.get("side"))
         rank = str(row.get("rank") or "").strip().upper()
@@ -569,6 +615,8 @@ def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None,
         if asset not in cache:
             cache[asset] = load_ohlcv_frame(asset, **kwargs) if kwargs else load_ohlcv_frame(asset)
         out = simulate_row(row, cache[asset], simulated_at)
+        if history_short(cache[asset], row.get("date")):
+            short_history.add(out["signal_id"])
         if asset in CHASE_ASSETS and out["status"] not in {"excluded_scale", "excluded_bad_levels",
                                                            "invalid_data", "data_window_expired"}:
             out["chase_status"], out["chase_r"] = chase_row(row, cache[asset])
@@ -580,7 +628,7 @@ def simulate_ledger(ledger: pd.DataFrame, raw_dir: Path | None = None,
              out["atr_floor_widened"]) = atr_floor_row(row, cache[asset])
         rows.append(out)
     sim = pd.DataFrame(rows, columns=COLUMNS)
-    return _keep_finalized_rows(sim, previous)
+    return _keep_finalized_rows(sim, previous, short_history)
 
 
 def summarize(sim: pd.DataFrame) -> dict:
