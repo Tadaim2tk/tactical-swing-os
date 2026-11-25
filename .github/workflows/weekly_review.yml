@@ -65,13 +65,9 @@ jobs:
           else
             git commit -m "Append weekly review ledger [skip ci]" \
               -m "Data append commit permitted by governance_reform_2026-07 (data/ only, no code/docs/workflow changes)."
-            git pull --rebase origin main
-            # 鍵はpush直前に書き、直後に破棄する(依存インストール中に晒さない: #121 Codex P1)
-            key_file=$(mktemp)
-            trap 'rm -f "$key_file"' EXIT
-            printf '%s\n' "$TSO_BOT_DEPLOY_KEY" > "$key_file"
-            GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-              git push "git@github.com:$GITHUB_REPOSITORY.git" HEAD:main
+            # 専用鍵で push する。取り込み直し・鍵の扱い(#121 Codex P1)・弾かれたときのやり直しは
+            # tools/ci_push_main.sh にある(2026-11-25、runbook §1h)。
+            bash tools/ci_push_main.sh main
           fi
 
       - name: Upload weekly review artifacts

@@ -381,6 +381,46 @@ ChatGPT の本文を読めなくなり、台帳は 10/27 で止まって 10/31 �
 
 ---
 
+## 1h. 定期実行の push が弾かれたとき（2026-11-25 判明・同日修正）
+
+main へ直接 push する定期実行は4本ある（daily cycle・news narratives・narrative reliability・weekly review。
+専用鍵の例外経路）。daily cycle と news narratives は cron では5分ずれているが、GitHub は定期実行を数時間遅らせ、
+2本を同じ分にまとめて始めることがある。どちらも約40秒で終わる。
+
+**2026-11-25 に起きたこと。** 2本が 13:37:00 と 13:37:05（JST）に始まり、同じ秒に push した。先に入ったのは
+news narratives で、daily cycle は `cannot lock ref 'refs/heads/main': is at … but expected …` で弾かれた。
+push は1回きりで、弾かれたあと取り込み直す手順が無かったので、その日の夜間の台帳（採点・執行シミュレーション・
+市場コンテキストの写し・売買頻度の記録・機械生成シグナル）は main に入らず、ジョブは赤で終わった。
+そのあとの定期実行（評価・ダッシュボードなど）は、その日の台帳が無い main を読んだ。
+
+- 気付いたのは 19:59（6時間あと）。同じ run を再実行し、20:02 に台帳が main に入った（`d678880`）。ダッシュボードは
+  そのあと作り直した。
+- **その日の行は、ふだんより遅い時刻の価格で作られている。** 定期実行はふだん 9〜14時台（JST）に走る。
+  市場コンテキストの写しには作った時刻が残る（`generated_at_jst` が 20:02:41）。機械生成シグナル
+  （`data/generated_signal_log.csv`）には時刻の列が無い。11/25 の再実行では VIX が当日の日付の行になった
+  （ふだんの時刻なら前日の足まで）。GPT の判断の台帳（`data/signal_log.csv`）は取込で入るので、影響を受けない。
+- **Sheets には、弾かれた回の行も残っている。** 同期は push より前の手順なので、13:37 の回が MARKET_SNAPSHOT 5行・
+  SIGNALS 7行・EVALUATIONS 7行を入れ、20:02 の回が鍵の違う行（6・7・7行）を足した。リポジトリに無い行が
+  Sheets に数行ある。正はリポジトリ。
+
+**直し（同日）。** push を `tools/ci_push_main.sh` にまとめ、4本ともそれを呼ぶ。
+
+| 場面 | 動き |
+|---|---|
+| push が弾かれた | 取り込み直して（`git pull --rebase --autostash`）やり直す。最大5回、あいだは 5・10・15・20秒 |
+| 取り込みが衝突した（同じファイルの同じ場所を別の実行が書き換えた） | やり直さずに赤。機械がどちらかを選ばない |
+| 5回とも弾かれた | 赤。`This run's data is NOT on main` と書く |
+
+鍵は push の直前に書き、直後に消す（取り込みや待ちのあいだは置かない）。narrative reliability は、取り込み直さずに
+push して失敗を警告で流す作りだったので、同じスクリプトに寄せた（この手順が add するファイルは `.gitignore` の対象で、
+2026-11 時点では毎回「変更なし」で終わり、push まで来ていない）。試験は `src/test_ci_push_main.py`。
+
+**daily cycle が push の失敗で赤になったら、その日のうちに同じ run を再実行する**（`gh run rerun <run-id>`）。
+市場コンテキストの写しは、日をまたぐと埋められない（当時の値を作り直すと、あとの情報が混ざる）。再実行は最初から
+やり直すので、二重には入らない（弾かれた回のコミットは main に無い）。
+
+---
+
 ## 2. 毎朝の確認順序（上から順に5分）
 
 Dashboard を開いて、**この順番**で見る。上ほど「土台の健全性」、下ほど「中身」。
@@ -388,6 +428,7 @@ Dashboard を開いて、**この順番**で見る。上ほど「土台の健全
 1. **Data Health / Freshness** — まず計器自体が健全か。
    - daily_cycle が赤なら、snapshot 欠落か、**売買頻度の ALERT**（§1f。`reports/throughput_watch.md` を読む）か、
      **台帳の停止**（§1g。取込が2日続けて入っていない）。どれかはジョブの最後のステップのログに出る。
+     「Commit daily ledgers」の手順で赤なら **push が入っていない**（§1h。その日のうちに再実行する）。
    - `health_status` を見る → §3.1 の解釈表へ。
    - `critical/degraded` なら attention_layers を確認し、§4 の一次対応へ。
 2. **System Health** — datetime監査（タイムゾーン整合）。
@@ -477,6 +518,7 @@ Dashboard を開いて、**この順番**で見る。上ほど「土台の健全
 | validation suite が赤 | いずれかのスクリプトが例外 | Step Summary の missing 項目を特定し、該当スクリプトをローカル実行 |
 | daily_cycle が赤、ログに `ledger freshness ALERT` | 取込の経路が止まった（Codex が本文を読めない／予備の定期タスクが止めてある・承認待ち／ChatGPT 側が出力していない）。または台帳が読めない | §1g の順で確認。欠けた日は `tools/ingest_from_export.py` でまとめて入る |
 | daily_cycle が赤、ログに `ledger freshness could not run` | 鮮度を確認するスクリプトが異常終了した | Ledger freshness ステップのログを読む。手元で `python tools/ledger_freshness.py` |
+| daily_cycle（または news narratives・weekly review）が赤、ログに `could not push to main after 5 attempts` か `remote rejected` | 別の定期実行と同じ瞬間に push して、5回とも弾かれた。または取り込みが衝突した | **その日のうちに**同じ run を再実行する（§1h）。衝突なら、どの実行が同じファイルを書いたかをログで確かめてから |
 | Dashboard workflow が `Deploy GitHub Pages` で失敗（`No artifacts named "github-pages"`） | GitHub 側の一覧が、直前に上げた成果物をまだ返さなかった（2026-11-12 と 2026-11-22 の2回。2026-11-22 以降は同じジョブの中で30秒置いて1回やり直すので、赤になるのは2回続けて落ちたとき） | **同じ run を再実行しない**（同じ名前の成果物が2つになり `Multiple artifacts named "github-pages"` で必ず落ちる）。`gh workflow run dashboard.yml` で新しい run を起こす |
 
 > 共通原則: **「赤い＝壊れた」ではなく「赤い＝正直に異常を表示できている」**。

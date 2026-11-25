@@ -51,13 +51,12 @@ jobs:
             echo "no narrative changes to commit"
           else
             git commit -m "chore: narrative alignment + reliability artifacts [skip ci]"
-            # main-merge-gate ruleset (§6): 鍵はpush直前に書き込み直後に破棄(#121 Codex P1)。
-            key_file=$(mktemp)
-            trap 'rm -f "$key_file"' EXIT
-            printf '%s\n' "$TSO_BOT_DEPLOY_KEY" > "$key_file"
-            GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-              git push "git@github.com:$GITHUB_REPOSITORY.git" "HEAD:$GITHUB_REF_NAME" \
-              || echo "warning: push failed (possibly concurrent update)"
+            # main-merge-gate ruleset (§6): 専用鍵で push する。取り込み直し・鍵の扱い(#121 Codex P1)・
+            # 弾かれたときのやり直しは tools/ci_push_main.sh にある(2026-11-25、runbook §1h)。
+            # 以前は取り込み直さずに push し、失敗を警告で流していた(入らなかったことが緑のまま残る)。
+            # いまは最後まで入らなければ赤になる。なお、この手順が add するファイルは .gitignore の対象で、
+            # 2026-11 時点では毎回「no narrative changes to commit」で終わっている(push まで来ない)。
+            bash tools/ci_push_main.sh "$GITHUB_REF_NAME"
           fi
 
       - name: Upload narrative artifacts
