@@ -1511,3 +1511,13 @@ date,signal_id,asset,side,rank,type,entry_low,entry_high,sl,tp1,tp2,rr,win_prob,
 2026-11-25,20261125_DXY_NONE_NO_TRADE,DXY,NONE,NO_TRADE,NO_TRADE,,,,,,,,,48,44,72,,MIXED,49,51,46,45,49,50,direction_conflict,DXY_5tradingdays,partially_verified,chatgpt_app
 2026-11-25,20261125_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,NO_TRADE,,,,,,,,,47,42,76,,EVENT,46,50,44,43,47,49,PCE_direction_uncertain,US10Y_yield_5tradingdays,partially_verified,chatgpt_app
 2026-11-25,20261125_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,45,40,79,,RISK_OFF,47,44,51,42,46,48,volatility_direction_uncertain,VIX_index_5tradingdays,partially_verified,chatgpt_app
+2026-11-26,20261126_GOLD_SELL_PULLBACK,GOLD,SELL,B,PULLBACK,3570,3610,3750,3350,3200,1.50,0.57,0.35,70,71,39,0.25,RISK_OFF,63,66,71,58,72,69,above_3750_holiday_risk,GCZ26_ATR10_5day,partially_verified,chatgpt_app
+2026-11-26,20261126_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,NO_TRADE,,,,,,,,,49,43,79,,RISK_OFF,46,38,58,42,52,46,ETF_CME_basis_unverified,BTCUSD_5day,partially_verified,chatgpt_app
+2026-11-26,20261126_ETH_NONE_NO_TRADE,ETH,NONE,NO_TRADE,NO_TRADE,,,,,,,,,40,37,84,,RISK_OFF,43,35,49,40,45,43,reference_price_missing,ETHUSD_5day,unverified,chatgpt_app
+2026-11-26,20261126_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,NO_TRADE,,,,,,,,,48,42,77,,MIXED,48,45,50,39,49,46,supply_risk_conflict,WTI_futures_5day,partially_verified,chatgpt_app
+2026-11-26,20261126_USDJPY_BUY_PULLBACK,USDJPY,BUY,B,PULLBACK,158.40,159.00,155.00,162.50,164.00,1.0270,0.55,0.09,66,62,45,0.25,MIXED,61,59,67,49,67,64,below_155_intervention_risk,USDJPY_ATR10_5day,partially_verified,chatgpt_app
+2026-11-26,20261126_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,48,46,80,,RISK_OFF,52,45,57,43,54,53,ES_reference_price_missing,ESZ26_5day,unverified,chatgpt_app
+2026-11-26,20261126_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,NO_TRADE,,,,,,,,,57,59,75,,RISK_OFF,59,51,64,46,62,60,NQ_reference_price_missing,NQZ26_5day,partially_verified,chatgpt_app
+2026-11-26,20261126_DXY_NONE_NO_TRADE,DXY,NONE,NO_TRADE,NO_TRADE,,,,,,,,,48,42,74,,MIXED,49,48,51,45,51,50,latest_close_missing,DXY_index_5day,partially_verified,chatgpt_app
+2026-11-26,20261126_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,NO_TRADE,,,,,,,,,44,40,76,,MIXED,46,45,48,43,47,48,latest_yield_missing,US10Y_yield_5day,partially_verified,chatgpt_app
+2026-11-26,20261126_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,45,43,81,,RISK_OFF,47,43,54,39,49,51,closing_value_missing,VIX_index_5day,partially_verified,chatgpt_app
