@@ -58,13 +58,9 @@ jobs:
           else
             git commit -m "Append narrative memory store [skip ci]" \
               -m "Data-append commit permitted by governance_reform_2026-07 (data/ only)."
-            git pull --rebase origin main
-            # main-merge-gate ruleset (§6): 鍵はpush直前に書き込み直後に破棄(#121 Codex P1)。
-            key_file=$(mktemp)
-            trap 'rm -f "$key_file"' EXIT
-            printf '%s\n' "$TSO_BOT_DEPLOY_KEY" > "$key_file"
-            GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-              git push "git@github.com:$GITHUB_REPOSITORY.git" HEAD:main
+            # main-merge-gate ruleset (§6): 専用鍵で push する。取り込み直し・鍵の扱い(#121 Codex P1)・
+            # 弾かれたときのやり直しは tools/ci_push_main.sh にある(2026-11-25、runbook §1h)。
+            bash tools/ci_push_main.sh main
           fi
 
       - name: Upload news narrative artifacts
