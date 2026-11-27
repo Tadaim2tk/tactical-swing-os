@@ -1716,11 +1716,15 @@ def execution_view_summary(scores: pd.DataFrame, ledger: pd.DataFrame) -> dict:
     return out
 
 
-def execution_sim_summary(sim: pd.DataFrame) -> dict:
+def execution_sim_summary(sim: pd.DataFrame, frames: dict | None = None) -> dict:
     """SL/TP執行シミュレーション(data/execution_simulation.csv)のダッシュボード用サマリー。
 
     集計ロジックは simulate_execution.summarize を共有(重複実装しない)。
     Pages でも追跡CSVから直接計算できる。表示のみ。
+
+    open_book: 進行中の擬似取引（建玉）の含みR と、週ごとの「確定＋含み」の変化（src/open_book.py。2026-11-27）。
+    決着ぶんだけを出していたので、含み損を抱えた週が良く見えていた。frames は試験用（資産 → 日足）。
+    渡さなければ data/raw から読む。価格が読めなければ available=False で、0 とは書かない。
     """
     try:
         from simulate_execution import summarize as _summarize
@@ -1728,6 +1732,11 @@ def execution_sim_summary(sim: pd.DataFrame) -> dict:
         return {"available": False}
     out = _summarize(sim if sim is not None else pd.DataFrame())
     out["available"] = bool(out.get("orders"))
+    try:
+        from open_book import summary as _open_book
+        out["open_book"] = _open_book(sim if sim is not None else pd.DataFrame(), frames)
+    except Exception as exc:  # 表示の追加で、既存の集計を落とさない
+        out["open_book"] = {"available": False, "reason": f"計算できなかった: {type(exc).__name__}"}
     return out
 
 
