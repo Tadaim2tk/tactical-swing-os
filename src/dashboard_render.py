@@ -802,6 +802,75 @@ def throughput_block(tp: dict) -> str:
     return f"{line}{note}{stale}<h3>週ごと(台帳から、直近8週)</h3>{table}"
 
 
+def _signed_r(v) -> str:
+    return f"{v:+.1f}R" if isinstance(v, (int, float)) and v == v else "—"
+
+
+def _tone_of(v) -> str:
+    if not isinstance(v, (int, float)) or v != v or v == 0:
+        return ""
+    return "positive" if v > 0 else "negative"
+
+
+def open_book_block(book: dict | None, tile) -> str:
+    """進行中の擬似取引（建玉）の含みR と、週の「確定＋含み」の変化（定義は src/open_book.py）。
+
+    決着ぶんだけを見せると、含み損を抱えた週が良く見える（2026-11-23 の週: 決着 +2.8R・進行中 34 件の含み −11.5R）。
+    測れなかったときは 0 と書かず、測れなかったと書く。
+    """
+    b = book or {}
+    head = "<h3>進行中の擬似取引を、いまの値で測ると</h3>"
+    if not b.get("available"):
+        why = html.escape(str(b.get("reason") or "価格を取れなかった"))
+        return head + f'<p class="notice">含み損益は未計算です（{why}）。上の合計は決着ぶんだけで、進行中の損益は入っていません。</p>'
+    weeks = b.get("weeks") or []
+    cur = weeks[-1] if weeks else {}
+    prev = weeks[-2] if len(weeks) >= 2 else {}
+    mark, equity = b.get("mark_r"), b.get("equity_r")
+    tiles = [
+        tile("進行中の含み(未確定)", _signed_r(mark), f"約定済み {b.get('positions', 0)}件・{b.get('as_of', '')} までの値", _tone_of(mark)),
+        tile("確定＋含み", _signed_r(equity), f"決着の合計 {_signed_r(b.get('realized_r'))} に含みを足した値", _tone_of(equity)),
+    ]
+    if cur:
+        sub = f"{cur.get('week_start', '')} の週・{cur.get('last_day', '')} まで"
+        if prev:
+            sub += f"／前の週 {_signed_r(prev.get('change_r'))}"
+        tiles.append(tile("今週の変化(確定＋含み)", _signed_r(cur.get("change_r")), sub, _tone_of(cur.get("change_r"))))
+    extra = []
+    if b.get("unfilled_open"):
+        extra.append(f"まだ約定していない注文 {b['unfilled_open']}件は含みに入れていません")
+    if b.get("unmeasured"):
+        extra.append(f"価格や幅が読めず測れなかった建玉が {b['unmeasured']}件あります（含みに入っていません）")
+    rows = "".join(
+        f"<tr><td>{html.escape(str(r.get('asset', '')))}</td><td>{int(r.get('positions', 0))}</td>"
+        f"<td>{_signed_r(r.get('mark_r'))}</td><td>{html.escape(str(r.get('mark_date', '')))}</td></tr>"
+        for r in (b.get("by_asset") or [])
+    )
+    table = ('<div class="table-wrap"><table class="slim"><thead><tr><th>資産</th><th>建玉</th><th>含みR</th><th>評価に使った足</th></tr></thead>'
+             f"<tbody>{rows}</tbody></table></div>" if rows else "")
+    note = (
+        '<p class="notice">含みは、約定して決着していない擬似取引を、資産ごとの最新の日足の終値で測った値です。'
+        "<b>確定した結果ではありません</b>（最新の足は形成途中のことがあります）。SL・TP1・5営業日の時間決済のどれかで決着すると、"
+        "その値に置き換わります。週は月曜〜日曜です。"
+        + ("".join(f" {html.escape(x)}。" for x in extra)) + "</p>"
+    )
+    return head + note + f'<div class="tiles">{"".join(tiles)}</div>' + table
+
+
+def week_change_pill(execution_sim: dict | None) -> str:
+    """ヘッダーに出す、擬似執行の今週の変化（確定＋含み）。決着ぶんだけだと、含み損を抱えた週が良く見える。"""
+    label = "今週の変化(擬似執行・確定＋含み)"
+    book = (execution_sim or {}).get("open_book") or {}
+    weeks = book.get("weeks") or []
+    if not (book.get("available") and weeks):
+        return summary_pill(label, "未計算", "neutral")
+    chg = weeks[-1].get("change_r")
+    tone = "neutral"
+    if isinstance(chg, (int, float)) and chg == chg and chg != 0:
+        tone = "good" if chg > 0 else "warn"
+    return summary_pill(label, f"{_signed_r(chg)}／含み {_signed_r(book.get('mark_r'))}", tone)
+
+
 def summary_pill(label: str, value: str, tone: str) -> str:
     return (
         f'<span class="summary-pill pill-{tone}">'
@@ -1469,6 +1538,7 @@ def render_html(
     header_pills = (
         ledger_pill
         + summary_pill("売買頻度", _tp_txt, tp.get("tone", "neutral") if tp.get("available") else "neutral")
+        + week_change_pill(execution_sim)
         + summary_pill("計器の健全性", _health_txt, _health_tone)
         + summary_pill("今週のモード", _mode_txt, _mode_tone)
         + summary_pill("B級 5日勝率(終値)", str(prediction_log.get("b_rank_win_rate_5d", "—")), "good" if prediction_log.get("available") else "neutral")
@@ -1588,6 +1658,7 @@ def render_html(
         sim_detail = '<p class="notice">決着した擬似取引がまだありません。</p>'
     else:
         sim_detail = '<p class="notice">シミュレーションデータ未生成(日次CIで自動生成されます)。</p>'
+    book_html = open_book_block(es.get("open_book"), _tile) if es.get("available") else ""
 
     exec_note = (
         '<p class="notice">終値基準の方向採点で、SL/TP執行は再現していません。到達判定は当日タッチを拾えないため、'
@@ -1645,6 +1716,7 @@ def render_html(
       <p class="notice">上の「到達×終値」が方向の質(上限寄り)を示すのに対し、こちらは記帳どおりのSL/TP1で執行した場合の下限寄りの見積もりです。実際はこの間にあります。</p>
       {sim_detail}
       <div class="tiles">{sim_tiles}</div>
+      {book_html}
     </section>
 
     <details class="group" id="verify"><summary><span class="n" style="color:var(--accent)">04</span> 検証 — 予測は当たっているか<span class="g-sub">評価・理由コード・見送り検証・類似局面・内部エンジン</span></summary><div class="g-body">
