@@ -3,13 +3,14 @@
 
     python src/fetch_market.py                                  # 価格(data/raw は git 管理外)を先に取る
     python tools/analysis/weekly_2026_11_27.py                  # 全部
-    python tools/analysis/weekly_2026_11_27.py flips direction  # 一部だけ: geometry / flips / direction / rows / chase / weekend
+    python tools/analysis/weekly_2026_11_27.py flips direction  # 一部だけ: geometry / flips / direction / rows / chase / weekend / follow / notes
 
 一度きりの探索で、採用した規則は1つも無い。読むときの前提:
 
 * 数字は、実行した日の台帳と価格の窓（直近 240 日ぶん）で決まる。あとから同じコマンドを打つと、窓が進んだぶん
   古い期間の値が変わる（測れない行が増える）。文書の値は main の 401819b の台帳と、2026-11-27 13:45 JST に取った価格。
-* 切り口を6つ試した。多重比較の補正はしていない。符号が出たものも「観察」で、次の較正で前向きに確かめる対象。
+* 切り口を6つ試した（geometry〜weekend）。多重比較の補正はしていない。符号が出たものも「観察」で、次の較正で前向きに確かめる対象。
+  同じ日の夕方に、予測の中身を読むための2つ（follow・notes）を足した。follow は7つ目の切り口。
 * 取引しない資産（DXY・US10Y）は除いてある。
 * 行（注文）で数えた数字は、同じ見立てを毎日出し直した日数ぶん重なる。見立てごと・判断日ごとの数字を並べて出す。
 
@@ -28,6 +29,7 @@
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -287,7 +289,71 @@ def weekend(orders, frames):
     print("\n全期間"); print(x.groupby("kind").apply(lambda d: pd.Series(result_cols(d))).to_string())
 
 
-SECTIONS = {"geometry": geometry, "flips": flips, "direction": direction, "rows": rows, "chase": chase, "weekend": weekend}
+# --------------------------------------------------------------------------- 7. 直前の足と同じ向きか
+def follow(orders, frames):
+    print("\n" + "=" * 100 + "\n7. 直前の足と同じ向きに出した注文と、逆向きに出した注文（1本後に向きが合っていたか）\n" + "=" * 100)
+    print("直前の足 = 判断時に閉まっていた最後の足（その前の足の終値からの向き）。\n"
+          "1本後 = 採点の台帳の fwd_return_1d（判断の後に始まる最初の足の終値。判断時に閉まっていた足の終値から測る）。\n"
+          "暗号資産の1本後は、判断の時点でほぼ見えていた1本を含む（判断の2時間後に閉まる足）。週5日の資産だけの表を並べて出す。")
+    x = anchors(orders, frames)
+    prev = [float(frames[a].iloc[int(i) - 1]["close"]) for a, i in zip(x["asset"], x["bar_a"])]
+    x["follow"] = x["sgn"] * (x["c0"] - np.array(prev)) > 0
+    sc = pd.read_csv("data/prediction_log_scores.csv")
+    sc["key"] = sc["date"].astype(str) + "|" + sc["asset"].astype(str)
+    x = x.merge(sc[["key", "side", "fwd_return_1d"]], on="key", how="left")
+    x["hit1"] = np.sign(x["fwd_return_1d"] * x["side"].map({"LONG": 1.0, "SHORT": -1.0})).replace(0, np.nan)
+
+    def slot(day):
+        if day < "2026-11-04":
+            return era(day)
+        return "c1 11/04〜11/20" if day < "2026-11-21" else "c2 11/21〜11/27"
+
+    def per(d):
+        n, f, g = d["hit1"].dropna(), d[d["follow"]]["hit1"].dropna(), d[~d["follow"]]["hit1"].dropna()
+        return pd.Series({"注文": len(d), "直前の足と同じ向きの割合": round(float(d["follow"].mean()), 2),
+                          "1本後の当たり": f"{int((n > 0).sum())}/{len(n)}", "同じ向きの注文": f"{int((f > 0).sum())}/{len(f)}",
+                          "逆向きの注文": f"{int((g > 0).sum())}/{len(g)}", "判断日の数": d["day"].nunique()})
+    x["slot"] = x["day"].map(slot)
+    print("\n期間ごと（取引する資産）"); print(x.groupby("slot").apply(per).to_string())
+    wk = x[~x["asset"].isin(CRYPTO)]
+    print("\n期間ごと（週5日の資産だけ: GOLD・NASDAQ・SPX・WTI・USDJPY）"); print(wk.groupby("slot").apply(per).to_string())
+    w = x[x["day"] >= "2026-11-21"].copy()
+    # 列の名前で束ねると、pandas 3 は束ねた列を per に渡さない。同じ値の別の系列で束ねる
+    print("\n11/21〜11/27 の日ごと"); print(w.groupby(w["day"].str[5:].rename("日")).apply(per).to_string())
+    # 文字の配列どうしの + は numpy の版によって通らない。1行ずつ組み立てる
+    w["cell"] = [("買" if s == "BUY" else "売") + ("?" if h != h else ("○" if h > 0 else "×")) for s, h in zip(w["side_n"], w["hit1"])]
+    print("\n11/21〜11/27 の表（○ = 1本後に向きが合っていた／× = 外れ／? = まだ採点されていない／・ = 注文なし）")
+    print(w.assign(d=w["day"].str[5:]).pivot(index="asset", columns="d", values="cell").fillna("・").to_string())
+    four = w[w["day"] <= "2026-11-24"]
+    idx = four[four["asset"].isin(["GOLD", "NASDAQ", "SPX", "ETH"])]
+    print(f"\n11/21〜11/24 の4日間: {per(four)['1本後の当たり']}（うち GOLD・NASDAQ・SPX・ETH: {per(idx)['1本後の当たり']}）")
+
+
+# --------------------------------------------------------------------------- 8. 本文の注記
+_ATR_GAP = re.compile(r"暫定|未確定|できていません|できていない|未完了|確保でき")
+_NO_A = re.compile(r"保留|見送|しない|行いません|昇格|認定")
+
+
+def notes(orders, frames):
+    print("\n" + "=" * 100 + "\n8. 毎朝の本文（data/prediction_log_archive）で、ATR10 を計算できなかったと書いた日\n" + "=" * 100)
+    print("文面の一致で数える（意味は読んでいない）。(1) 同じ行に「ATR10」と、暫定・未確定・できていません・できていない・未完了・確保でき の\n"
+          "どれかがある日。(2) 同じ行に「A級」と「ATR10 か OHLC」と、保留・見送・しない・行いません・昇格・認定 のどれかがある日。")
+    rows_ = []
+    for path in sorted(Path("data/prediction_log_archive").glob("*_tso-daily-signal-log.md")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        gap = any("ATR10" in ln and _ATR_GAP.search(ln) for ln in lines)
+        no_a = any("A級" in ln and ("ATR10" in ln or "OHLC" in ln) and _NO_A.search(ln) for ln in lines)
+        rows_.append({"month": path.name[:7], "day": path.name[:10], "gap": gap, "no_a": no_a})
+    t = pd.DataFrame(rows_)
+    print(t.groupby("month").agg(本文のある日=("day", "size"), ATR10を計算できなかったと書いた日=("gap", "sum"),
+                                 A級にしない理由に挙げた日=("no_a", "sum")).to_string())
+    nov = t[t["month"] == "2026-11"]
+    print("11月で (1) に当たる日:", " ".join(d[8:] for d in nov[nov["gap"]]["day"]))
+    print("11月で (2) に当たる日:", " ".join(d[8:] for d in nov[nov["no_a"]]["day"]))
+
+
+SECTIONS = {"geometry": geometry, "flips": flips, "direction": direction, "rows": rows, "chase": chase, "weekend": weekend,
+            "follow": follow, "notes": notes}
 
 
 def main(argv=None) -> int:
