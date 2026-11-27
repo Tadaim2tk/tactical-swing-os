@@ -332,6 +332,9 @@ def follow(orders, frames):
 # --------------------------------------------------------------------------- 8. 本文の注記
 _ATR_GAP = re.compile(r"暫定|未確定|できていません|できていない|未完了|確保でき")
 _NO_A = re.compile(r"保留|見送|しない|行いません|昇格|認定")
+# changelog (23)（2026-11-28 から）: 本文は ATR10 の表を開けたかを1行で書く。`atr_table: as_of=YYYY-MM-DD` か `atr_table: unavailable`
+_ATR_TABLE = re.compile(r"atr_table\s*[:：]\s*(?:as_of\s*=\s*(\d{4}-\d{2}-\d{2})|(unavailable))")
+ATR_TABLE_FROM = "2026-11-28"
 
 
 def notes(orders, frames):
@@ -340,16 +343,28 @@ def notes(orders, frames):
           "どれかがある日。(2) 同じ行に「A級」と「ATR10 か OHLC」と、保留・見送・しない・行いません・昇格・認定 のどれかがある日。")
     rows_ = []
     for path in sorted(Path("data/prediction_log_archive").glob("*_tso-daily-signal-log.md")):
-        lines = path.read_text(encoding="utf-8").splitlines()
+        # Codex が保存した本文は、コードフェンスの外の `_` が `\_` になっている（changelog (22)）。同じ形に戻してから数える
+        lines = path.read_text(encoding="utf-8").replace("\\_", "_").splitlines()
         gap = any("ATR10" in ln and _ATR_GAP.search(ln) for ln in lines)
         no_a = any("A級" in ln and ("ATR10" in ln or "OHLC" in ln) and _NO_A.search(ln) for ln in lines)
-        rows_.append({"month": path.name[:7], "day": path.name[:10], "gap": gap, "no_a": no_a})
+        m = next((mm for mm in (_ATR_TABLE.search(ln) for ln in lines) if mm), None)
+        table = "" if m is None else (m.group(1) or "unavailable")
+        rows_.append({"month": path.name[:7], "day": path.name[:10], "gap": gap, "no_a": no_a, "atr_table": table})
     t = pd.DataFrame(rows_)
     print(t.groupby("month").agg(本文のある日=("day", "size"), ATR10を計算できなかったと書いた日=("gap", "sum"),
                                  A級にしない理由に挙げた日=("no_a", "sum")).to_string())
     nov = t[t["month"] == "2026-11"]
     print("11月で (1) に当たる日:", " ".join(d[8:] for d in nov[nov["gap"]]["day"]))
     print("11月で (2) に当たる日:", " ".join(d[8:] for d in nov[nov["no_a"]]["day"]))
+    after = t[t["day"] >= ATR_TABLE_FROM]
+    print(f"\n(23) の後（{ATR_TABLE_FROM}〜。本文は ATR10 の表を開けたかを `atr_table:` の1行で書く）: 本文のある日 {len(after)}")
+    if len(after):
+        opened = after[~after["atr_table"].isin(["", "unavailable"])]
+        print(f"  表を開けたと書いた日 {len(opened)} / 開けなかったと書いた日 {int((after['atr_table'] == 'unavailable').sum())}"
+              f" / 行が無い日 {int((after['atr_table'] == '').sum())} / なお「計算できない」と書いた日 {int(after['gap'].sum())}")
+        for _, r in after.iterrows():
+            lag = "" if r["atr_table"] in ("", "unavailable") else f"（判断日の {(pd.Timestamp(r['day']) - pd.Timestamp(r['atr_table'])).days} 日前）"
+            print(f"  {r['day']}: atr_table={r['atr_table'] or '行なし'}{lag}{' ・「計算できない」の文面あり' if r['gap'] else ''}")
 
 
 SECTIONS = {"geometry": geometry, "flips": flips, "direction": direction, "rows": rows, "chase": chase, "weekend": weekend,

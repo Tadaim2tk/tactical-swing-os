@@ -48,3 +48,22 @@ def test_stops_without_prices_instead_of_printing_empty_tables(tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     assert _mod().main([]) == 1
     assert "価格が無い" in capsys.readouterr().out
+
+
+def test_notes_reads_the_atr_table_line_in_both_spellings_after_the_change(tmp_path, monkeypatch, capsys):
+    # (23): 2026-11-28 から、本文は ATR10 の表を開けたかを1行で書く。Codex が保存した本文では `_` が `\\_` になる
+    arch = tmp_path / "data" / "prediction_log_archive"
+    arch.mkdir(parents=True)
+    (arch / "2026-11-27_tso-daily-signal-log.md").write_text("atr_table: as_of=2026-11-25\n", encoding="utf-8")            # 境界より前は数えない
+    (arch / "2026-11-28_tso-daily-signal-log.md").write_text("`atr\\_table: as\\_of=2026-11-26`\n", encoding="utf-8")
+    (arch / "2026-11-29_tso-daily-signal-log.md").write_text("atr_table: unavailable\nATR10 は推定。SL は暫定。\n", encoding="utf-8")
+    (arch / "2026-11-30_tso-daily-signal-log.md").write_text("本日の結論\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    _mod().notes(None, None)
+    out = capsys.readouterr().out
+    assert "本文のある日 3" in out
+    assert "表を開けたと書いた日 1 / 開けなかったと書いた日 1 / 行が無い日 1 / なお「計算できない」と書いた日 1" in out
+    assert "2026-11-28: atr_table=2026-11-26（判断日の 2 日前）" in out
+    assert "2026-11-29: atr_table=unavailable ・「計算できない」の文面あり" in out
+    assert "2026-11-30: atr_table=行なし" in out
+
