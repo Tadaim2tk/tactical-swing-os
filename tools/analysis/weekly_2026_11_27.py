@@ -21,6 +21,8 @@
 * 期限 = 執行シミュレーションの時間決済の足（判断の後に始まる最初の足を0本目として5本先。EXIT_DEADLINE_BARS）。
 * 成績 = 執行シミュレーションの r_result。未決着で約定済みの行は、最新の終値で測った含みR（src/open_book.py）を使う。
   「決着」とだけ書いた列は r_result だけ。
+* 形成途中の足（系列の最後の足で、src/score_prediction_log.py の bar_is_final が確定と認めないもの）を使うのは、
+  この含みR だけ。「期限までの動き」と「届いた割合」には、確定した足しか使わない（#242 Codex P2）。
 * 期間: a = 2026-06〜09-15（見立てを毎日出し直していた頃）／b = 09-16〜11-03（注文がほぼ出なかった頃。SL幅 0.6 ATR）／
   c = 11-04〜（いまの本文）。
 """
@@ -36,7 +38,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 import open_book as ob  # noqa: E402
 import throughput_metrics as tm  # noqa: E402
-from score_prediction_log import decision_time_anchor, load_ohlcv_frame  # noqa: E402
+from score_prediction_log import _current_utc_date, bar_is_final, decision_time_anchor, load_ohlcv_frame  # noqa: E402
 from simulate_execution import EXIT_DEADLINE_BARS, atr_at_decision  # noqa: E402
 
 pd.set_option("display.width", 250)
@@ -46,6 +48,11 @@ pd.set_option("display.max_columns", 50)
 CONTEXT = {"DXY", "US10Y"}
 CRYPTO = {"BTC", "ETH"}
 RAW = Path("data/raw")
+
+
+def final_len(f: pd.DataFrame) -> int:
+    """確定した足の本数。系列の最後の足が形成途中なら、その1本を除く。"""
+    return len(f) if bar_is_final(f, len(f) - 1, _current_utc_date()) else len(f) - 1
 
 
 def era(day: str) -> str:
@@ -121,7 +128,7 @@ def geometry(orders, frames):
     for a, f in frames.items():
         span = (2 if a in CRYPTO else 1) + EXIT_DEADLINE_BARS          # anchor の次の足から期限の足まで（週5日の資産は6本、暗号資産は7本）
         up, dn = [], []
-        for i in range(10, len(f) - span):
+        for i in range(10, final_len(f) - span):                         # 期限の足が確定している窓だけ
             atr = atr_at_decision(f, i)
             if not atr == atr or atr <= 0:
                 continue
@@ -170,7 +177,8 @@ def flips(orders, frames):
                 continue
             anc, k, sgn = int(g.loc[i, "bar_a"]), int(g.loc[i, "bar_k"]), g.loc[i, "sgn"]
             exit_i = k + EXIT_DEADLINE_BARS                              # 期限の足（判断後の最初の足を0本目として5本先）
-            after = sgn * (float(f.iloc[exit_i]["close"]) - g.loc[i, "c0"]) / g.loc[i, "atr"] if exit_i < len(f) else np.nan
+            # 期限の足が確定していなければ「出そろった」に入れない（形成途中の終値は、足が閉じるまでに変わる）
+            after = sgn * (float(f.iloc[exit_i]["close"]) - g.loc[i, "c0"]) / g.loc[i, "atr"] if exit_i < final_len(f) else np.nan
             back = i + 1 < len(g) and g.loc[i + 1, "side_n"] != g.loc[i, "side_n"] and (g.loc[i + 1, "date"] - g.loc[i, "date"]).days <= 2
             last_move = sgn * (float(f.iloc[anc]["close"]) - float(f.iloc[anc - 1]["close"]))
             rows.append({"day": g.loc[i, "day"], "asset": a, "new": g.loc[i, "side_n"], "era": g.loc[i, "era"],
