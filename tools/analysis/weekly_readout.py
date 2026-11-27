@@ -80,6 +80,11 @@ def readout(sim: pd.DataFrame, frames: dict, weeks: int, context: set) -> str:
             out.append("  該当なし")
             continue
         for _, r in wk.iterrows():
+            if r["incomplete"]:
+                out.append(f"  {r['week_start']:%m/%d} の週（{pd.Timestamp(r['last_day']):%m/%d} まで）: 変化は出せない"
+                           f"（測れない建玉が、前の週の終わりに {int(r['prev_unmeasured'])} 件・この週の終わりに {int(r['unmeasured'])} 件）"
+                           f" / 確定ぶんの変化 {_r(r['realized_change_r'])}")
+                continue
             out.append(f"  {r['week_start']:%m/%d} の週（{pd.Timestamp(r['last_day']):%m/%d} まで）: 変化 {_r(r['change_r'])}"
                        f"（うち確定 {_r(r['realized_change_r'])}） / 週の終わりの含み {_r(r['mark_r'])} / 確定＋含み（記録の最初からの通算） {_r(r['equity_r'])}")
 

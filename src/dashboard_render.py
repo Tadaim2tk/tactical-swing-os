@@ -833,7 +833,11 @@ def open_book_block(book: dict | None, tile) -> str:
     ]
     if cur:
         sub = f"{cur.get('week_start', '')} の週・{cur.get('last_day', '')} まで"
-        if prev:
+        if cur.get("incomplete"):
+            # 比べる日のどちらかに測れない建玉がある。その含みが片方にだけ入らず、符号まで変わりうるので数字を出さない
+            sub += (f"／測れない建玉があり比べられません（前の週の終わり {cur.get('prev_unmeasured', 0)}件・最新 {cur.get('unmeasured', 0)}件）。"
+                    f"確定ぶんの変化は {_signed_r(cur.get('realized_change_r'))}")
+        elif prev:
             sub += f"／前の週 {_signed_r(prev.get('change_r'))}"
         tiles.append(tile("今週の変化(確定＋含み)", _signed_r(cur.get("change_r")), sub, _tone_of(cur.get("change_r"))))
     extra = []
@@ -864,6 +868,8 @@ def week_change_pill(execution_sim: dict | None) -> str:
     weeks = book.get("weeks") or []
     if not (book.get("available") and weeks):
         return summary_pill(label, "未計算", "neutral")
+    if weeks[-1].get("incomplete"):
+        return summary_pill(label, "比べられない(測れない建玉あり)", "neutral")
     chg = weeks[-1].get("change_r")
     tone = "neutral"
     if isinstance(chg, (int, float)) and chg == chg and chg != 0:

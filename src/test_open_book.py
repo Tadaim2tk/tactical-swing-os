@@ -308,3 +308,63 @@ def test_cli_fails_clearly_without_prices_or_without_the_table(tmp_path, capsys)
     assert "読めなかった" in capsys.readouterr().out
     assert _cli().main(["--sim", str(tmp_path / "nope.csv"), "--raw-dir", str(raw)]) == 1
     assert "が無い" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- 測れない建玉がある週（#241 Codex P2）
+def _two_asset_sim():
+    # ZZZ は価格が無い。先週は建玉、今週 +1.0R で決着。AAA は先週から建玉のまま
+    return _sim([
+        ["2026-11-19", "z", "ZZZ", "LONG", "filled_time_exit", "2026-11-19", 10.0, 1.0, "2026-11-24", "1.0"],
+        ["2026-11-20", "a", "AAA", "LONG", "open", "2026-11-20", 105.0, 10.0, "", ""],
+    ])
+
+
+def test_weekly_change_is_withheld_when_an_endpoint_has_unmeasured_positions():
+    # 先週の終わり（11/22）に ZZZ が測れない。ZZZ の含みが +2R だったなら本当の変化は −1R 側で、出てくる数字と符号が逆になりうる
+    wk = ob.weekly_changes(ob.equity_curve(_two_asset_sim(), FRAMES, "2026-11-09", "2026-11-25")).iloc[-1]
+    assert bool(wk["incomplete"]) and wk["prev_unmeasured"] == 1 and wk["unmeasured"] == 0
+    assert math.isnan(wk["change_r"])
+    assert wk["realized_change_r"] == pytest.approx(1.0)      # 確定ぶんは価格に依らないので出す
+    assert wk["equity_r"] == pytest.approx(1.0 - 0.4)         # 最新の日は全部測れている
+
+
+def test_weekly_change_is_withheld_when_the_latest_day_has_unmeasured_positions():
+    sim = _sim([
+        ["2026-11-24", "z", "ZZZ", "LONG", "open", "2026-11-24", 10.0, 1.0, "", ""],
+        ["2026-11-20", "a", "AAA", "LONG", "open", "2026-11-20", 105.0, 10.0, "", ""],
+    ])
+    wk = ob.weekly_changes(ob.equity_curve(sim, FRAMES, "2026-11-09", "2026-11-25")).iloc[-1]
+    assert bool(wk["incomplete"]) and wk["unmeasured"] == 1 and wk["prev_unmeasured"] == 0
+    assert math.isnan(wk["change_r"]) and math.isnan(wk["equity_r"]) and math.isnan(wk["mark_r"])
+
+
+def test_summary_and_dashboard_do_not_name_a_change_for_an_incomplete_week():
+    es = ds.execution_sim_summary(_two_asset_sim().assign(rank="B", risk_pct=0.25, capital_pct=""), FRAMES)
+    week = es["open_book"]["weeks"][-1]
+    assert week["incomplete"] is True and week["change_r"] is None and week["realized_change_r"] == pytest.approx(1.0)
+    # いまの建玉は全部測れているので、建玉の注意書きには何も出ない。週のほうで知らせる
+    assert es["open_book"]["unmeasured"] == 0
+    text = dr.open_book_block(es["open_book"], _tile)
+    assert "[今週の変化(確定＋含み)|—|2026-11-23 の週・2026-11-25 まで／測れない建玉があり比べられません（前の週の終わり 1件・最新 0件）。確定ぶんの変化は +1.0R|]" in text
+    pill = dr.week_change_pill(es)
+    assert "比べられない(測れない建玉あり)" in pill and "pill-neutral" in pill and "+1.0R" not in pill
+
+
+def test_a_complete_week_after_an_incomplete_one_is_reported_normally():
+    # ZZZ が 11/13 に決着して以後は全部測れる。11/16 の週は 11/15 と 11/22 を比べるので、変化を出してよい
+    sim = _sim([
+        ["2026-11-10", "z", "ZZZ", "LONG", "filled_time_exit", "2026-11-10", 10.0, 1.0, "2026-11-13", "1.0"],
+        ["2026-11-20", "a", "AAA", "LONG", "open", "2026-11-20", 105.0, 10.0, "", ""],
+    ])
+    wk = ob.weekly_changes(ob.equity_curve(sim, FRAMES, "2026-11-02", "2026-11-25")).set_index("week_start")
+    assert bool(wk.loc[pd.Timestamp("2026-11-09"), "incomplete"]) is False      # 11/08 は建玉なし、11/15 は決着済み
+    assert wk.loc[pd.Timestamp("2026-11-09"), "change_r"] == pytest.approx(1.0)
+    assert bool(wk.loc[pd.Timestamp("2026-11-16"), "incomplete"]) is False
+    assert wk.loc[pd.Timestamp("2026-11-16"), "change_r"] == pytest.approx(-0.1)
+
+
+def test_cli_says_the_change_cannot_be_given_for_an_incomplete_week(tmp_path, capsys):
+    sim_path, raw = _write_inputs(tmp_path, _two_asset_sim().values.tolist())
+    assert _cli().main(["--weeks", "1", "--context-assets", "", "--sim", str(sim_path), "--raw-dir", str(raw)]) == 0
+    out = capsys.readouterr().out
+    assert "11/23 の週（11/25 まで）: 変化は出せない（測れない建玉が、前の週の終わりに 1 件・この週の終わりに 0 件） / 確定ぶんの変化 +1.00R" in out

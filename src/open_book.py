@@ -22,6 +22,9 @@
 * 週 = 月曜〜日曜（throughput_metrics.weekly_table と同じ W-SUN）。週の変化 = その週の最後の日の
   「確定＋含み」− 前の週の最後の日の「確定＋含み」。進行中の週は、最新の日までの変化。
 * 測れない建玉 = 価格が無い・risk_unit が 0 以下か欠損・向きが読めない行。含みRに入れず、件数を出す。
+* **比べる2つの日のどちらかに測れない建玉があれば、週の変化は出さない**（その建玉の含みが片方にだけ入らず、
+  変化の符号まで変わりうる。例: 先週末に +2R の含みがあった取引が今週 +1R で決着すると、本当は −1R の変化だが、
+  その資産の価格が読めないと +1R に見える。#241 Codex P2）。確定ぶんの変化は価格に依らないので出す。
 
 含みRは確定した結果ではない。決着したときの r_result とは一致しない。
 観測だけ。採点・提案・配分に入る数は変えない。
@@ -144,8 +147,13 @@ def equity_curve(sim: pd.DataFrame, frames: dict, start, end) -> pd.DataFrame:
 
 
 def weekly_changes(curve: pd.DataFrame) -> pd.DataFrame:
-    """日ごとの曲線から、週（月曜〜日曜）ごとの変化。最初の週は前の週の値が無いので出さない。"""
-    cols = ["week_start", "last_day", "equity_r", "change_r", "realized_change_r", "mark_r"]
+    """日ごとの曲線から、週（月曜〜日曜）ごとの変化。最初の週は前の週の値が無いので出さない。
+
+    比べる2つの日（その週の最後の日と、前の週の最後の日）のどちらかに測れない建玉があれば、change_r と equity_r は
+    欠損にする（incomplete=True。unmeasured / prev_unmeasured に件数）。確定ぶんの変化は出す。
+    """
+    cols = ["week_start", "last_day", "equity_r", "change_r", "realized_change_r", "mark_r",
+            "incomplete", "unmeasured", "prev_unmeasured"]
     if curve is None or curve.empty:
         return pd.DataFrame(columns=cols)
     c = curve.sort_values("day").copy()
@@ -156,11 +164,14 @@ def weekly_changes(curve: pd.DataFrame) -> pd.DataFrame:
         cur, prev = last.iloc[i], last.iloc[i - 1]
         if cur["week"].ordinal - prev["week"].ordinal != 1:
             continue  # 間の週が抜けている曲線では、前の週との差を名乗らない
+        n_cur, n_prev = int(cur.get("unmeasured", 0) or 0), int(prev.get("unmeasured", 0) or 0)
+        incomplete = bool(n_cur or n_prev)
         rows.append({"week_start": cur["week"].start_time.normalize(), "last_day": cur["day"],
-                     "equity_r": round(float(cur["equity_r"]), 2),
-                     "change_r": round(float(cur["equity_r"] - prev["equity_r"]), 2),
+                     "equity_r": float("nan") if n_cur else round(float(cur["equity_r"]), 2),
+                     "change_r": float("nan") if incomplete else round(float(cur["equity_r"] - prev["equity_r"]), 2),
                      "realized_change_r": round(float(cur["realized_r"] - prev["realized_r"]), 2),
-                     "mark_r": round(float(cur["mark_r"]), 2)})
+                     "mark_r": float("nan") if n_cur else round(float(cur["mark_r"]), 2),
+                     "incomplete": incomplete, "unmeasured": n_cur, "prev_unmeasured": n_prev})
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -201,8 +212,12 @@ def summary(sim: pd.DataFrame, frames: dict | None = None, raw_dir: Path = RAW_D
     week_start = as_of.to_period("W-SUN").start_time.normalize()
     curve = equity_curve(sim, frames, week_start - pd.Timedelta(days=7 * max(int(weeks), 1)), as_of)
     wk = weekly_changes(curve)
+    def _num(v):
+        return None if v != v else float(v)      # 欠損は None（JSON に NaN を書かない）
     out["weeks"] = [{"week_start": r["week_start"].strftime("%Y-%m-%d"), "last_day": pd.Timestamp(r["last_day"]).strftime("%Y-%m-%d"),
-                     "equity_r": r["equity_r"], "change_r": r["change_r"], "realized_change_r": r["realized_change_r"],
-                     "mark_r": r["mark_r"]} for _, r in wk.tail(max(int(weeks), 1)).iterrows()]
+                     "equity_r": _num(r["equity_r"]), "change_r": _num(r["change_r"]),
+                     "realized_change_r": _num(r["realized_change_r"]), "mark_r": _num(r["mark_r"]),
+                     "incomplete": bool(r["incomplete"]), "unmeasured": int(r["unmeasured"]),
+                     "prev_unmeasured": int(r["prev_unmeasured"])} for _, r in wk.tail(max(int(weeks), 1)).iterrows()]
     out["available"] = True
     return out
