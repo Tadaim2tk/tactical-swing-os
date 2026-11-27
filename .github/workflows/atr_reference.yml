@@ -1,0 +1,57 @@
+name: Tactical Swing OS ATR reference
+
+# 朝の判断（ChatGPT の日次タスク）が読む ATR10 の表を、毎日作り直す。tools/atr_reference.py。
+# 2026-11-27: 日次の本文は「SL幅は 1×ATR10 以上」を求めているのに、11月の本文は 27 日のうち 20 日で
+# 「ATR10 を計算できない」と書いていた。計算の材料が渡っていなかった（docs/weekly_readout_2026-11-27.md §7.3）。
+on:
+  workflow_dispatch:
+  schedule:
+    # 05:40 UTC is 14:40 JST. 米先物のその日のセッションの行が出てから走らせる（その前だと、直前の足がまだ
+    # 確定扱いにならず、表が1本古くなる）。GitHub は定期実行を数時間遅らせるので、実際に走るのは夕方〜夜（JST）。
+    # 朝の判断は 07:00 JST なので、それまでに終わっていればよい。
+    - cron: "40 5 * * *"
+
+# governance_reform_2026-07 §2 #6: data/ 配下のデータのコミットのみ許可
+permissions:
+  contents: write
+
+jobs:
+  atr-reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch market data
+        run: python src/fetch_market.py
+
+      - name: Build ATR reference
+        run: python tools/atr_reference.py
+
+      - name: Commit ATR reference (data only)
+        if: github.ref == 'refs/heads/main'
+        env:
+          TSO_BOT_DEPLOY_KEY: ${{ secrets.TSO_BOT_DEPLOY_KEY }}
+        run: |
+          git config user.name "tso-actions-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/atr10_reference.csv
+          if git diff --cached --quiet; then
+            echo "no ATR reference changes to commit"
+          else
+            git commit -m "Update ATR reference [skip ci]" \
+              -m "Data commit permitted by governance_reform_2026-07 (data/ only)."
+            # main-merge-gate ruleset (§6): 専用鍵で push する。取り込み直し・鍵の扱い・弾かれたときのやり直しは
+            # tools/ci_push_main.sh にある（runbook §1h）。
+            bash tools/ci_push_main.sh main
+          fi

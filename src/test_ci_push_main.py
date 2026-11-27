@@ -25,7 +25,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "ci_push_main.sh"
 WORKFLOWS = ROOT / ".github" / "workflows"
-PUSHERS = ("daily_cycle.yml", "news_narratives.yml", "narrative_reliability.yml", "weekly_review.yml")
+PUSHERS = ("daily_cycle.yml", "news_narratives.yml", "narrative_reliability.yml", "weekly_review.yml",
+           "atr_reference.yml")   # 2026-11-27: ATR10 の表も同じ経路で main に入れる
 SECRET = "-----BEGIN TEST KEY-----\nnot-a-real-key\n-----END TEST KEY-----"
 REAL_GIT = shutil.which("git")
 BASH = shutil.which("bash")
@@ -292,7 +293,7 @@ def test_no_workflow_pushes_on_its_own():
     assert offenders == [], "workflow の中で直接 push している: %s" % offenders
 
 
-def test_the_four_writers_call_the_script_right_after_their_commit():
+def test_every_writer_calls_the_script_right_after_its_commit():
     for name in PUSHERS:
         callers = [step for step in _run_scripts(name) if "tools/ci_push_main.sh" in step["run"]]
         assert len(callers) == 1, name

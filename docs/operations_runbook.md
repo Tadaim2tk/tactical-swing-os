@@ -34,6 +34,7 @@ GitHub Actions が毎日この順で走る（UTC cron を JST 換算）。
 | 07:10 | **dashboard** | 全レイヤー生成 → **Dashboard公開(GitHub Pages)** |
 | 07:20 | narrative_lookahead_audit | ナラティブの未来情報混入監査 |
 | 07:30 | adversarial_review | 提案レイヤーの横断敵対監査 |
+| 14:40 | atr_reference | 朝の判断が読む ATR10 の表を作り直す（§1j。2026-11-27〜） |
 | 土 12:10 | weekly_review | 週次レビュー |
 | 1日 12:30 | monthly_calibration | 月次較正（機械側レポート + **先月の GPT 判断の草稿** `tools/monthly_calibration_run.py`。2026-11-09〜） |
 
@@ -383,7 +384,8 @@ ChatGPT の本文を読めなくなり、台帳は 10/27 で止まって 10/31 �
 
 ## 1h. 定期実行の push が弾かれたとき（2026-11-25 判明・同日修正）
 
-main へ直接 push する定期実行は4本ある（daily cycle・news narratives・narrative reliability・weekly review。
+main へ直接 push する定期実行は5本ある（daily cycle・news narratives・narrative reliability・weekly review と、
+2026-11-27 に足した atr reference。この節を書いた 11/25 の時点では前の4本。
 専用鍵の例外経路）。daily cycle と news narratives は cron では5分ずれているが、GitHub は定期実行を数時間遅らせ、
 2本を同じ分にまとめて始めることがある。どちらも約40秒で終わる。
 
@@ -403,7 +405,7 @@ push は1回きりで、弾かれたあと取り込み直す手順が無かっ�
   SIGNALS 7行・EVALUATIONS 7行を入れ、20:02 の回が鍵の違う行（6・7・7行）を足した。リポジトリに無い行が
   Sheets に数行ある。正はリポジトリ。
 
-**直し（同日）。** push を `tools/ci_push_main.sh` にまとめ、4本ともそれを呼ぶ。
+**直し（同日）。** push を `tools/ci_push_main.sh` にまとめ、どの実行もそれを呼ぶ（試験 `src/test_ci_push_main.py` の `PUSHERS`）。
 
 | 場面 | 動き |
 |---|---|
@@ -463,6 +465,34 @@ Dashboard の執行シミュレーションは、**決着した擬似取引の�
 - **比べる2つの日（その週の最後の日と、前の週の最後の日）のどちらかに測れない建玉があれば、週の変化は出さない**
   （「比べられない」と出る）。その建玉の含みが片方にだけ入らず、変化の符号まで変わりうる。確定ぶんの変化は出る。
 - 観測だけ。採点・提案・配分に入る数は変えていない。試験は `src/test_open_book.py`。
+
+## 1j. 朝の判断に渡す ATR10 の表（2026-11-27 導入）
+
+日次の本文は 2026-11-04 から「SL幅は 1×ATR10 以上」を求めている。ところが 11月の本文は、27 日のうち 20 日で
+「ATR10 を計算できない（10日ぶんの四本値を取れない）ので SL は暫定」と書き、10 日はそれを A級にしない理由に挙げていた
+（[weekly_readout_2026-11-27.md](weekly_readout_2026-11-27.md) §7.3）。規則だけがあって、計算の材料が渡っていなかった。
+所有者が 2026-11-27 に「渡す」と決めた。
+
+- **表**: `data/atr10_reference.csv`。1資産1行で `asset, as_of, close, atr10, atr10_pct, updated_at_utc`。
+  朝の判断が読む場所は `https://raw.githubusercontent.com/Tadaim2tk/tactical-swing-os/main/data/atr10_reference.csv`。
+- **作る人**: workflow `atr_reference`（cron 05:40 UTC。GitHub の遅れで、実際は夕方〜夜の JST）。手で作るなら
+  `python src/fetch_market.py && python tools/atr_reference.py`。
+- **定義**: 執行シミュレーションと同じ ATR10（`atr_at_decision`）を、**確定した最後の足**まで（`bar_is_final`）で計算する。
+  形成途中の足は使わない。
+
+読むときの注意:
+
+| こと | 中身 |
+|---|---|
+| 表は古い | 夜に作るので、朝の判断時に閉まっていた足と比べて、週5日の資産は1〜2本前、暗号資産は0〜1本前で止まっている。`as_of` に出る |
+| 行が古いまま残ることがある | ある資産の価格を取れなかった日は、その資産の行を前回のまま残す（`as_of` と `updated_at_utc` が古い）。0 や空欄は書かない |
+| 行が無いことがある | 一度も計算できていない資産は、行そのものが無い |
+| 祝日の足は付け替わる | 2026-11-26（感謝祭）の先物の足は、翌日の昼には独立した足として配られ、夕方には 11/27 の足にまとめ直されていた。確定前の足を使わないのはこのため |
+
+- この workflow が赤でも、朝の判断は止まらない（前の日の表を読む。本文は「表を開けなかった日は推定で置く」と決めている）。
+  赤が2日続いたら直す。push の失敗は §1h と同じ（`could not push to main`）。
+- 表を渡したことの効き目は、本文の `atr_table:` の行と、SL幅÷ATR10 の分布で見る（changelog (23)。貼った日の14日後）。
+- 試験は `src/test_atr_reference.py`。観測の材料を渡すだけで、採点・執行シミュレーション・提案・配分に入る数は変えていない。
 
 ---
 
