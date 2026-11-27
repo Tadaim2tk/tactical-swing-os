@@ -1531,3 +1531,13 @@ date,signal_id,asset,side,rank,type,entry_low,entry_high,sl,tp1,tp2,rr,win_prob,
 2026-11-27,20261127_DXY_NONE_NO_TRADE,DXY,NONE,NO_TRADE,NO_TRADE,,,,,,,,,54,48,67,,EVENT,51,59,49,57,57,61,conflicting_direction,DXY_5D,partially_verified,chatgpt_app
 2026-11-27,20261127_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,NO_TRADE,,,,,,,,,49,43,74,,EVENT,46,55,45,59,54,58,holiday_rate_discovery,US10Y_yield_5D,partially_verified,chatgpt_app
 2026-11-27,20261127_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,43,38,83,,EVENT,40,42,39,61,49,53,index_price_discrepancy,VIX_index_5D,partially_verified,chatgpt_app
+2026-11-28,20261128_GOLD_NONE_NO_TRADE,GOLD,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,GCZ26,unverified,chatgpt_app
+2026-11-28,20261128_BTC_NONE_NO_TRADE,BTC,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,BTCUSD_spot,unverified,chatgpt_app
+2026-11-28,20261128_ETH_NONE_NO_TRADE,ETH,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,ETHUSD_spot,unverified,chatgpt_app
+2026-11-28,20261128_WTI_NONE_NO_TRADE,WTI,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,CL_futures,unverified,chatgpt_app
+2026-11-28,20261128_USDJPY_NONE_NO_TRADE,USDJPY,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,USDJPY_spot,unverified,chatgpt_app
+2026-11-28,20261128_SPX_NONE_NO_TRADE,SPX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,ES_futures,unverified,chatgpt_app
+2026-11-28,20261128_NASDAQ_NONE_NO_TRADE,NASDAQ,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,NQ_futures,unverified,chatgpt_app
+2026-11-28,20261128_DXY_NONE_NO_TRADE,DXY,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,DXY_index,unverified,chatgpt_app
+2026-11-28,20261128_US10Y_NONE_NO_TRADE,US10Y,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,US10Y_yield_pct,unverified,chatgpt_app
+2026-11-28,20261128_VIX_NONE_NO_TRADE,VIX,NONE,NO_TRADE,NO_TRADE,,,,,,,,,0,0,100,,UNKNOWN,0,0,0,0,0,0,price_unavailable,VIX_index,unverified,chatgpt_app
