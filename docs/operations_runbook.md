@@ -622,3 +622,4 @@ Dashboard を開いて、**この順番**で見る。上ほど「土台の健全
 - 仕様凍結: [SPEC_STATISTICAL_GUARDS.md](SPEC_STATISTICAL_GUARDS.md) / [SPEC_DEFLATED_SHARPE.md](SPEC_DEFLATED_SHARPE.md) / [SPEC_REGIME_DECAY.md](SPEC_REGIME_DECAY.md) / [SPEC_NARRATIVE_QUANT.md](SPEC_NARRATIVE_QUANT.md) / [SPEC_PREDICTION_CALIBRATION.md](SPEC_PREDICTION_CALIBRATION.md) / [SPEC_TRANSACTION_COST.md](SPEC_TRANSACTION_COST.md)
 - レイヤー解説: [dashboard.md](dashboard.md) / [dashboard_health.md](dashboard_health.md) / [narrative_lookahead_audit.md](narrative_lookahead_audit.md) / [adversarial_review.md](adversarial_review.md) / [validation_suite.md](validation_suite.md)
 - フェーズ進捗: [phase_status.md](phase_status.md)
+- 週末の読み: [weekly_readout_2026-11-27.md](weekly_readout_2026-11-27.md)（最初の回。読み方は §1i）
